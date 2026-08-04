@@ -126,9 +126,14 @@ describe('clinical v1.10-v1.12 — traversable graph edges', () => {
     expect(result!.linkedCondition).toEqual(['urn:uuid:cond-0011', 'urn:uuid:cond-0012']);
   });
 
-  it('still reads the deprecated linkedConditionIds literal', () => {
+  it('still reads the deprecated linkedConditionIds literal verbatim', () => {
     // Retained for backward compatibility with data written before v1.10.
     // Dropping it on read would lose the only link those records carry.
+    //
+    // The literal is passed through UNPARSED. Emitters disagree about the
+    // delimiter, so splitting it here would encode a guess; a consumer that
+    // wants the individual ids has to know which emitter wrote the record.
+    const packed = '3f2a1c66-0b41-4a2e-9c11-7d0e5b8a4412,9c4d7e18-2a55-4f30-b7c8-1e6a0d3f9b27';
     const turtle = [
       `@prefix cascade: <${NAMESPACES.cascade}> .`,
       `@prefix clinical: <${NAMESPACES.clinical}> .`,
@@ -136,11 +141,11 @@ describe('clinical v1.10-v1.12 — traversable graph edges', () => {
       '',
       '<urn:uuid:cond-0013> a health:ConditionRecord ;',
       '    health:conditionName "Neuropathy" ;',
-      '    clinical:linkedConditionIds "abc-123 def-456" .',
+      `    clinical:linkedConditionIds "${packed}" .`,
     ].join('\n');
 
     const result = deserializeOne<Condition>(turtle, 'ConditionRecord');
-    expect(result!.linkedConditionIds).toBe('abc-123 def-456');
+    expect(result!.linkedConditionIds).toBe(packed);
   });
 
   it('exposes the edges in the JSON-LD context as IRI-valued sets', () => {
