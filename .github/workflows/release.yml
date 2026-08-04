@@ -1,0 +1,97 @@
+name: Release to npm
+
+# Publishing is driven by the tag, so a version can no longer be bumped in
+# package.json, merged, and then silently never shipped. Pushing v1.7.0 is what
+# publishes 1.7.0, and the job refuses to proceed if those two numbers disagree.
+#
+# Authentication is npm Trusted Publishing (OIDC): no NPM_TOKEN is stored in this
+# repository. Before the first run, configure the trusted publisher at
+# https://www.npmjs.com/package/@the-cascade-protocol/sdk/access with:
+#
+#   Organization/user:    the-cascade-protocol
+#   Repository:           sdk-typescript
+#   Workflow filename:    release.yml
+#   Environment:          npm
+#
+# The environment must match the `environment:` key below. Trusted publishing
+# requires npm >= 11.5.1 and a cloud-hosted runner; self-hosted runners are not
+# supported. Provenance is generated automatically, so --provenance is not
+# passed here.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      # Required for Trusted Publishing and for the provenance attestation.
+      id-token: write
+
+    steps:
+      - name: Check out sdk-typescript
+        uses: actions/checkout@v4
+        with:
+          path: sdk-typescript
+
+      # Sibling layout, for the same reason as ci.yml. Tests gate the publish,
+      # so this is not optional -- without it the suite cannot run and a release
+      # would either fail or, worse, ship untested.
+      - name: Check out conformance as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/conformance
+          path: conformance
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+          cache-dependency-path: sdk-typescript/package-lock.json
+
+      # setup-node bundles whatever npm shipped with the Node release, which can
+      # predate trusted publishing. Pin the floor explicitly rather than hoping.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
+      - name: Install
+        working-directory: sdk-typescript
+        run: npm ci
+
+      # A tag that disagrees with package.json would publish a version nobody
+      # asked for. npm allows unpublish only within 72 hours, so this is cheap
+      # insurance against an expensive mistake.
+      - name: Refuse to publish if the tag and package.json disagree
+        working-directory: sdk-typescript
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          echo "tag=${tag} package.json=${pkg}"
+          if [ "${tag}" != "${pkg}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${pkg}"
+            exit 1
+          fi
+
+      - name: Build
+        working-directory: sdk-typescript
+        run: npm run build
+
+      - name: Test
+        working-directory: sdk-typescript
+        run: npm test
+
+      # No NODE_AUTH_TOKEN: the OIDC token minted by id-token: write is the
+      # credential. prepublishOnly runs the build again, which is harmless.
+      - name: Publish to npm
+        working-directory: sdk-typescript
+        run: npm publish

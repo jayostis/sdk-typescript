@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor of the declared engines range, plus current LTS.
+        node-version: ['18.x', '22.x']
+
+    steps:
+      - name: Check out sdk-typescript
+        uses: actions/checkout@v4
+        with:
+          path: sdk-typescript
+
+      # Several suites resolve shared fixtures at <parent>/conformance/fixtures/
+      # via resolve(__dirname, '../../conformance/fixtures'), so conformance must
+      # be a SIBLING of this checkout rather than a subdirectory. Note the failure
+      # mode if this step is removed: readdirSync throws at collection time, so the
+      # run fails loudly rather than quietly skipping the fixture-backed tests.
+      - name: Check out conformance as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/conformance
+          path: conformance
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: sdk-typescript/package-lock.json
+
+      # npm ci, never a node_modules symlink: a symlinked node_modules resolves
+      # packages back to whatever tree it points at, which silently invalidates
+      # everything the suite then claims to have tested.
+      - name: Install
+        working-directory: sdk-typescript
+        run: npm ci
+
+      - name: Build
+        working-directory: sdk-typescript
+        run: npm run build
+
+      - name: Test
+        working-directory: sdk-typescript
+        run: npm test
