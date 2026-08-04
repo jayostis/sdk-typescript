@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.6.1] - 2026-08-04
+
+No functional change. This release exists to exercise the tag-driven publishing
+workflow end to end, since 1.6.0 was published manually before that workflow
+existed and a tag for it would be rejected as a duplicate.
+
+The published artifact is byte-equivalent in behaviour to 1.6.0; the only
+difference is how it got to npm. From this release on, publishing is triggered
+by pushing a `v*` tag and authenticated with OIDC, so no long-lived npm token
+exists for this package and every release carries a provenance attestation.
+
 ## [1.6.0] - 2026-08-04
 
 Vocabulary sync: core 3.3 → 3.4, health 2.4 → 2.5, clinical 1.9 → 1.13.
