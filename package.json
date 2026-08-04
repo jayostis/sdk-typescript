@@ -1,6 +1,6 @@
 {
   "name": "@the-cascade-protocol/sdk",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Cascade Protocol SDK - TypeScript library for structured health data",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
