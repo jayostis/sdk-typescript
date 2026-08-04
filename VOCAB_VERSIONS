@@ -2,9 +2,9 @@
 # Compare against spec/VOCAB_VERSIONS to detect drift.
 # Run scripts/check-downstream-versions.sh from spec/ to check all repos at once.
 # Update this file when adding new model/predicate support for a vocabulary version.
-core=3.3
-health=2.4
-clinical=1.9
+core=3.4
+health=2.5
+clinical=1.13
 coverage=1.3
 checkup=3.2
 pots=1.4
@@ -18,6 +18,53 @@ pots=1.4
 # core=3.3: AIAsserted provenance leaf and ProxyAgent (caregiver-proxy) added
 # health=2.4: SocialHistoryRecord (consumer-reported) added; distinct from clinical:SocialHistoryRecord
 # clinical=1.9: cascade:AIExtracted accepted as a dataProvenance value on clinical records
+#
+# core=3.4: pod export manifest. All 32 terms implemented. ExportManifest,
+#     RecordSummary and InteractionScenario models + TYPE_MAPPING entries, all 26
+#     uncontested properties in PROPERTY_PREDICATES, full serialize/deserialize
+#     and JSON-LD context coverage. dcat and void registered in NAMESPACES
+#     because ExportManifest is rdfs:subClassOf dcat:Dataset and RecordSummary
+#     rdfs:subClassOf void:Dataset with every count rdfs:subPropertyOf
+#     void:entities; the VoID subproperty axioms themselves live in the ontology
+#     and are NOT re-asserted by this SDK. cascade:date, cascade:notes and
+#     cascade:loincCode collide with the health:/clinical: spellings this SDK
+#     already writes: both spellings are ACCEPTED ON READ, and which one is
+#     written is decided per record type (TYPE_PREDICATE_OVERRIDES). Verified
+#     byte-exact against conformance fixtures pod-002 and pod-004.
+# core=3.4: sourceType, dataTypes and version are registered as predicates only.
+#     They are emitted on prov:Agent device-source subjects, for which the core
+#     ontology defines no class, so there is no model to attach them to.
+# health=2.5: the five clinical record classes were ALREADY supported; v2.5
+#     defined what this SDK was already emitting. Closed the real gaps: the 4
+#     missing daily-snapshot properties (activeEnergyKcal, exerciseMinutes,
+#     standHours, durationHours), the DailyActivitySnapshot / DailySleepSnapshot
+#     models and type mappings, health:sleepQuality emitted and parsed as an IRI
+#     over the 4 named individuals, and the 6 wellness container classes as
+#     WELLNESS_CONTAINER_SUBCLASSES + isHealthProfileType(). All 40 v2.5
+#     properties are registered and audited by test. Verified byte-exact against
+#     conformance fixtures dailyactivity-001/002 and dailysleep-001/002.
+# health=2.5: the wellness containers are CONSTANTS ONLY — a subclass map and a
+#     predicate. The eight history-container object properties
+#     (restingHeartRateHistory, dailyActivityHistory, ...) and the reading
+#     classes they range over are still unmodelled here; this release does not
+#     claim to serialize a health:HealthProfile.
+# clinical=1.10: hasEncounter, indicationReference and linkedCondition added as
+#     IRI-valued edges; the deprecated linkedConditionIds literal is still read.
+# clinical=1.11: indicationReference carried on Procedure and
+#     MedicationAdministration as well as Medication, matching the widened domain.
+# clinical=1.12: parsedIndicationReference added as a separate field, kept
+#     distinguishable from indicationReference so a consumer can label a derived
+#     match differently from a stated one.
+# clinical=1.13: the 4 deprecated classes are read, never written.
+#     DEPRECATED_TYPE_ALIASES maps clinical:LabResult/Condition/Allergy/
+#     Immunization to their health: successors and deserialize() accepts both
+#     spellings; TYPE_MAPPING has no entry for any of them, so nothing here can
+#     emit one. The unambiguous clinical: spellings of their properties are also
+#     accepted on read — accepting the class but dropping its data would be a
+#     silent data loss. clinical:value, clinical:unit, clinical:interpretation
+#     and clinical:severity are deliberately NOT aliased: three already resolve
+#     to a VitalSign field and the fourth would collide with cascade:severity,
+#     and a reverse predicate map has no record-type context to disambiguate.
 #
 # 2026-07-15 batched draft sync (spec PENDING_DOWNSTREAM_SYNC rows 1-3). Per
 # D-PATH, pre-stable drafts stay UNROWED until v1.0 graduation; namespaces +

@@ -42,13 +42,16 @@ The pre-commit hook will block commits to `src/models/` or `src/vocabularies/` w
 
 Check `VOCAB_VERSIONS` at the repo root. Compare against `spec/VOCAB_VERSIONS` to see what's behind.
 
-### Known gaps (as of 2026-03-20)
+### Known gaps (as of 2026-08-04)
 
-See `VOCAB_VERSIONS` comments. Priority items:
-- **Clinical v1.7**: MedicationAdministration, ImplantedDevice, ImagingStudy (models missing)
-- **Coverage v1.3**: ClaimRecord, BenefitStatement, DenialNotice, AppealRecord, DenialReasonCode (all missing)
-- **Core v2.8**: FHIR passthrough properties in predicates (`layerPromotionStatus`, `fhirJson`, `fhirResourceType`, `sourceRecordDate`)
-- **JSON-LD context**: `checkup:` and `pots:` namespaces missing
+See `VOCAB_VERSIONS` comments. Remaining items:
+- **Core v2.8**: `fhirResourceType` is still unregistered. `layerPromotionStatus`, `fhirJson` and `sourceRecordDate` are present.
+- **Health v2.0/v2.5**: the eight history-container object properties (`restingHeartRateHistory`, `dailyActivityHistory`, ...) and the reading classes they range over are unmodelled. The six wellness containers are registered as constants only; this SDK does not serialize a `health:HealthProfile`.
+- **Blank-node reads**: only `clinicalSummary` / `wellnessSummary` are reconstructed into nested objects. The patient-profile sub-structures (`emergencyContact`, `address`, `preferredPharmacy`) serialize as blank nodes but come back as blank-node identifiers.
+- **Conformance coverage**: the fixture-driven harnesses load a subset of the fixture families. `dailyvital-`, `device-`, `encounter-`, `medadmin-`, `imaging-`, `social-`, `proxy-`, `claim-`, `benefit-` and `denial-` are not exercised by any test.
+- **Silent skips**: `tests/deserializer.test.ts` uses `if (!recordType) return;`, so an unmapped `dataType` reports a pass without asserting anything. Prefer an explicit assertion over an early return.
+
+Resolved since the 2026-03-20 list: the clinical v1.7 models, the coverage v1.3 classes, and the `checkup:`/`pots:` JSON-LD context entries all exist.
 
 ## Commit Conventions
 

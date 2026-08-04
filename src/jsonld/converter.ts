@@ -9,7 +9,7 @@
 
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY, buildReversePredicateMap } from '../vocabularies/namespaces.js';
 import { CONTEXT_URI } from './context.js';
-import type { CascadeRecord } from '../models/common.js';
+import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
  * // { "@context": "https://...", "@id": "urn:uuid:...", "@type": "clinical:Medication", ... }
  * ```
  */
-export function toJsonLd(record: CascadeRecord): object {
+export function toJsonLd(record: CascadeEntity): object {
   const mappingKey = TYPE_TO_MAPPING_KEY[record.type];
   const mapping = mappingKey ? TYPE_MAPPING[mappingKey] : undefined;
   if (!mapping) {
@@ -89,7 +89,7 @@ export function toJsonLd(record: CascadeRecord): object {
  * const med = fromJsonLd<Medication>(jsonldDoc);
  * ```
  */
-export function fromJsonLd<T extends CascadeRecord>(doc: object): T {
+export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
   const raw = doc as Record<string, unknown>;
   const record: Record<string, unknown> = {};
 

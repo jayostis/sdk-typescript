@@ -10,6 +10,10 @@ export {
   TYPE_MAPPING,
   TYPE_TO_MAPPING_KEY,
   PROPERTY_PREDICATES,
+  DEPRECATED_TYPE_ALIASES,
+  WELLNESS_CONTAINER_SUBCLASSES,
+  SLEEP_QUALITY_VALUES,
+  isHealthProfileType,
   buildReversePredicateMap,
 } from './namespaces.js';
 

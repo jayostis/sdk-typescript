@@ -26,6 +26,7 @@ export type {
   AgeGroup,
   BloodType,
   ProcedureStatus,
+  CascadeEntity,
   CascadeRecord,
 } from './common.js';
 
@@ -81,3 +82,20 @@ export type {
   ProxyAgent,
   GenerationTrigger,
 } from './advisory-generation.js';
+
+// Pod export manifest (core v3.4)
+export type {
+  ExportManifest,
+  RecordSummary,
+  InteractionScenario,
+  InteractionSeverity,
+} from './export-manifest.js';
+
+// Single-day wellness snapshots (health v2.5)
+// DISTINCT from ActivitySnapshot / SleepSnapshot, which are the 7-day
+// aggregate forms; both are emitted.
+export type {
+  DailyActivitySnapshot,
+  DailySleepSnapshot,
+  SleepQuality,
+} from './daily-snapshot.js';

@@ -11,6 +11,7 @@
  */
 
 import type { CascadeRecord } from './common.js';
+import type { SleepQuality } from './daily-snapshot.js';
 
 /**
  * A nightly sleep snapshot in the Cascade Protocol.
@@ -58,4 +59,12 @@ export interface SleepSnapshot extends CascadeRecord {
    * Maps to `health:awakenings` in Turtle serialization.
    */
   awakenings?: number;
+
+  /**
+   * Qualitative classification of the sleep session, as derived by the
+   * recording device. One of the four `health:SleepQuality` named individuals
+   * defined in health v2.5.
+   * Maps to `health:sleepQuality`, emitted as an IRI (`health:Good`).
+   */
+  sleepQuality?: SleepQuality;
 }

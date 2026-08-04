@@ -72,6 +72,25 @@ export function getContext(): object {
   // Fields that need typed @id annotations
   const idTypedFields = new Set([
     'dataProvenance', 'emergencyContact', 'address', 'preferredPharmacy',
+    // health v2.5: health:sleepQuality is emitted with an IRI object
+    // (health:Good), never a string literal.
+    'sleepQuality',
+    // core v3.4: object properties whose range is a cascade:RecordSummary.
+    'clinicalSummary', 'wellnessSummary',
+    // clinical v1.10: the encounter grouping edge.
+    'hasEncounter',
+  ]);
+
+  // Ordered rdf:List fields whose members are IRIs. @container: @list keeps the
+  // order, which is meaningful for all four (core v3.4).
+  const orderedIriListFields = new Set([
+    'provenanceLayers', 'deviceSources', 'interactionScenarios', 'involvedResources',
+  ]);
+
+  // Unordered repeated object properties, one triple per IRI
+  // (clinical v1.10-v1.12 graph edges).
+  const iriSetFields = new Set([
+    'indicationReference', 'parsedIndicationReference', 'linkedCondition',
   ]);
 
   // Fields that need xsd:dateTime typing
@@ -80,13 +99,19 @@ export function getContext(): object {
     'administrationDate', 'effectiveDate', 'effectivePeriodStart', 'effectivePeriodEnd',
     'effectiveStart', 'effectiveEnd',
     'proxyGrantedAt', 'proxyRevokedAt',
+    // core v3.4: dcterms:created on an export manifest.
+    'created',
   ]);
 
   // Fields that need xsd:date typing
   const dateOnlyFields = new Set(['dateOfBirth', 'date']);
 
   // Fields that need xsd:boolean typing
-  const booleanFields = new Set(['isActive', 'asNeeded']);
+  const booleanFields = new Set([
+    'isActive', 'asNeeded',
+    // core v3.4
+    'requiresCrossProvenance',
+  ]);
 
   // Fields that need xsd:integer typing
   const integerFields = new Set([
@@ -94,11 +119,22 @@ export function getContext(): object {
     'steps', 'activeMinutes', 'calories', 'awakenings',
     'totalSleepMinutes', 'deepSleepMinutes', 'remSleepMinutes', 'lightSleepMinutes',
     'appliedTriplesCount',
+    // core v3.4 — record summary counts (rdfs:subPropertyOf void:entities)
+    'conditionCount', 'medicationCount', 'allergyCount', 'labResultCount',
+    'immunizationCount', 'coverageCount', 'supplementCount',
+    // core v3.4 — day counts (deliberately NOT void:entities subproperties)
+    'vitalSignDays', 'heartRateDays', 'bloodPressureDays', 'activityDays', 'sleepDays',
+    // core v3.4 — reading-level
+    'sampleCount',
+    // health v2.5 — daily snapshot
+    'exerciseMinutes', 'standHours',
   ]);
 
   // Fields that need xsd:decimal/double typing
   const decimalFields = new Set([
     'generationTemperature',
+    // health v2.5 — daily snapshot
+    'activeEnergyKcal', 'durationHours',
   ]);
 
   // Fields that are URI references
@@ -111,6 +147,10 @@ export function getContext(): object {
     if (DRAFT_CONTEXT_EXCLUDED_PREFIXES.has(curiePrefix(pred))) continue;
     if (idTypedFields.has(key)) {
       context[key] = { '@id': pred, '@type': '@id' };
+    } else if (orderedIriListFields.has(key)) {
+      context[key] = { '@id': pred, '@type': '@id', '@container': '@list' };
+    } else if (iriSetFields.has(key)) {
+      context[key] = { '@id': pred, '@type': '@id', '@container': '@set' };
     } else if (dateTimeFields.has(key)) {
       context[key] = { '@id': pred, '@type': 'xsd:dateTime' };
     } else if (dateOnlyFields.has(key)) {

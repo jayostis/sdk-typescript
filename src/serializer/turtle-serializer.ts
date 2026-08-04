@@ -19,7 +19,7 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
-import type { CascadeRecord } from '../models/common.js';
+import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
 import type { Allergy } from '../models/allergy.js';
@@ -49,6 +49,28 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
     snomedCode: 'clinical:snomedCode',
     interpretation: 'clinical:interpretation',
   },
+  // Core v3.4: the export-manifest classes carry cascade:notes, not the
+  // health:notes that health records use. Same JSON key, different predicate.
+  ExportManifest: {
+    notes: 'cascade:notes',
+  },
+  RecordSummary: {
+    notes: 'cascade:notes',
+  },
+  InteractionScenario: {
+    notes: 'cascade:notes',
+  },
+  // Health v2.5: a daily snapshot carries cascade:date, per
+  // health:DailyActivitySnapshotShape / health:DailySleepSnapshotShape. The
+  // 7-day aggregate ActivitySnapshot / SleepSnapshot carry health:date. Both
+  // spellings mean the same thing and readers accept both; this decides which
+  // one is WRITTEN.
+  DailyActivitySnapshot: {
+    date: 'cascade:date',
+  },
+  DailySleepSnapshot: {
+    date: 'cascade:date',
+  },
 };
 
 /**
@@ -72,6 +94,11 @@ const URI_FIELDS = new Set([
   'snomedCode',
   'loincCode',
   'testCode',
+  // Core v3.4: object properties whose range is a cascade:RecordSummary.
+  'clinicalSummary',
+  'wellnessSummary',
+  // Clinical v1.10: the encounter grouping edge. Always an IRI.
+  'hasEncounter',
 ]);
 
 /**
@@ -85,6 +112,47 @@ const ARRAY_FIELDS = new Set([
 ]);
 
 /**
+ * Object-property fields whose values are arrays of IRIs, serialized as
+ * repeated predicate triples (one per value).
+ *
+ * Distinct from {@link ARRAY_FIELDS}, which infers list-versus-repeated from
+ * whether the values look like `http` URLs. Cascade record IRIs are `urn:uuid:`
+ * and would fail that test, so the traversable graph edges added in clinical
+ * v1.10–v1.12 are declared explicitly instead of guessed at.
+ */
+const IRI_ARRAY_FIELDS = new Set([
+  'indicationReference',
+  'parsedIndicationReference',
+  'linkedCondition',
+]);
+
+/**
+ * Fields serialized as an `rdf:List` whose members are IRIs or prefixed names,
+ * e.g. `cascade:deviceSources ( <urn:uuid:a> <urn:uuid:b> )`.
+ *
+ * The core v3.4 manifest declares these `rdfs:range rdf:List`, so the order is
+ * meaningful and a repeated predicate would lose it.
+ */
+const IRI_LIST_FIELDS = new Set([
+  'provenanceLayers',
+  'deviceSources',
+  'interactionScenarios',
+  'involvedResources',
+]);
+
+/**
+ * Fields whose value is a bare local name in JSON but an IRI in Turtle, keyed
+ * by the namespace prefix to qualify it with.
+ *
+ * `dataProvenance` is handled separately (it predates this map). The health
+ * v2.5 sleep-quality individuals work the same way: `sleepQuality: 'Good'`
+ * serializes as `health:sleepQuality health:Good`.
+ */
+const PREFIXED_ENUM_FIELDS: Record<string, string> = {
+  sleepQuality: 'health',
+};
+
+/**
  * Explicit set of fields that are dateTime-typed even though their names
  * don't contain "date" or "time" as a substring.
  */
@@ -93,17 +161,34 @@ const EXPLICIT_DATETIME_FIELDS = new Set([
   'effectivePeriodEnd',
   'effectiveStart',
   'effectiveEnd',
+  // Core v3.4: dcterms:created on an export manifest. Required to be
+  // xsd:dateTime by cascade:ExportManifestShape, and the name contains neither
+  // "date" nor "time", so the heuristic below would miss it.
+  'created',
+]);
+
+/**
+ * Record types whose `date` field is a full `xsd:dateTime` rather than the
+ * bare `YYYY-MM-DD` the aggregate snapshots carry.
+ *
+ * `health:DailyActivitySnapshotShape` and `health:DailySleepSnapshotShape` both
+ * declare `cascade:date` with `sh:datatype xsd:dateTime` (health v2.5).
+ */
+const DATETIME_DATE_TYPES = new Set([
+  'DailyActivitySnapshot',
+  'DailySleepSnapshot',
 ]);
 
 /**
  * Fields whose values contain date/time and get ^^xsd:dateTime typing.
  * We check the key name and a set of explicit fields.
  */
-function isDateTimeField(key: string): boolean {
+function isDateTimeField(key: string, recordType?: string): boolean {
   if (EXPLICIT_DATETIME_FIELDS.has(key)) return true;
   const lower = key.toLowerCase();
   // Specific date-only field
-  if (key === 'dateOfBirth' || key === 'date') return false;
+  if (key === 'dateOfBirth') return false;
+  if (key === 'date') return recordType !== undefined && DATETIME_DATE_TYPES.has(recordType);
   return lower.includes('date') || lower.includes('time');
 }
 
@@ -122,7 +207,34 @@ const INTEGER_FIELDS = new Set([
   'refillsAllowed',
   'supplyDurationDays',
   'onsetAge',
+  // Core v3.4 cascade:RecordSummary counts. cascade:RecordSummaryShape declares
+  // every one of them sh:datatype xsd:integer.
+  'conditionCount',
+  'medicationCount',
+  'allergyCount',
+  'labResultCount',
+  'immunizationCount',
+  'coverageCount',
+  'supplementCount',
+  'vitalSignDays',
+  'heartRateDays',
+  'bloodPressureDays',
+  'activityDays',
+  'sleepDays',
 ]);
+
+/**
+ * Nested-object fields that serialize as a typed blank node, keyed by the
+ * `rdf:type` the blank node carries.
+ */
+const BLANK_NODE_TYPES: Record<string, string> = {
+  emergencyContact: 'cascade:EmergencyContact',
+  address: 'cascade:Address',
+  preferredPharmacy: 'cascade:PharmacyInfo',
+  // Core v3.4: an export manifest carries its per-domain summaries inline.
+  clinicalSummary: 'cascade:RecordSummary',
+  wellnessSummary: 'cascade:RecordSummary',
+};
 
 /**
  * Fields that are boolean and should be serialized unquoted.
@@ -134,7 +246,7 @@ function isBooleanField(_key: string, value: unknown): boolean {
 /**
  * Determine which prefixes are needed for a given record.
  */
-function collectPrefixes(record: CascadeRecord): Map<string, string> {
+function collectPrefixes(record: CascadeEntity): Map<string, string> {
   const prefixes = new Map<string, string>();
 
   // Always include cascade and xsd
@@ -224,14 +336,14 @@ function sortedPrefixes(prefixes: Map<string, string>): [string, string][] {
  * @param record - Any CascadeRecord (Medication, Condition, VitalSign, etc.)
  * @returns A complete Turtle document string
  */
-export function serialize(record: CascadeRecord): string {
+export function serialize(record: CascadeEntity): string {
   return serializeRecord(record);
 }
 
 /**
  * Internal workhorse that serializes any record.
  */
-function serializeRecord(record: CascadeRecord): string {
+function serializeRecord(record: CascadeEntity): string {
   const mappingKey = TYPE_TO_MAPPING_KEY[record.type];
   const mapping = mappingKey ? TYPE_MAPPING[mappingKey] : undefined;
   if (!mapping) {
@@ -287,6 +399,32 @@ function serializeRecord(record: CascadeRecord): string {
       return;
     }
 
+    // Bare local names that serialize as prefixed IRIs (e.g. sleepQuality).
+    const enumPrefix = PREFIXED_ENUM_FIELDS[key];
+    if (enumPrefix && typeof value === 'string') {
+      sub.uri(pred, `${enumPrefix}:${value}`);
+      return;
+    }
+
+    // rdf:List of IRIs / prefixed names. Order is meaningful, so these are
+    // never flattened into repeated predicates.
+    if (IRI_LIST_FIELDS.has(key) && Array.isArray(value)) {
+      if (value.length === 0) return;
+      const items = value.map((item) =>
+        key === 'provenanceLayers' ? `cascade:${String(item)}` : String(item),
+      );
+      sub.uriList(pred, items);
+      return;
+    }
+
+    // Repeated object-property triples, one per IRI.
+    if (IRI_ARRAY_FIELDS.has(key) && Array.isArray(value)) {
+      for (const item of value) {
+        sub.uri(pred, String(item));
+      }
+      return;
+    }
+
     // Boolean fields
     if (isBooleanField(key, value)) {
       sub.boolean(pred, value as boolean);
@@ -299,12 +437,14 @@ function serializeRecord(record: CascadeRecord): string {
       return;
     }
 
-    // Number fields (plain, untyped integers like clinical:value, referenceRangeLow, etc.)
+    // Number fields (plain, untyped literals like clinical:value,
+    // referenceRangeLow, health:steps, health:durationHours). RDF 1.1 already
+    // types a bare 8432 as xsd:integer and a bare 7.4 as xsd:decimal.
     if (typeof value === 'number') {
       if (Number.isInteger(value)) {
         sub.number(pred, value);
       } else {
-        sub.double(pred, value);
+        sub.decimal(pred, value);
       }
       return;
     }
@@ -337,12 +477,13 @@ function serializeRecord(record: CascadeRecord): string {
     }
 
     // DateTime fields
-    if (isDateTimeField(key) && typeof value === 'string') {
+    if (isDateTimeField(key, record.type) && typeof value === 'string') {
       sub.dateTime(pred, value);
       return;
     }
 
-    // Nested objects (blank nodes) for PatientProfile
+    // Nested objects (blank nodes): patient-profile sub-structures and the
+    // core v3.4 manifest record summaries.
     if (typeof value === 'object' && !Array.isArray(value)) {
       serializeBlankNode(sub, pred, key, value as Record<string, unknown>);
       return;
@@ -373,11 +514,7 @@ function serializeBlankNode(
   key: string,
   obj: Record<string, unknown>,
 ): void {
-  // Determine the blank node type based on the key
-  let bnodeType: string | undefined;
-  if (key === 'emergencyContact') bnodeType = 'cascade:EmergencyContact';
-  else if (key === 'address') bnodeType = 'cascade:Address';
-  else if (key === 'preferredPharmacy') bnodeType = 'cascade:PharmacyInfo';
+  const bnodeType = BLANK_NODE_TYPES[key];
 
   sub.blankNode(predicate, (b) => {
     if (bnodeType) {
@@ -385,8 +522,13 @@ function serializeBlankNode(
     }
     for (const [k, v] of Object.entries(obj)) {
       if (v === undefined || v === null) continue;
-      // Look up predicate for nested field - try with 'cascade:' prefix for profile nested types
+      // Nested fields are `type`-free sub-structures under the cascade: vocabulary.
+      if (k === 'type' || k === 'id') continue;
       const nestedPred = `cascade:${k}`;
+      if (INTEGER_FIELDS.has(k) && typeof v === 'number') {
+        b.integer(nestedPred, v);
+        continue;
+      }
       if (typeof v === 'string') {
         b.literal(nestedPred, v);
       } else if (typeof v === 'boolean') {
@@ -395,7 +537,7 @@ function serializeBlankNode(
         if (Number.isInteger(v)) {
           b.number(nestedPred, v);
         } else {
-          b.double(nestedPred, v);
+          b.decimal(nestedPred, v);
         }
       }
     }

@@ -41,4 +41,25 @@ export interface MedicationAdministration extends CascadeRecord {
 
   /** SNOMED CT code URI for the medication concept. Maps to `health:snomedCode`. */
   snomedCode?: string;
+
+  /**
+   * IRI of the `clinical:Encounter` this administration occurred within.
+   * Maps to `clinical:hasEncounter` (clinical v1.10).
+   */
+  hasEncounter?: string;
+
+  /**
+   * IRIs of the conditions that are the clinical reason for this
+   * administration, as stated by the source. FHIR alignment:
+   * `MedicationAdministration.reasonReference`.
+   * Maps to `clinical:indicationReference`.
+   */
+  indicationReference?: string[];
+
+  /**
+   * IRIs of conditions an importer DERIVED by parsing a coded or free-text
+   * reason on the record. See `Medication.parsedIndicationReference`.
+   * Maps to `clinical:parsedIndicationReference` (clinical v1.12).
+   */
+  parsedIndicationReference?: string[];
 }

@@ -1,4 +1,4 @@
-import type { CascadeRecord, ProvenanceType } from '../models/common.js';
+import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
@@ -45,6 +45,13 @@ const RECOGNIZED_DATA_TYPES: ReadonlySet<string> = new Set([
   'AdvisoryApplicationActivity',
   'AIGenerationActivity',
   'ProxyAgent',
+  // core v3.4 — pod export manifest
+  'ExportManifest',
+  'RecordSummary',
+  'InteractionScenario',
+  // health v2.5 — single-day wellness snapshots
+  'DailyActivitySnapshot',
+  'DailySleepSnapshot',
 ]);
 
 const VALID_CONDITION_STATUSES: ReadonlySet<string> = new Set([
@@ -68,12 +75,30 @@ const AGENT_AND_ACTIVITY_TYPES: ReadonlySet<string> = new Set([
   'ProxyAgent',
   'AdvisoryApplicationActivity',
   'AIGenerationActivity',
+  // core v3.4 — the pod export manifest classes are a dcat:Dataset, a
+  // void:Dataset and a prov:Entity respectively, NOT cascade:HealthRecord
+  // subclasses. They describe an export rather than reporting an observation,
+  // so demanding a cascade:dataProvenance on them would invent a requirement
+  // no shape states. Required fields follow each SHACL shape instead.
+  'ExportManifest',
+  'RecordSummary',
+  'InteractionScenario',
 ]);
 
 const AGENT_ACTIVITY_REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ProxyAgent: ['actsForPatient', 'proxyRelationship', 'proxyGrantedAt'],
   AIGenerationActivity: ['extractionModel', 'trigger'],
   AdvisoryApplicationActivity: [],
+  // cascade:ExportManifestShape: title, created and schemaVersion are
+  // sh:minCount 1. An untitled, undated export cannot be presented to a user
+  // and a consumer cannot tell whether it is current.
+  ExportManifest: ['title', 'created', 'schemaVersion'],
+  // cascade:RecordSummaryShape: domain is sh:minCount 1.
+  RecordSummary: ['domain'],
+  // cascade:InteractionScenarioShape: title and involvedResources are
+  // sh:minCount 1. A scenario that names no resources states a risk exists but
+  // gives a consumer nothing to check it against.
+  InteractionScenario: ['title', 'involvedResources'],
 };
 
 // Types that should ideally have coding system references
@@ -106,7 +131,7 @@ function hasNumber(rec: RecordFields, field: string): boolean {
 
 // ─── Validation Logic ───────────────────────────────────────────────────────
 
-function validateBase(record: CascadeRecord): ValidationError[] {
+function validateBase(record: CascadeEntity): ValidationError[] {
   const errors: ValidationError[] = [];
 
   // 1. id must be present and non-empty
@@ -156,7 +181,7 @@ function validateBase(record: CascadeRecord): ValidationError[] {
   return errors;
 }
 
-function validateWarnings(record: CascadeRecord): ValidationError[] {
+function validateWarnings(record: CascadeEntity): ValidationError[] {
   const warnings: ValidationError[] = [];
   const rec: RecordFields = { ...record };
 
@@ -186,7 +211,7 @@ function validateWarnings(record: CascadeRecord): ValidationError[] {
   return warnings;
 }
 
-function validateTypeSpecific(record: CascadeRecord): ValidationError[] {
+function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
   const errors: ValidationError[] = [];
   const rec: RecordFields = { ...record };
 
@@ -351,7 +376,7 @@ function validateTypeSpecific(record: CascadeRecord): ValidationError[] {
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /** Validate a single CascadeRecord for structural correctness. */
-export function validate(record: CascadeRecord): ValidationResult {
+export function validate(record: CascadeEntity): ValidationResult {
   const baseErrors = validateBase(record);
   const typeErrors = validateTypeSpecific(record);
   const warningErrors = validateWarnings(record);
@@ -367,7 +392,7 @@ export function validate(record: CascadeRecord): ValidationResult {
 }
 
 /** Validate an array of CascadeRecords, returning a combined result. */
-export function validateAll(records: CascadeRecord[]): ValidationResult {
+export function validateAll(records: CascadeEntity[]): ValidationResult {
   const allErrors: ValidationError[] = [];
   const allWarnings: ValidationError[] = [];
 

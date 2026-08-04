@@ -93,4 +93,11 @@ export interface LabResult extends CascadeRecord {
    * Maps to `health:performingLab` in Turtle serialization.
    */
   performingLab?: string;
+
+  /**
+   * IRI of the `clinical:Encounter` (visit context) this observation was
+   * recorded within. FHIR alignment: `Observation.encounter`.
+   * Maps to `clinical:hasEncounter` (clinical v1.10).
+   */
+  hasEncounter?: string;
 }

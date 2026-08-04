@@ -64,4 +64,29 @@ export interface Condition extends CascadeRecord {
    * Maps to `health:monitoredVitalSigns` as an RDF list in Turtle serialization.
    */
   monitoredVitalSigns?: string[];
+
+  /**
+   * IRI of the `clinical:Encounter` (visit context) this condition was recorded
+   * within. FHIR alignment: `Condition.encounter`.
+   * Maps to `clinical:hasEncounter` (clinical v1.10).
+   */
+  hasEncounter?: string;
+
+  /**
+   * IRIs of related conditions, for example a complication and its root
+   * condition. The traversable RDF replacement for
+   * {@link Condition.linkedConditionIds}.
+   * Maps to `clinical:linkedCondition` (clinical v1.10).
+   */
+  linkedCondition?: string[];
+
+  /**
+   * @deprecated Clinical v1.10 deprecated `clinical:linkedConditionIds`: it
+   * packed related-condition UUIDs into one space-separated literal that no
+   * graph query can traverse. Use {@link Condition.linkedCondition} instead.
+   * Retained so existing data still round-trips; not emitted for new data.
+   *
+   * Maps to `clinical:linkedConditionIds`.
+   */
+  linkedConditionIds?: string;
 }
