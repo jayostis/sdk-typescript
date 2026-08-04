@@ -119,6 +119,20 @@ export class SubjectBuilder {
     return this;
   }
 
+  /**
+   * Add a plain decimal literal with no datatype annotation, e.g.
+   * `health:durationHours 7.4`.
+   *
+   * This is the form Cascade Turtle uses for decimals; RDF 1.1 already types a
+   * bare `7.4` as `xsd:decimal`, so the annotation adds nothing. Prefer this
+   * over {@link SubjectBuilder.double}, which spells the datatype out and is
+   * kept only for callers that need the explicit form.
+   */
+  decimal(predicate: string, value: number): this {
+    this._predicates.push(`${predicate} ${value}`);
+    return this;
+  }
+
   /** Add a `^^xsd:dateTime` typed literal. */
   dateTime(predicate: string, value: string): this {
     this._predicates.push(`${predicate} "${value}"^^xsd:dateTime`);
@@ -135,6 +149,24 @@ export class SubjectBuilder {
   list(predicate: string, items: string[]): this {
     const formatted = items.map((item) => escapeTurtleString(item)).join(' ');
     this._predicates.push(`${predicate} ( ${formatted} )`);
+    return this;
+  }
+
+  /**
+   * Add an RDF list whose members are IRIs or prefixed names, e.g.
+   * `cascade:deviceSources ( <urn:uuid:a> cascade:DeviceGenerated )`.
+   *
+   * Each item is emitted the same way {@link SubjectBuilder.uri} emits a single
+   * object: already-prefixed names pass through, everything else is wrapped in
+   * angle brackets. Use this rather than {@link SubjectBuilder.list} whenever
+   * the members are resources, since `list` would quote them into literals.
+   */
+  uriList(predicate: string, items: string[]): this {
+    const formatted = items
+      .map((item) => (/^[a-zA-Z][\w-]*:[\w-]+$/.test(item) ? item : `<${item}>`))
+      .map((item) => `        ${item}`)
+      .join('\n');
+    this._predicates.push(`${predicate} (\n${formatted}\n    )`);
     return this;
   }
 

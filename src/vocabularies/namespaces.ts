@@ -84,6 +84,25 @@ export const NAMESPACES = {
   /** Dublin Core Terms namespace. */
   dcterms: 'http://purl.org/dc/terms/',
 
+  /**
+   * W3C DCAT 3 namespace. `cascade:ExportManifest` is `rdfs:subClassOf
+   * dcat:Dataset` (core v3.4): a pod export is a published dataset with a
+   * title, description, creation date and publisher, which DCAT already
+   * standardises.
+   * @see https://www.w3.org/TR/vocab-dcat-3/
+   */
+  dcat: 'http://www.w3.org/ns/dcat#',
+
+  /**
+   * W3C VoID namespace. `cascade:RecordSummary` is `rdfs:subClassOf
+   * void:Dataset` and every per-domain count property is
+   * `rdfs:subPropertyOf void:entities` paired with the `void:class` it counts
+   * (core v3.4), so a VoID-aware consumer can read Cascade record counts with
+   * no Cascade-specific code.
+   * @see https://www.w3.org/TR/void/
+   */
+  void: 'http://rdfs.org/ns/void#',
+
   // ── Draft vocabularies (v1-draft) ─────────────────────────────────────────
   // NOT registered in VOCAB_VERSIONS until v1.0 graduation (per D-PATH), and
   // deliberately EXCLUDED from the generated JSON-LD context (see
@@ -283,6 +302,35 @@ export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; na
     nameKey: 'proxyWebID',
     namePred: 'cascade:proxyWebID',
   },
+  // ── Core v3.4 — pod export manifest ──
+  'export-manifest': {
+    rdfType: 'cascade:ExportManifest',
+    nameKey: 'title',
+    namePred: 'dcterms:title',
+  },
+  'record-summaries': {
+    rdfType: 'cascade:RecordSummary',
+    nameKey: 'domain',
+    namePred: 'cascade:domain',
+  },
+  'interaction-scenarios': {
+    rdfType: 'cascade:InteractionScenario',
+    nameKey: 'title',
+    namePred: 'dcterms:title',
+  },
+  // ── Health v2.5 — single-day snapshots inside the wellness history
+  // containers. DISTINCT from the 7-day aggregate ActivitySnapshot /
+  // SleepSnapshot above; both forms are emitted.
+  'daily-activity': {
+    rdfType: 'health:DailyActivitySnapshot',
+    nameKey: 'date',
+    namePred: 'cascade:date',
+  },
+  'daily-sleep': {
+    rdfType: 'health:DailySleepSnapshot',
+    nameKey: 'date',
+    namePred: 'cascade:date',
+  },
 } as const;
 
 // ─── Record Type to Mapping Key ─────────────────────────────────────────────
@@ -328,7 +376,92 @@ export const TYPE_TO_MAPPING_KEY: Record<string, string> = {
   AdvisoryApplicationActivity: 'advisory-application-activities',
   AIGenerationActivity: 'ai-generation-activities',
   ProxyAgent: 'proxy-agents',
+  ExportManifest: 'export-manifest',
+  RecordSummary: 'record-summaries',
+  InteractionScenario: 'interaction-scenarios',
+  DailyActivitySnapshot: 'daily-activity',
+  DailySleepSnapshot: 'daily-sleep',
 };
+
+// ─── Deprecated Type Aliases (clinical v1.13) ───────────────────────────────
+
+/**
+ * Deprecated `clinical:` class spellings and the `health:` class each one is
+ * superseded by.
+ *
+ * Clinical v1.13 marked `clinical:LabResult`, `clinical:Condition`,
+ * `clinical:Allergy` and `clinical:Immunization` `owl:deprecated true`, each
+ * with an `rdfs:seeAlso` pointing at its `health:` equivalent. They were
+ * **deprecated, not removed**: the pod export path is still their sole emitter
+ * and existing pods contain them.
+ *
+ * The resulting asymmetry is deliberate and is implemented here:
+ *
+ * - **Readers accept both spellings.** {@link deserialize} resolves a requested
+ *   record type to its `health:` RDF type *and* to any deprecated `clinical:`
+ *   spelling listed here, so a pod written before v1.13 still reads back.
+ * - **Writers emit only the `health:` form.** `TYPE_MAPPING` carries no entry
+ *   for the deprecated classes, so nothing in this SDK can produce one.
+ *
+ * Keys and values are full RDF type IRIs.
+ */
+export const DEPRECATED_TYPE_ALIASES: Readonly<Record<string, string>> = {
+  [`${NAMESPACES.clinical}LabResult`]: `${NAMESPACES.health}LabResultRecord`,
+  [`${NAMESPACES.clinical}Condition`]: `${NAMESPACES.health}ConditionRecord`,
+  [`${NAMESPACES.clinical}Allergy`]: `${NAMESPACES.health}AllergyRecord`,
+  [`${NAMESPACES.clinical}Immunization`]: `${NAMESPACES.health}ImmunizationRecord`,
+};
+
+// ─── Wellness Container Classes (health v2.5) ───────────────────────────────
+
+/**
+ * The six wellness container classes and the class each is a subclass of.
+ *
+ * Health v2.5 declared `health:ActivityData`, `health:SleepData`,
+ * `health:HeartRateData`, `health:BloodPressureData`, `health:HRVData` and
+ * `health:BodyMeasurements` as `rdfs:subClassOf health:HealthProfile`. That
+ * subclass axiom is what makes the `rdfs:domain health:HealthProfile` already
+ * asserted on the eight history-container properties true, and what brings
+ * these subjects under `health:HealthProfileShape`.
+ *
+ * Use {@link isHealthProfileType} rather than comparing against
+ * `health:HealthProfile` directly: a subject typed `health:SleepData` IS a
+ * health profile, and an equality check will say it is not.
+ *
+ * Values are full RDF type IRIs.
+ */
+export const WELLNESS_CONTAINER_SUBCLASSES: Readonly<Record<string, string>> = {
+  [`${NAMESPACES.health}ActivityData`]: `${NAMESPACES.health}HealthProfile`,
+  [`${NAMESPACES.health}SleepData`]: `${NAMESPACES.health}HealthProfile`,
+  [`${NAMESPACES.health}HeartRateData`]: `${NAMESPACES.health}HealthProfile`,
+  [`${NAMESPACES.health}BloodPressureData`]: `${NAMESPACES.health}HealthProfile`,
+  [`${NAMESPACES.health}HRVData`]: `${NAMESPACES.health}HealthProfile`,
+  [`${NAMESPACES.health}BodyMeasurements`]: `${NAMESPACES.health}HealthProfile`,
+};
+
+/**
+ * True when `rdfType` denotes a health profile: either `health:HealthProfile`
+ * itself or one of the six `health:` wellness containers that v2.5 declared a
+ * subclass of it.
+ *
+ * @param rdfType - A full RDF type IRI, e.g.
+ *   `https://ns.cascadeprotocol.org/health/v1#SleepData`.
+ */
+export function isHealthProfileType(rdfType: string): boolean {
+  if (rdfType === `${NAMESPACES.health}HealthProfile`) return true;
+  return WELLNESS_CONTAINER_SUBCLASSES[rdfType] === `${NAMESPACES.health}HealthProfile`;
+}
+
+// ─── Sleep Quality Individuals (health v2.5) ────────────────────────────────
+
+/**
+ * The four `health:SleepQuality` named individuals, in descending order.
+ *
+ * `health:sleepQuality` is emitted with an IRI object (`health:Good`), not a
+ * string literal. These are the local names; the serializer writes the
+ * `health:`-prefixed form and the deserializer strips it back off.
+ */
+export const SLEEP_QUALITY_VALUES = ['Excellent', 'Good', 'Fair', 'Poor'] as const;
 
 // ─── Schema Version ──────────────────────────────────────────────────────────
 
@@ -592,6 +725,84 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   extractionConfidence: 'cascade:extractionConfidence',
   sourceNarrativeSection: 'cascade:sourceNarrativeSection',
   requiresUserReview: 'cascade:requiresUserReview',
+
+  // ── Clinical v1.10–v1.12 — traversable graph edges ──
+  // Object properties: every value is an IRI, never a literal.
+  hasEncounter: 'clinical:hasEncounter',
+  indicationReference: 'clinical:indicationReference',
+  parsedIndicationReference: 'clinical:parsedIndicationReference',
+  linkedCondition: 'clinical:linkedCondition',
+  // DEPRECATED in clinical v1.10: packed related-condition UUIDs into one
+  // space-separated literal that no graph query can traverse. Registered so
+  // existing Checkup data still round-trips; write `linkedCondition` instead.
+  linkedConditionIds: 'clinical:linkedConditionIds',
+
+  // ── Health v2.5 — daily snapshot predicates ──
+  // The single-day forms carried on health:DailyActivitySnapshot /
+  // health:DailySleepSnapshot. Distinct from the 7-day aggregate forms above
+  // (activeEnergyBurnedKcal, exerciseMinutesWeekly, standHoursDaily); both
+  // sets are emitted.
+  activeEnergyKcal: 'health:activeEnergyKcal',
+  exerciseMinutes: 'health:exerciseMinutes',
+  standHours: 'health:standHours',
+  durationHours: 'health:durationHours',
+  // Emitted with an IRI object (health:Good), not a string literal.
+  sleepQuality: 'health:sleepQuality',
+
+  // ── Core v3.4 — pod export manifest ──
+  // cascade:ExportManifest is a dcat:Dataset, so the descriptive terms are the
+  // DCAT/Dublin Core standard ones rather than Cascade-specific inventions.
+  title: 'dcterms:title',
+  description: 'dcterms:description',
+  created: 'dcterms:created',
+  creator: 'dcterms:creator',
+  publisher: 'dcterms:publisher',
+  patientProfileVersion: 'cascade:patientProfileVersion',
+  provenanceLayers: 'cascade:provenanceLayers',
+  clinicalSummary: 'cascade:clinicalSummary',
+  wellnessSummary: 'cascade:wellnessSummary',
+  deviceSources: 'cascade:deviceSources',
+  interactionScenarios: 'cascade:interactionScenarios',
+
+  // ── Core v3.4 — record summary (a void:Dataset) ──
+  // Each count below is rdfs:subPropertyOf void:entities, paired in the
+  // ontology with the void:class it counts.
+  domain: 'cascade:domain',
+  conditionCount: 'cascade:conditionCount',
+  medicationCount: 'cascade:medicationCount',
+  allergyCount: 'cascade:allergyCount',
+  labResultCount: 'cascade:labResultCount',
+  immunizationCount: 'cascade:immunizationCount',
+  coverageCount: 'cascade:coverageCount',
+  supplementCount: 'cascade:supplementCount',
+  // Day counts: DAYS COVERED, not entities, so these are deliberately NOT
+  // void:entities subproperties. A 30-day heart rate history holds many more
+  // readings than 30.
+  vitalSignDays: 'cascade:vitalSignDays',
+  heartRateDays: 'cascade:heartRateDays',
+  bloodPressureDays: 'cascade:bloodPressureDays',
+  activityDays: 'cascade:activityDays',
+  sleepDays: 'cascade:sleepDays',
+
+  // ── Core v3.4 — interaction scenario (deliberately novel) ──
+  involvedResources: 'cascade:involvedResources',
+  severity: 'cascade:severity',
+  requiresCrossProvenance: 'cascade:requiresCrossProvenance',
+
+  // ── Core v3.4 — device sources ──
+  // sourceType describes the TRANSPORT a reading arrived through, not its
+  // trustworthiness; that is cascade:dataProvenance.
+  sourceType: 'cascade:sourceType',
+  dataTypes: 'cascade:dataTypes',
+  version: 'cascade:version',
+
+  // ── Core v3.4 — reading-level terms ──
+  // cascade:date and cascade:loincCode are second spellings of `date` and
+  // `loincCode`, which already map to health:date and clinical:loincCode
+  // above. Both spellings are accepted on read (see ADDITIONAL_REVERSE_MAPPINGS
+  // in the deserializer); which one is written is decided per record type by
+  // TYPE_PREDICATE_OVERRIDES in the serializer.
+  sampleCount: 'cascade:sampleCount',
 
   // ── Core predicates (cascade: vocabulary) ──
   dataProvenance: 'cascade:dataProvenance',

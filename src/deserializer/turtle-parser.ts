@@ -18,8 +18,14 @@
  * @module deserializer
  */
 
-import { NAMESPACES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY, buildReversePredicateMap } from '../vocabularies/namespaces.js';
-import type { CascadeRecord } from '../models/common.js';
+import {
+  DEPRECATED_TYPE_ALIASES,
+  NAMESPACES,
+  TYPE_MAPPING,
+  TYPE_TO_MAPPING_KEY,
+  buildReversePredicateMap,
+} from '../vocabularies/namespaces.js';
+import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -54,6 +60,43 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   [`${NAMESPACES.clinical}performedDate`]: 'performedDate',
   [`${NAMESPACES.clinical}sourceRecordId`]: 'sourceRecordId',
   [`${NAMESPACES.clinical}notes`]: 'notes',
+
+  // Core v3.4 defined cascade:date, cascade:notes and cascade:loincCode as
+  // second spellings of terms this SDK already writes under health: and
+  // clinical:. The ontology is explicit that readers of history containers
+  // must handle both, so both resolve to the same JSON key here. Which
+  // spelling is WRITTEN is decided per record type by TYPE_PREDICATE_OVERRIDES
+  // in the serializer; reading is deliberately the permissive side.
+  [`${NAMESPACES.cascade}date`]: 'date',
+  [`${NAMESPACES.cascade}notes`]: 'notes',
+  [`${NAMESPACES.cascade}loincCode`]: 'loincCode',
+
+  // Clinical v1.13 deprecated (but did not remove) clinical:LabResult,
+  // clinical:Condition, clinical:Allergy and clinical:Immunization. Existing
+  // pods contain them, and clinical.ttl declares these properties with
+  // rdfs:domain set to one of those four classes, so a pod that spells the
+  // class the old way spells its properties the old way too. Accepting the
+  // class without accepting its properties would return a record with an id, a
+  // type and no data — absence dressed up as a successful read.
+  //
+  // Only unambiguous local names are aliased. clinical:value, clinical:unit,
+  // clinical:interpretation and clinical:severity are deliberately absent: the
+  // first three already resolve to a VitalSign field and the fourth would
+  // collide with cascade:severity, and a reverse map has no record-type
+  // context with which to disambiguate.
+  [`${NAMESPACES.clinical}testName`]: 'testName',
+  [`${NAMESPACES.clinical}referenceRange`]: 'referenceRange',
+  [`${NAMESPACES.clinical}specimenType`]: 'specimenType',
+  [`${NAMESPACES.clinical}conditionName`]: 'conditionName',
+  [`${NAMESPACES.clinical}onsetDate`]: 'onsetDate',
+  [`${NAMESPACES.clinical}icd10Code`]: 'icd10Code',
+  [`${NAMESPACES.clinical}allergen`]: 'allergen',
+  [`${NAMESPACES.clinical}reaction`]: 'reaction',
+  [`${NAMESPACES.clinical}allergyCategory`]: 'allergyCategory',
+  [`${NAMESPACES.clinical}vaccineName`]: 'vaccineName',
+  [`${NAMESPACES.clinical}vaccineCode`]: 'vaccineCode',
+  [`${NAMESPACES.clinical}lotNumber`]: 'lotNumber',
+  [`${NAMESPACES.clinical}site`]: 'site',
 };
 
 const REVERSE_PREDICATE_MAP = buildReversePredicateMap(ADDITIONAL_REVERSE_MAPPINGS);
@@ -120,7 +163,31 @@ const NUMBER_FIELDS = new Set([
 /** Fields that hold arrays of strings */
 const ARRAY_TYPE_FIELDS = new Set([
   'drugCodes', 'affectsVitalSigns', 'monitoredVitalSigns',
+  // Clinical v1.10–v1.12 graph edges (repeated predicate triples).
+  'indicationReference', 'parsedIndicationReference', 'linkedCondition',
+  // Core v3.4 manifest rdf:List members.
+  'provenanceLayers', 'deviceSources', 'interactionScenarios', 'involvedResources',
 ]);
+
+/**
+ * Fields whose Turtle object is a prefixed IRI but whose JSON value is the bare
+ * local name, keyed by the namespace whose prefix is stripped on read.
+ *
+ * `dataProvenance` predates this map and is handled separately below.
+ */
+const PREFIXED_ENUM_FIELDS: Record<string, string> = {
+  sleepQuality: NAMESPACES.health,
+};
+
+/** Members of these lists are `cascade:` individuals reported as bare names. */
+const CASCADE_LOCAL_NAME_LIST_FIELDS = new Set(['provenanceLayers']);
+
+/** Strip a namespace URI or its CURIE prefix from an RDF list member. */
+function stripCascadeQualifier(value: string): string {
+  if (value.startsWith(NAMESPACES.cascade)) return value.slice(NAMESPACES.cascade.length);
+  if (value.startsWith('cascade:')) return value.slice('cascade:'.length);
+  return value;
+}
 
 // ─── Turtle Tokenizer / Parser ──────────────────────────────────────────────
 
@@ -295,8 +362,10 @@ function parseTurtleContent(content: string): {
   body = removeComments(body).trim();
 
   // Parse subject blocks: <subject> predicate-list .
-  // Match subject URIs or prefixed names
-  const subjectRegex = /(<[^>]+>|[a-zA-Z][\w-]*:[\w-]+)\s+/;
+  // Match subject URIs or prefixed names. `<>` (the empty relative IRI, which
+  // names the document itself) is a legal subject and is how a pod export
+  // manifest identifies itself, so the URI branch accepts zero characters.
+  const subjectRegex = /(<[^>]*>|[a-zA-Z][\w-]*:[\w-]+)\s+/;
 
   while (body.length > 0) {
     body = body.trim();
@@ -778,11 +847,14 @@ function parseListItems(content: string): string[] {
         break;
       }
     } else {
-      // Unquoted token
-      const spaceIdx = remaining.indexOf(' ');
-      if (spaceIdx >= 0) {
-        items.push(remaining.slice(0, spaceIdx));
-        remaining = remaining.slice(spaceIdx + 1);
+      // Unquoted token (e.g. a prefixed name like cascade:DeviceGenerated).
+      // Split on ANY whitespace: a multi-line rdf:List separates its members
+      // with newlines, and splitting on the space character alone captures the
+      // trailing newline into the token.
+      const wsMatch = /\s/.exec(remaining);
+      if (wsMatch) {
+        items.push(remaining.slice(0, wsMatch.index));
+        remaining = remaining.slice(wsMatch.index + 1);
       } else {
         items.push(remaining);
         remaining = '';
@@ -834,9 +906,69 @@ function resolveTypeUri(type: string): string | null {
 }
 
 /**
+ * Every RDF type IRI a subject may carry and still be read back as `typeUri`.
+ *
+ * This is where clinical v1.13's read/write asymmetry lives. v1.13 deprecated
+ * `clinical:LabResult`, `clinical:Condition`, `clinical:Allergy` and
+ * `clinical:Immunization` but did NOT remove them: the pod export path is still
+ * their sole emitter and existing pods contain them. Refusing to read those
+ * pods would be a data-loss bug dressed up as standards compliance, so the
+ * deprecated spellings stay readable here while `TYPE_MAPPING` keeps this SDK
+ * from ever writing one.
+ */
+function acceptedTypeUris(typeUri: string): string[] {
+  const accepted = [typeUri];
+  for (const [deprecated, supersededBy] of Object.entries(DEPRECATED_TYPE_ALIASES)) {
+    if (supersededBy === typeUri) accepted.push(deprecated);
+  }
+  return accepted;
+}
+
+/**
+ * Fields whose Turtle object is an inline blank node that must be rebuilt into
+ * a nested JSON object rather than reported as a blank-node identifier.
+ *
+ * Deliberately narrow. The patient-profile sub-structures
+ * (`emergencyContact`, `address`, `preferredPharmacy`) are also blank nodes and
+ * are NOT reconstructed today; widening this to every blank node is a separate
+ * change with its own compatibility question.
+ */
+const NESTED_BLANK_NODE_FIELDS = new Set(['clinicalSummary', 'wellnessSummary']);
+
+/** Rebuild an inline blank node's predicates into a plain nested object. */
+function triplesToNestedObject(
+  bnodeId: string,
+  triples: ParsedTriple[],
+): Record<string, unknown> {
+  const nested: Record<string, unknown> = {};
+  for (const t of triples) {
+    if (t.subject !== bnodeId || t.predicate === RDF_TYPE) continue;
+    const key = REVERSE_PREDICATE_MAP.get(t.predicate);
+    if (!key) continue;
+    if (t.objectType === 'boolean') {
+      nested[key] = t.object === 'true';
+    } else if (
+      t.objectType === 'integer' ||
+      t.datatype === `${NAMESPACES.xsd}integer`
+    ) {
+      nested[key] = parseInt(t.object, 10);
+    } else if (
+      t.objectType === 'double' ||
+      t.datatype === `${NAMESPACES.xsd}double` ||
+      t.datatype === `${NAMESPACES.xsd}decimal`
+    ) {
+      nested[key] = parseFloat(t.object);
+    } else {
+      nested[key] = t.object;
+    }
+  }
+  return nested;
+}
+
+/**
  * Convert parsed triples for a single subject into a typed record object.
  */
-function triplesToRecord<T extends CascadeRecord>(
+function triplesToRecord<T extends CascadeEntity>(
   subjectUri: string,
   triples: ParsedTriple[],
   recordType: string,
@@ -864,6 +996,20 @@ function triplesToRecord<T extends CascadeRecord>(
     const jsonKey = REVERSE_PREDICATE_MAP.get(predUri);
     if (!jsonKey) continue;
 
+    // Inline blank-node objects (core v3.4: an export manifest carries its
+    // per-domain cascade:RecordSummary inline). Reconstructed rather than
+    // reported as the bare blank-node identifier, which would silently drop
+    // every count the manifest exists to carry.
+    const firstTriple = predTriples[0];
+    if (
+      NESTED_BLANK_NODE_FIELDS.has(jsonKey) &&
+      firstTriple &&
+      firstTriple.objectType === 'blankNode'
+    ) {
+      record[jsonKey] = triplesToNestedObject(firstTriple.object, triples);
+      continue;
+    }
+
     // Handle array fields
     if (ARRAY_TYPE_FIELDS.has(jsonKey)) {
       const values: string[] = [];
@@ -879,7 +1025,9 @@ function triplesToRecord<T extends CascadeRecord>(
           values.push(t.object);
         }
       }
-      record[jsonKey] = values;
+      record[jsonKey] = CASCADE_LOCAL_NAME_LIST_FIELDS.has(jsonKey)
+        ? values.map(stripCascadeQualifier)
+        : values;
       continue;
     }
 
@@ -895,6 +1043,16 @@ function triplesToRecord<T extends CascadeRecord>(
       } else {
         record[jsonKey] = triple.object;
       }
+      continue;
+    }
+
+    // Prefixed enum individuals (e.g. health:sleepQuality health:Good) come
+    // back as the bare local name the model uses.
+    const enumNs = PREFIXED_ENUM_FIELDS[jsonKey];
+    if (enumNs) {
+      record[jsonKey] = triple.object.startsWith(enumNs)
+        ? triple.object.slice(enumNs.length)
+        : triple.object;
       continue;
     }
 
@@ -958,7 +1116,7 @@ function triplesToRecord<T extends CascadeRecord>(
  * const meds = deserialize<Medication>(turtleString, 'MedicationRecord');
  * ```
  */
-export function deserialize<T extends CascadeRecord>(turtle: string, type: string): T[] {
+export function deserialize<T extends CascadeEntity>(turtle: string, type: string): T[] {
   const { triples } = parseTurtleContent(turtle);
 
   // Resolve the requested type to a full URI
@@ -967,10 +1125,12 @@ export function deserialize<T extends CascadeRecord>(turtle: string, type: strin
     throw new Error(`Unknown record type: ${type}. Cannot resolve to RDF type URI.`);
   }
 
-  // Find all subjects with matching rdf:type
+  // Find all subjects with a matching rdf:type. Deprecated-but-still-emitted
+  // clinical: spellings count as matches (clinical v1.13).
+  const accepted = new Set(acceptedTypeUris(typeUri));
   const matchingSubjects: string[] = [];
   for (const triple of triples) {
-    if (triple.predicate === RDF_TYPE && triple.object === typeUri) {
+    if (triple.predicate === RDF_TYPE && accepted.has(triple.object)) {
       matchingSubjects.push(triple.subject);
     }
   }
@@ -994,7 +1154,7 @@ export function deserialize<T extends CascadeRecord>(turtle: string, type: strin
  * @param type - Record type string
  * @returns The parsed record, or null
  */
-export function deserializeOne<T extends CascadeRecord>(turtle: string, type: string): T | null {
+export function deserializeOne<T extends CascadeEntity>(turtle: string, type: string): T | null {
   const results = deserialize<T>(turtle, type);
   return results[0] ?? null;
 }

@@ -173,4 +173,37 @@ export interface Medication extends CascadeRecord {
    * Maps to `health:affectsVitalSigns` as an RDF list in Turtle serialization.
    */
   affectsVitalSigns?: string[];
+
+  /**
+   * IRI of the `clinical:Encounter` (visit context) this medication was
+   * recorded within. FHIR alignment: `MedicationRequest.encounter`.
+   * Maps to `clinical:hasEncounter` (clinical v1.10).
+   */
+  hasEncounter?: string;
+
+  /**
+   * IRIs of the conditions this medication was prescribed FOR, as stated by
+   * the source. The traversable edge alongside the free-text
+   * {@link Medication.indication} literal, which is retained. FHIR alignment:
+   * `MedicationRequest.reasonReference`.
+   * Maps to `clinical:indicationReference` (clinical v1.10, domain widened in
+   * v1.11 so procedures and administrations can carry it too).
+   */
+  indicationReference?: string[];
+
+  /**
+   * IRIs of conditions an importer DERIVED by parsing a coded or free-text
+   * reason on the record and matching it to a condition in the same pod, as
+   * distinct from {@link Medication.indicationReference}, which restates an
+   * explicit reference the source carried.
+   *
+   * A subproperty of `clinical:indicationReference`, so one traversal over the
+   * superproperty returns both families. Present these differently from stated
+   * indications (e.g. "Indication (from record text)"): a parsed match is only
+   * as good as the code or wording it matched on. Carries no confidence score
+   * by design; it is a deterministic parse, not an inference.
+   *
+   * Maps to `clinical:parsedIndicationReference` (clinical v1.12).
+   */
+  parsedIndicationReference?: string[];
 }

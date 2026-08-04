@@ -275,9 +275,57 @@ export type ProcedureStatus =
 // ─── Base Record Interface ───────────────────────────────────────────────────
 
 /**
+ * Base fields shared by every Cascade Protocol subject, whether or not it is a
+ * health record.
+ *
+ * `dataProvenance` and `schemaVersion` are optional here because not every
+ * Cascade class is a `cascade:HealthRecord`. A `cascade:ExportManifest` or
+ * `cascade:RecordSummary` describes an export rather than reporting an
+ * observation, so its SHACL shape does not require a provenance value; a
+ * `cascade:RecordSummary` may carry one but need not.
+ *
+ * Health records use {@link CascadeRecord}, which requires both.
+ *
+ * - `id` maps to the RDF subject URI (e.g., `urn:uuid:...`)
+ * - `type` maps to `rdf:type` (e.g., `clinical:Medication`)
+ */
+export interface CascadeEntity {
+  /** Unique identifier for this subject (URN UUID format: `urn:uuid:...`). */
+  id: string;
+
+  /** RDF type of this subject (e.g., `MedicationRecord`, `ExportManifest`). */
+  type: string;
+
+  /**
+   * Data provenance classification indicating the source of this subject.
+   * Maps to `cascade:dataProvenance` in Turtle serialization.
+   */
+  dataProvenance?: ProvenanceType;
+
+  /**
+   * Schema version in major.minor format (e.g., `"1.3"`).
+   * Maps to `cascade:schemaVersion` in Turtle serialization.
+   */
+  schemaVersion?: string;
+
+  /**
+   * Identifier linking back to the source record in the originating system.
+   * Maps to `health:sourceRecordId` in Turtle serialization.
+   */
+  sourceRecordId?: string;
+
+  /**
+   * Free-text notes associated with this subject.
+   * Maps to `health:notes` in Turtle serialization (or `cascade:notes` on the
+   * core v3.4 export-manifest classes).
+   */
+  notes?: string;
+}
+
+/**
  * Base fields shared by all Cascade Protocol health records.
  *
- * Every record in the Cascade Protocol must include an `id`, `type`,
+ * Every health record in the Cascade Protocol must include an `id`, `type`,
  * `dataProvenance`, and `schemaVersion`. Additional optional metadata
  * fields are available for traceability.
  *
@@ -286,7 +334,7 @@ export type ProcedureStatus =
  * - `dataProvenance` maps to `cascade:dataProvenance`
  * - `schemaVersion` maps to `cascade:schemaVersion`
  */
-export interface CascadeRecord {
+export interface CascadeRecord extends CascadeEntity {
   /** Unique identifier for this record (URN UUID format: `urn:uuid:...`). */
   id: string;
 

@@ -21,6 +21,7 @@
 
 // Base record and common types
 export type {
+  CascadeEntity,
   CascadeRecord,
   ProvenanceType,
   ProvenanceClass,
@@ -97,6 +98,23 @@ export type {
   GenerationTrigger,
 } from './models/advisory-generation.js';
 
+// Pod export manifest (core v3.4)
+export type {
+  ExportManifest,
+  RecordSummary,
+  InteractionScenario,
+  InteractionSeverity,
+} from './models/export-manifest.js';
+
+// Single-day wellness snapshots (health v2.5)
+// DISTINCT from ActivitySnapshot / SleepSnapshot, which carry the 7-day
+// aggregate forms; both are emitted.
+export type {
+  DailyActivitySnapshot,
+  DailySleepSnapshot,
+  SleepQuality,
+} from './models/daily-snapshot.js';
+
 // ─── Vocabulary Constants ────────────────────────────────────────────────────
 
 export {
@@ -104,6 +122,10 @@ export {
   CURRENT_SCHEMA_VERSION,
   TYPE_MAPPING,
   PROPERTY_PREDICATES,
+  DEPRECATED_TYPE_ALIASES,
+  WELLNESS_CONTAINER_SUBCLASSES,
+  SLEEP_QUALITY_VALUES,
+  isHealthProfileType,
 } from './vocabularies/index.js';
 
 export type { NamespacePrefix } from './vocabularies/index.js';

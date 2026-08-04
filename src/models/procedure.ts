@@ -69,4 +69,29 @@ export interface Procedure extends CascadeRecord {
    * Maps to `health:location` in Turtle serialization.
    */
   location?: string;
+
+  /**
+   * IRI of the `clinical:Encounter` (visit context) this procedure occurred
+   * within. FHIR alignment: `Procedure.encounter`.
+   * Maps to `clinical:hasEncounter` (clinical v1.10).
+   */
+  hasEncounter?: string;
+
+  /**
+   * IRIs of the conditions that are the clinical reason for this procedure, as
+   * stated by the source. FHIR alignment: `Procedure.reasonReference`, which is
+   * why clinical v1.11 dropped the property's original
+   * `rdfs:domain clinical:Medication`.
+   * Maps to `clinical:indicationReference`.
+   */
+  indicationReference?: string[];
+
+  /**
+   * IRIs of conditions an importer DERIVED by parsing a coded or free-text
+   * reason on the record, as distinct from
+   * {@link Procedure.indicationReference}. See
+   * `Medication.parsedIndicationReference` for the full semantics.
+   * Maps to `clinical:parsedIndicationReference` (clinical v1.12).
+   */
+  parsedIndicationReference?: string[];
 }
