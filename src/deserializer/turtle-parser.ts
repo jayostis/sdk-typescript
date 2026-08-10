@@ -170,6 +170,25 @@ const ARRAY_TYPE_FIELDS = new Set([
 ]);
 
 /**
+ * Code properties whose vocabulary cardinality is `0..*` (health v2.6,
+ * clinical v1.14). The serializer writes one repeated-predicate triple per
+ * value; this is the reading side of that.
+ *
+ * ARITY-PRESERVING, and deliberately not a member of {@link ARRAY_TYPE_FIELDS}:
+ * one triple reads back as a bare string, N triples read back as an N-element
+ * array. Always returning an array would report structure the graph does not
+ * carry, and would change what every existing single-coded record deserializes
+ * to. Keeping only the first triple, which is what happened before v2.0.0,
+ * silently discarded every coding after the first.
+ */
+const MULTI_VALUE_CODE_FIELDS = new Set([
+  'testCode',
+  'labCategory',
+  'icd10Code',
+  'snomedCode',
+]);
+
+/**
  * Fields whose Turtle object is a prefixed IRI but whose JSON value is the bare
  * local name, keyed by the namespace whose prefix is stripped on read.
  *
@@ -1028,6 +1047,13 @@ function triplesToRecord<T extends CascadeEntity>(
       record[jsonKey] = CASCADE_LOCAL_NAME_LIST_FIELDS.has(jsonKey)
         ? values.map(stripCascadeQualifier)
         : values;
+      continue;
+    }
+
+    // 0..* code properties: every triple, arity preserved.
+    if (MULTI_VALUE_CODE_FIELDS.has(jsonKey)) {
+      const values = predTriples.map((t) => t.object);
+      record[jsonKey] = values.length === 1 ? values[0] : values;
       continue;
     }
 

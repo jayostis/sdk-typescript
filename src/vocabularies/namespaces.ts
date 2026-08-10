@@ -623,6 +623,9 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   // ── Shared predicates ──
   notes: 'health:notes',
   sourceRecordId: 'health:sourceRecordId',
+  // Core v3.5: the ORIGIN axis. rdfs:domain is owl:Thing, so it may appear on
+  // any subject; the typed accessor lives on CascadeEntity for that reason.
+  sourceIdentity: 'cascade:sourceIdentity',
 
   // ── Activity snapshot predicates ──
   date: 'health:date',

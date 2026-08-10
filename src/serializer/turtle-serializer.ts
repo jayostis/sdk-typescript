@@ -102,6 +102,29 @@ const URI_FIELDS = new Set([
 ]);
 
 /**
+ * Code properties whose vocabulary cardinality is `0..*` (health v2.6,
+ * clinical v1.14): `sh:maxCount 1` was removed because FHIR R4
+ * `Observation.category` is 0..* and `CodeableConcept.coding` is 0..*.
+ *
+ * Each accepts a bare value or an array, and each value becomes its own
+ * repeated-predicate triple in the order given. Never an `rdf:List`: the
+ * vocabulary declares no order, and the SHACL shapes count triples.
+ *
+ * Membership is by FIELD NAME rather than by record type, because that is the
+ * only thing this serializer knows: `getPredicateForField` resolves the
+ * namespace per type (a VitalSign writes `clinical:snomedCode`, a Condition
+ * writes `health:snomedCode`), but the cardinality decision is made before any
+ * type context is available. Applying it uniformly is also correct: no shape
+ * still caps any of these four at one.
+ */
+const MULTI_VALUE_CODE_FIELDS = new Set([
+  'testCode',
+  'labCategory',
+  'icd10Code',
+  'snomedCode',
+]);
+
+/**
  * Fields whose values are arrays of URIs or strings and should be serialized
  * as repeated predicate triples (one per value).
  */
@@ -278,9 +301,13 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
       }
     }
 
-    // Check URI values for namespace references
-    if (typeof value === 'string' && URI_FIELDS.has(key)) {
-      addPrefixForUri(value, prefixes);
+    // Check URI values for namespace references. A 0..* code property needs a
+    // prefix declared for EVERY member, not only the first: two codings from
+    // two systems must both be declared.
+    if (URI_FIELDS.has(key)) {
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (typeof item === 'string') addPrefixForUri(item, prefixes);
+      }
     }
     if (Array.isArray(value) && ARRAY_FIELDS.has(key)) {
       for (const item of value) {
@@ -421,6 +448,25 @@ function serializeRecord(record: CascadeEntity): string {
     if (IRI_ARRAY_FIELDS.has(key) && Array.isArray(value)) {
       for (const item of value) {
         sub.uri(pred, String(item));
+      }
+      return;
+    }
+
+    // 0..* code properties (health v2.6, clinical v1.14). One triple per value,
+    // in the order given, whether the caller passed a bare value or an array.
+    // Object form (URI reference vs literal) is unchanged from the single-value
+    // case, so a record carrying one code serializes byte-identically to before.
+    if (MULTI_VALUE_CODE_FIELDS.has(key) && (typeof value === 'string' || Array.isArray(value))) {
+      const values = (Array.isArray(value) ? value : [value]).filter(
+        (item): item is string => typeof item === 'string',
+      );
+      if (values.length === 0) return;
+      for (const item of values) {
+        if (URI_FIELDS.has(key)) {
+          sub.uri(pred, item);
+        } else {
+          sub.literal(pred, item);
+        }
       }
       return;
     }

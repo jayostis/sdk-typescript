@@ -9,7 +9,7 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord, LabInterpretation } from './common.js';
+import type { CascadeRecord, LabInterpretation, MultiValue } from './common.js';
 
 /**
  * A lab result record in the Cascade Protocol.
@@ -59,16 +59,20 @@ export interface LabResult extends CascadeRecord {
   performedDate?: string;
 
   /**
-   * LOINC code URI for this test.
-   * Maps to `health:testCode` in Turtle serialization as a URI reference.
+   * LOINC code URI, or URIs, for this test. Repeatable: FHIR R4
+   * `CodeableConcept.coding` is 0..*, and an `Observation.code` routinely
+   * carries more than one coding for the same test.
+   * Maps to one `health:testCode` URI-reference triple per value.
    */
-  testCode?: string;
+  testCode?: MultiValue<string>;
 
   /**
-   * Laboratory category (e.g., `"Chemistry"`, `"Hematology"`).
-   * Maps to `health:labCategory` in Turtle serialization.
+   * Laboratory category, or categories (e.g., `"Chemistry"`, `"Hematology"`).
+   * Repeatable: FHIR R4 `Observation.category` is 0..*, and real exports
+   * categorise one result several ways at once.
+   * Maps to one `health:labCategory` triple per value.
    */
-  labCategory?: string;
+  labCategory?: MultiValue<string>;
 
   /**
    * Type of specimen collected (e.g., `"Whole Blood"`, `"Serum"`).

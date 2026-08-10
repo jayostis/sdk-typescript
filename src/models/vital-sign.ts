@@ -10,7 +10,7 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord, VitalType, VitalInterpretation } from './common.js';
+import type { CascadeRecord, VitalType, VitalInterpretation, MultiValue } from './common.js';
 
 /**
  * A vital sign record in the Cascade Protocol.
@@ -60,10 +60,11 @@ export interface VitalSign extends CascadeRecord {
   loincCode?: string;
 
   /**
-   * SNOMED CT code URI for this vital sign type.
-   * Maps to `clinical:snomedCode` in Turtle serialization as a URI reference.
+   * SNOMED CT code URI, or URIs, for this vital sign type. Repeatable: FHIR R4
+   * `CodeableConcept.coding` is 0..*.
+   * Maps to one `clinical:snomedCode` URI-reference triple per value.
    */
-  snomedCode?: string;
+  snomedCode?: MultiValue<string>;
 
   /**
    * Lower bound of the normal reference range.
@@ -79,7 +80,13 @@ export interface VitalSign extends CascadeRecord {
 
   /**
    * Clinical interpretation of the vital sign value.
+   *
+   * `clinical:VitalSignShape` puts no `sh:in` on this property, so the union is
+   * advisory: it documents and autocompletes the ratified HL7 v3
+   * ObservationInterpretation codes without rejecting a value the validator
+   * accepts. Prefer a code from {@link VitalInterpretation}.
+   *
    * Maps to `clinical:interpretation` in Turtle serialization.
    */
-  interpretation?: VitalInterpretation;
+  interpretation?: VitalInterpretation | string;
 }

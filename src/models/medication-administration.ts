@@ -12,7 +12,7 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord } from './common.js';
+import type { CascadeRecord, MultiValue } from './common.js';
 
 /**
  * A medication administration event in the Cascade Protocol.
@@ -39,8 +39,11 @@ export interface MedicationAdministration extends CascadeRecord {
   /** Administration status: completed, not-done, in-progress. Maps to `clinical:administrationStatus`. */
   administrationStatus?: string;
 
-  /** SNOMED CT code URI for the medication concept. Maps to `health:snomedCode`. */
-  snomedCode?: string;
+  /**
+   * SNOMED CT code URI, or URIs, for the medication concept. Repeatable: FHIR R4
+   * `CodeableConcept.coding` is 0..*. Maps to one `health:snomedCode` triple per value.
+   */
+  snomedCode?: MultiValue<string>;
 
   /**
    * IRI of the `clinical:Encounter` this administration occurred within.

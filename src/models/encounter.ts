@@ -10,7 +10,7 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord } from './common.js';
+import type { CascadeRecord, MultiValue } from './common.js';
 
 /**
  * A clinical encounter record in the Cascade Protocol.
@@ -62,8 +62,9 @@ export interface Encounter extends CascadeRecord {
   providerName?: string;
 
   /**
-   * SNOMED CT code URI for the encounter type.
-   * Maps to `clinical:snomedCode` in Turtle serialization.
+   * SNOMED CT code URI, or URIs, for the encounter type. Repeatable: FHIR R4
+   * `CodeableConcept.coding` is 0..*.
+   * Maps to one `clinical:snomedCode` triple per value.
    */
-  snomedCode?: string;
+  snomedCode?: MultiValue<string>;
 }

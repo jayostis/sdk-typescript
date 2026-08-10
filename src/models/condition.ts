@@ -10,7 +10,7 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord, ConditionStatus } from './common.js';
+import type { CascadeRecord, ConditionStatus, MultiValue } from './common.js';
 
 /**
  * A condition record in the Cascade Protocol.
@@ -42,16 +42,19 @@ export interface Condition extends CascadeRecord {
   onsetDate?: string;
 
   /**
-   * ICD-10-CM code URI for this condition.
-   * Maps to `health:icd10Code` in Turtle serialization as a URI reference.
+   * ICD-10-CM code URI, or URIs, for this condition. Repeatable: FHIR R4
+   * `CodeableConcept.coding` is 0..*, and dual-coded problem-list entries are
+   * ordinary EHR output.
+   * Maps to one `health:icd10Code` URI-reference triple per value.
    */
-  icd10Code?: string;
+  icd10Code?: MultiValue<string>;
 
   /**
-   * SNOMED CT code URI for this condition.
-   * Maps to `health:snomedCode` in Turtle serialization as a URI reference.
+   * SNOMED CT code URI, or URIs, for this condition. Repeatable for the same
+   * reason as {@link Condition.icd10Code}.
+   * Maps to one `health:snomedCode` URI-reference triple per value.
    */
-  snomedCode?: string;
+  snomedCode?: MultiValue<string>;
 
   /**
    * Clinical classification of the condition (e.g., `"cardiovascular"`, `"endocrine"`, `"respiratory"`).
