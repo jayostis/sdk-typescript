@@ -15,6 +15,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import type { MultiValue } from '../models/common.js';
 
 // ─── Internal Helpers ────────────────────────────────────────────────────────
 
@@ -44,6 +45,53 @@ export function deterministicUuid(input: string): string {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
+ * Reduce one content-field value to the string that enters the hash.
+ *
+ * This is the canonical form core v3.6 states normatively on
+ * `cascade:cascadeUri`, and it exists because an identifier hashed over an
+ * unordered field is not an identifier. `CodeableConcept.coding` is a SET: two
+ * exports of one record that list the same codings in a different order are the
+ * same record, and an identity that depended on the order would split it in two.
+ *
+ * The rule:
+ *
+ * 1. A **scalar passes through untouched** — no trim, no change. This is not an
+ *    oversight and must not be "tidied": it is what makes every URI minted
+ *    before the code fields became repeatable mint identically now.
+ * 2. An **array** has its null and blank-after-trim members discarded, each
+ *    survivor trimmed, the survivors deduplicated, sorted ascending by code
+ *    point, and joined with `,`.
+ * 3. A **one-element array canonicalizes to exactly the bare scalar form**, so a
+ *    field that held one code and now holds a list of one code keeps its
+ *    identity.
+ * 4. An array with no surviving member is **absent**, exactly as `undefined` is.
+ *
+ * Sorting uses the default comparator, i.e. UTF-16 code-unit order, NOT
+ * `localeCompare`. That is deliberate: a locale-aware order would make a
+ * record's identity depend on the machine that imported it.
+ *
+ * **Scope, and the one place this must not be used.** It is for inputs whose
+ * source element is a set. It must NOT be applied to an input whose source order
+ * carries meaning — FHIR `name[0]` is the primary name, and a component or note
+ * list is a sequence — because sorting there merges records the source
+ * deliberately kept apart.
+ *
+ * Exported so the rule is testable directly rather than only through the URIs it
+ * feeds, and so a caller assembling its own identity string uses the same one.
+ */
+export function canonicalFieldValue(value: MultiValue<string> | undefined | null): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return value;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (item === undefined || item === null) continue;
+    const trimmed = item.trim();
+    if (trimmed.length > 0) seen.add(trimmed);
+  }
+  return seen.size > 0 ? [...seen].sort().join(',') : undefined;
+}
+
+/**
  * Generates a deterministic `urn:uuid:` URI from structured content fields.
  *
  * The URI is stable: identical `resourceType` + `contentFields` values will
@@ -56,9 +104,16 @@ export function deterministicUuid(input: string): string {
  *    the URI is derived from `{resourceType}:{fallbackId}`.
  * 3. Otherwise a random UUID is used (non-deterministic).
  *
+ * **Multi-valued fields (core v3.6).** A value may be an array, because
+ * health v2.6 and clinical v1.14 made `icd10Code`, `snomedCode`, `testCode` and
+ * `labCategory` 0..\* to match FHIR `CodeableConcept.coding`, and a caller
+ * holding a record's field passes whatever that field holds. Arrays are
+ * canonicalized before hashing — see {@link canonicalFieldValue}.
+ *
  * @param resourceType - FHIR/Cascade resource name, e.g. `"Immunization"`.
- * @param contentFields - Key/value pairs that uniquely identify the record.
- *   `undefined` and blank values are ignored.
+ * @param contentFields - Key/value pairs that uniquely identify the record. A
+ *   value is a string or an array of strings. `undefined` and blank values are
+ *   ignored.
  * @param fallbackId - Optional source record ID used when content fields are
  *   all absent.
  *
@@ -74,10 +129,11 @@ export function deterministicUuid(input: string): string {
  */
 export function contentHashedUri(
   resourceType: string,
-  contentFields: Record<string, string | undefined>,
+  contentFields: Record<string, MultiValue<string> | undefined>,
   fallbackId?: string,
 ): string {
   const content = Object.entries(contentFields)
+    .map(([k, v]) => [k, canonicalFieldValue(v)] as const)
     .filter(([, v]) => v != null && v.trim().length > 0)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
@@ -127,7 +183,8 @@ export function immunizationUri(fields: {
  * @param fields - LOINC code, observation date, patient URI.
  */
 export function observationUri(fields: {
-  loincCode?: string;
+  /** 0..* since health v2.6; a set, canonicalized before hashing. */
+  loincCode?: MultiValue<string>;
   date?: string;
   patient?: string;
 }): string {
@@ -140,8 +197,10 @@ export function observationUri(fields: {
  * @param fields - SNOMED CT code, ICD-10 code, onset date, patient URI.
  */
 export function conditionUri(fields: {
-  snomedCode?: string;
-  icd10Code?: string;
+  /** 0..* since health v2.6 / clinical v1.14; a set, canonicalized before hashing. */
+  snomedCode?: MultiValue<string>;
+  /** 0..* since health v2.6 / clinical v1.14; a set, canonicalized before hashing. */
+  icd10Code?: MultiValue<string>;
   onsetDate?: string;
   patient?: string;
 }): string {

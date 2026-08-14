@@ -21,6 +21,7 @@ import {
   conditionUri,
   allergyUri,
   medicationUri,
+  canonicalFieldValue,
 } from '../src/utils/deterministic-uri.js';
 
 // ─── Cross-SDK Test Vectors ───────────────────────────────────────────────────
@@ -190,7 +191,24 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
   const fixtures = JSON.parse(readFileSync(fixturesPath, 'utf-8')) as {
     primitiveVectors: Array<{ label: string; input: string; expectedUuid: string }>;
     contentHashedUriVectors: Array<{ label: string; identityString: string; expectedUri: string }>;
+    multiValuedFieldVectors?: Array<{
+      label: string;
+      proves: string[];
+      resourceType: string;
+      contentFields: Record<string, string | string[]>;
+      canonicalIdentityString: string;
+      expectedUri: string;
+    }>;
   };
+
+  // Without this the loop below generates zero `it()` blocks against a fixture
+  // file that has lost its vectors, and the suite reports green for having
+  // tested nothing. readFileSync catches a MISSING file; it does not catch an
+  // EMPTY one, and the two failures look identical from here.
+  it('the multi-valued vectors are actually loaded', () => {
+    expect(fixtures.multiValuedFieldVectors, 'conformance test-vectors.json must carry multiValuedFieldVectors (added with core v3.6)').toBeDefined();
+    expect(fixtures.multiValuedFieldVectors!.length).toBeGreaterThan(0);
+  });
 
   for (const vector of fixtures.primitiveVectors) {
     it(`primitiveVector: ${vector.label}`, () => {
@@ -210,4 +228,96 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
       expect(contentHashedUri(resourceType, fields)).toBe(vector.expectedUri);
     });
   }
+
+  // The multi-valued vectors are fed as FIELDS, not as a pre-flattened identity
+  // string, which is the whole point: the vector is only satisfied if this SDK
+  // performs the canonicalization itself and arrives at the same answer as every
+  // other implementation.
+  for (const vector of fixtures.multiValuedFieldVectors ?? []) {
+    it(`multiValuedFieldVector: ${vector.label} [${vector.proves.join(', ')}]`, () => {
+      expect(contentHashedUri(vector.resourceType, vector.contentFields)).toBe(vector.expectedUri);
+    });
+  }
+});
+
+// ─── Canonical form of a set-valued identity input (core v3.6) ────────────────
+//
+// These are self-contained: they do NOT read the conformance fixture, so the
+// invariants stay proven in this repository even when the sibling checkout is
+// absent. The fixture loop above is the cross-SDK agreement check; this block is
+// the behaviour check.
+
+describe('canonical form of a set-valued identity input (core v3.6)', () => {
+  // The URI `conditionUri` minted for this record BEFORE multi-valued fields
+  // existed, i.e. what is already written into pods. It is also the
+  // `condition-hypertension` cross-SDK conformance vector, so the same literal
+  // is pinned in two places on purpose.
+  const HYPERTENSION_URI = 'urn:uuid:e7794fe1-1684-5095-a3d6-cb8c1d1f7c4b';
+  const PATIENT = 'urn:uuid:patient-smith';
+
+  it('GOLDEN PIN: the scalar spelling is byte-identical to what it always minted', () => {
+    expect(
+      conditionUri({ snomedCode: '38341003', icd10Code: 'I10', patient: PATIENT }),
+    ).toBe(HYPERTENSION_URI);
+  });
+
+  it('GOLDEN PIN: one-element arrays mint the same URI as the scalars', () => {
+    // SCALAR AGREEMENT, and the reason this change is safe to ship. A field that
+    // held one code and now holds a list of one code must not move. Pinned to
+    // the literal rather than compared with the test above, because a comparison
+    // passes just as happily when BOTH have moved.
+    expect(
+      conditionUri({ snomedCode: ['38341003'], icd10Code: ['I10'], patient: PATIENT }),
+    ).toBe(HYPERTENSION_URI);
+  });
+
+  it('ORDER INDEPENDENCE: two exports listing codings differently agree', () => {
+    const a = conditionUri({ snomedCode: ['73211009', '44054006'], icd10Code: ['E11.65', 'E11.9'], patient: PATIENT });
+    const b = conditionUri({ snomedCode: ['44054006', '73211009'], icd10Code: ['E11.9', 'E11.65'], patient: PATIENT });
+    expect(a).toBe(b);
+  });
+
+  it('DUPLICATE INDEPENDENCE: a repeated coding does not split the record', () => {
+    const once = conditionUri({ snomedCode: ['73211009', '44054006'], patient: PATIENT });
+    const twice = conditionUri({ snomedCode: ['44054006', '73211009', '44054006'], patient: PATIENT });
+    expect(twice).toBe(once);
+  });
+
+  it('a differing SET still differs: this removes splits, it never merges', () => {
+    // The guard on the whole change. If canonicalization ever collapsed two
+    // DIFFERENT sets, every assertion above would still pass while distinct
+    // records were silently merged.
+    const two = conditionUri({ snomedCode: ['73211009', '44054006'], patient: PATIENT });
+    const one = conditionUri({ snomedCode: ['73211009'], patient: PATIENT });
+    expect(two).not.toBe(one);
+  });
+
+  it('sorts by code point, not by locale', () => {
+    // localeCompare orders these a01, B02, Z01. Code-point order is
+    // B02, Z01, a01. Using the locale comparator would make a record's identity
+    // depend on the machine that imported it.
+    expect(canonicalFieldValue(['Z01', 'a01', 'B02'])).toBe('B02,Z01,a01');
+  });
+
+  it('a scalar is passed through untouched, whitespace and all', () => {
+    // Deliberate asymmetry with the array path, which trims. Trimming the scalar
+    // would change identities already written, which is the one thing this rule
+    // exists to prevent.
+    expect(canonicalFieldValue(' 38341003 ')).toBe(' 38341003 ');
+    expect(canonicalFieldValue([' 38341003 '])).toBe('38341003');
+  });
+
+  it('an array with no surviving member is absent, exactly as undefined is', () => {
+    expect(canonicalFieldValue([])).toBeUndefined();
+    expect(canonicalFieldValue(['', '   '])).toBeUndefined();
+    expect(conditionUri({ snomedCode: ['', '  '], icd10Code: 'I10', patient: PATIENT }))
+      .toBe(conditionUri({ icd10Code: 'I10', patient: PATIENT }));
+  });
+
+  it('agrees with sdk-python, which shipped this rule first', () => {
+    // sdk-python's _canonical_field_value is dedupe -> sort -> comma-join, and
+    // its docstring records that the other SDKs did not implement it yet. This
+    // is that gap closing: same input, same canonical string.
+    expect(canonicalFieldValue(['73211009', '44054006', '44054006'])).toBe('44054006,73211009');
+  });
 });
