@@ -2,6 +2,20 @@
 # Compare against spec/VOCAB_VERSIONS to detect drift.
 # Run scripts/check-downstream-versions.sh from spec/ to check all repos at once.
 # Update this file when adding new model/predicate support for a vocabulary version.
+# 2026-08-14 — IDENTITY ONLY. The versions below are deliberately NOT bumped.
+#   core v3.6 states the canonical form of a multi-valued identity input and this
+#   SDK now implements it (canonicalFieldValue in src/utils/deterministic-uri.ts),
+#   but that is an implementation rule, not a vocabulary term: core v3.6's actual
+#   new term (cascade:dataAbsentReason), health v2.7's
+#   health:interpretationSourceCode, clinical v1.15's
+#   clinical:interpretationSourceCode and the widened 74-value interpretation list
+#   are all still unregistered here. Bumping the rows would claim support this
+#   package does not have. They move in the model-level round, which also has to
+#   tighten VitalSign.interpretation — currently `VitalInterpretation | string`,
+#   so this SDK accepts any vital interpretation while sdk-python rejects
+#   non-ratified ones. The two SDKs disagree about vitals in opposite directions
+#   and should be fixed together.
+#
 core=3.5
 health=2.6
 clinical=1.14
