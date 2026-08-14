@@ -9,7 +9,7 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord, ProcedureStatus } from './common.js';
+import type { CascadeRecord, ProcedureStatus, MultiValue } from './common.js';
 
 /**
  * A procedure record in the Cascade Protocol.
@@ -53,10 +53,11 @@ export interface Procedure extends CascadeRecord {
   status?: ProcedureStatus;
 
   /**
-   * SNOMED CT code URI for this procedure.
-   * Maps to `health:snomedCode` in Turtle serialization as a URI reference.
+   * SNOMED CT code URI, or URIs, for this procedure. Repeatable: FHIR R4
+   * `CodeableConcept.coding` is 0..*.
+   * Maps to one `health:snomedCode` URI-reference triple per value.
    */
-  snomedCode?: string;
+  snomedCode?: MultiValue<string>;
 
   /**
    * Name of the clinician who performed the procedure.

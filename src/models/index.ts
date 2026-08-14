@@ -28,6 +28,15 @@ export type {
   ProcedureStatus,
   CascadeEntity,
   CascadeRecord,
+  MultiValue,
+} from './common.js';
+
+// Vocabulary value sets and helpers (runtime exports)
+export {
+  LAB_INTERPRETATION_VALUES,
+  LAB_INTERPRETATION_CHECKSUM,
+  OBSERVATION_INTERPRETATION_CODE_COUNT,
+  asArray,
 } from './common.js';
 
 // Clinical record types

@@ -117,7 +117,13 @@ type RecordFields = Record<string, unknown>;
 
 function hasField(rec: RecordFields, field: string): boolean {
   const val = rec[field];
-  return val !== undefined && val !== null;
+  if (val === undefined || val === null) return false;
+  // A 0..* property (health v2.6, clinical v1.14) may be an array. An empty one
+  // serializes to zero triples, so it is an absent value, not a present one:
+  // treating `testCode: []` as a coding would suppress the missing-coding
+  // warning on a record that carries no coding.
+  if (Array.isArray(val)) return val.length > 0;
+  return true;
 }
 
 function hasNonEmptyString(rec: RecordFields, field: string): boolean {

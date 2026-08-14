@@ -84,19 +84,113 @@ export type AllergyCategory =
   | 'environmental'
   | 'biologic';
 
+// ─── Multi-Valued Properties ─────────────────────────────────────────────────
+
+/**
+ * A property whose vocabulary cardinality is `0..*`.
+ *
+ * Cascade accepts, and returns, either a bare value or an array. The arity is
+ * preserved on both sides: one value in serializes to one triple and reads back
+ * as a bare value; N values in serialize to N repeated-predicate triples and
+ * read back as an N-element array. RDF has no notion of a "list of one" for a
+ * repeated predicate, so an SDK that always returned an array would be
+ * inventing structure the graph does not carry.
+ *
+ * Use {@link asArray} when the caller wants one shape to iterate over.
+ */
+export type MultiValue<T> = T | T[];
+
+/**
+ * Normalize a {@link MultiValue} to an array. Absent values yield `[]`, and the
+ * returned array is always a fresh copy, never the caller's.
+ *
+ * @example
+ * ```typescript
+ * for (const code of asArray(condition.icd10Code)) { ... }
+ * ```
+ */
+export function asArray<T>(value: MultiValue<T> | undefined | null): T[] {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value.slice() : [value];
+}
+
 // ─── Lab Result Types ────────────────────────────────────────────────────────
+
+/**
+ * Every value `health:interpretation` (and the `clinical:interpretation`
+ * spelling on a lab result) accepts, in the order the shape file lists them.
+ *
+ * Three groups, 60 values:
+ *
+ * 1. The 49 SELECTABLE codes of the HL7 v3 ObservationInterpretation code
+ *    system, `http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation`
+ *    (version 3.0.0), which is what FHIR R4 binds `Observation.interpretation`
+ *    to. Transcribed verbatim and in the code system's own order. The eight
+ *    abstract (`notSelectable`) concepts are deliberately absent: they are
+ *    hierarchy nodes, not values. Codes the code system marks deprecated
+ *    (`Carrier`, `AC`, `QCF`, `TOX`, `MS`, `VS`, `HM`, `OBX`, `H>`, `L<`) ARE
+ *    included, because a deprecated code is still a defined code and historical
+ *    results carry them.
+ * 2. `"unknown"`, from
+ *    `http://terminology.hl7.org/CodeSystem/data-absent-reason`. Importers
+ *    write it when the source Observation carried no interpretation at all.
+ * 3. The ten lower- and Title-case words of the pre-v2.6 enum, retained so data
+ *    written against health v2.5 keeps validating. NOT recommended for new
+ *    writes.
+ *
+ * Note what is NOT here: `"elevated"`. It was a member of this SDK's
+ * `LabInterpretation` union through v1.6.1 and was never accepted by any
+ * version of the shapes, while `"high"`, accepted by every version, was
+ * missing from the union. Both defects are corrected here.
+ *
+ * The array is the single source of truth and {@link LabInterpretation} is
+ * derived from it, so the type and the runtime list cannot drift apart.
+ *
+ * @see LAB_INTERPRETATION_CHECKSUM for how the list is pinned.
+ */
+export const LAB_INTERPRETATION_VALUES = [
+  // HL7 v3 ObservationInterpretation 3.0.0: 49 selectable codes
+  'EX', 'HM', 'OBX', 'CAR', 'Carrier', 'B', 'D', 'U', 'W',
+  '<', '>', 'AC', 'IE', 'QCF', 'TOX',
+  'A', 'N', 'I', 'MS', 'NCL', 'NS', 'R', 'S', 'VS',
+  'AA', 'H', 'L', 'HH', 'LL', 'HX', 'LX', 'H>', 'HU', 'E', 'L<', 'LU',
+  'ND', 'IND', 'NEG', 'POS', 'EXP', 'UNE', 'DET',
+  'SYN-R', 'NR', 'RR', 'WR', 'SDD', 'SYN-S',
+  // data-absent-reason
+  'unknown',
+  // retained from the pre-v2.6 enum
+  'normal', 'high', 'low', 'abnormal', 'critical',
+  'Normal', 'High', 'Low', 'Abnormal', 'Critical',
+] as const;
+
+/** How many of {@link LAB_INTERPRETATION_VALUES} come from the code system itself. */
+export const OBSERVATION_INTERPRETATION_CODE_COUNT = 49;
+
+/**
+ * SHA-256, hex, of `LAB_INTERPRETATION_VALUES.join('\n')` encoded UTF-8, for
+ * the list as ratified in **health v2.6 / clinical v1.14**.
+ *
+ * Why a checksum rather than a test that reads the shape file: this package is
+ * published standalone and its CI checks out no `spec` sibling, so a
+ * shapes-reading test would either fail on every clean machine or skip itself
+ * whenever the sibling is missing, and a test that skips when it cannot find
+ * its input proves nothing while reporting green. The checksum moves the pin
+ * in-repo: `tests/interpretation-codes.test.ts` recomputes it from the array
+ * above and compares against a literal, so any edit to the list fails until
+ * someone updates the digest deliberately and names the vocabulary version they
+ * are moving to.
+ */
+export const LAB_INTERPRETATION_CHECKSUM =
+  '2da0a308329c92456edf7f46d1529c1a2971b79294d0776025328d04773695f2';
 
 /**
  * Interpretation of a lab result relative to reference ranges.
  *
- * Maps to `health:interpretation` in Turtle serialization.
+ * Maps to `health:interpretation` in Turtle serialization. Derived from
+ * {@link LAB_INTERPRETATION_VALUES}; see that constant for what the set is and
+ * where it comes from.
  */
-export type LabInterpretation =
-  | 'normal'
-  | 'abnormal'
-  | 'critical'
-  | 'elevated'
-  | 'low';
+export type LabInterpretation = typeof LAB_INTERPRETATION_VALUES[number];
 
 // ─── Medication Types ────────────────────────────────────────────────────────
 
@@ -163,13 +257,19 @@ export type VitalType =
 /**
  * Interpretation of a vital sign value relative to reference ranges.
  *
- * Maps to `clinical:interpretation` in Turtle serialization.
+ * Maps to `clinical:interpretation` in Turtle serialization, and is the same
+ * concept, on the same predicate, as {@link LabInterpretation}, so the
+ * recommended values are the same set.
+ *
+ * Unlike a lab result, a vital sign is NOT value-constrained by the shapes:
+ * `clinical:VitalSignShape` declares `clinical:interpretation` with a datatype
+ * and a cardinality and no `sh:in`. The field on {@link VitalSign} is therefore
+ * typed `VitalInterpretation | string`, matching how this SDK already models
+ * every other open binding (`vitalType`, `planType`, `coverageType`): the union
+ * documents and autocompletes the ratified codes without rejecting a value the
+ * validator would accept.
  */
-export type VitalInterpretation =
-  | 'normal'
-  | 'elevated'
-  | 'low'
-  | 'critical';
+export type VitalInterpretation = LabInterpretation;
 
 // ─── Immunization Types ──────────────────────────────────────────────────────
 
@@ -210,15 +310,24 @@ export type CoverageType =
   | 'supplemental';
 
 /**
- * Subscriber relationship to the plan holder.
+ * Subscriber relationship to the plan holder: the full HL7 SubscriberPolicyholder
+ * code system (`http://terminology.hl7.org/CodeSystem/subscriber-relationship`)
+ * that FHIR R4 binds `Coverage.relationship` to.
+ *
+ * Coverage v1.4 completed the enum with `common` (common law spouse) and
+ * `injured` (injured party); `parent` was in the code system all along and
+ * missing here.
  *
  * Maps to `clinical:relationship` or `coverage:subscriberRelationship` in Turtle serialization.
  */
 export type SubscriberRelationship =
-  | 'self'
-  | 'spouse'
   | 'child'
-  | 'other';
+  | 'parent'
+  | 'spouse'
+  | 'common'
+  | 'other'
+  | 'self'
+  | 'injured';
 
 // ─── Patient Profile Types ───────────────────────────────────────────────────
 
@@ -313,6 +422,34 @@ export interface CascadeEntity {
    * Maps to `health:sourceRecordId` in Turtle serialization.
    */
   sourceRecordId?: string;
+
+  /**
+   * ORIGIN AXIS (core v3.5). The canonical, transport-independent identity of
+   * the organization this record came from: a FHIR export and a C-CDA document
+   * of the SAME health system carry the same value here. That is what makes it
+   * usable as a reconciliation key, which the two neighbouring properties are
+   * not. A display label is worded however the source worded it, and an
+   * ingestion batch describes how and when data arrived, not where from.
+   *
+   * The value is a scheme-prefixed token, so a consumer can always tell how much
+   * the producer actually knew:
+   *
+   * - `org:{slug}`: an organization was derivable (`org:meridian`).
+   * - `ns:{namespace}`: no organization was derivable, but the identifiers have
+   *   an assigning authority: the FHIR server base URL, or the C-CDA `<id>` root
+   *   OID. Records agree on origin only if they agree on the namespace.
+   * - `transport:{label}`: LAST RESORT. Nothing named or located an
+   *   organization. Two `transport:` values mean "origin unknown", never
+   *   "shared source".
+   *
+   * This SDK stores and round-trips the value and deliberately does NOT validate
+   * or derive it: minting a slug requires the source document, which only the
+   * importer has. See the `cascade:sourceIdentity` definition in the core
+   * ontology for the normalization both transports must implement identically.
+   *
+   * Maps to `cascade:sourceIdentity` in Turtle serialization.
+   */
+  sourceIdentity?: string;
 
   /**
    * Free-text notes associated with this subject.

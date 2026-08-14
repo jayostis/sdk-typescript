@@ -1,5 +1,113 @@
 # Changelog
 
+## [2.0.0] - 2026-08-10
+
+Vocabulary sync: core 3.4 → 3.5, health 2.5 → 2.6, clinical 1.13 → 1.14,
+coverage 1.3 → 1.4, checkup 3.2 → 3.3.
+
+**This is a major release because two published types change shape.** Neither
+change can be made compatibly: `LabInterpretation` loses a member it should
+never have had, and four code properties become 0..*. Reader code that assigns
+either to a plain `string` no longer typechecks. Nothing changes at runtime for
+data already written (every record that serialized before serializes
+byte-identically now), so the migration is a type-level one. See "Migrating"
+below.
+
+### Changed (breaking)
+
+- **`LabInterpretation` is now the ratified value set, derived from a runtime
+  array.** `LAB_INTERPRETATION_VALUES` carries the 49 selectable codes of HL7 v3
+  ObservationInterpretation 3.0.0 (`http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation`,
+  the code system FHIR R4 binds `Observation.interpretation` to) in the code
+  system's own order, plus the data-absent-reason code `"unknown"` and the ten
+  retained legacy words: 60 values. The type is `typeof LAB_INTERPRETATION_VALUES[number]`,
+  so the type and the runtime list cannot drift apart. The previous five-member
+  union could not express a susceptibility (`S`/`I`/`R`), detection
+  (`POS`/`NEG`/`DET`/`ND`/`IND`), reactivity (`RR`/`WR`/`NR`) or change
+  (`B`/`D`/`U`/`W`) result, all of which are conformant FHIR that laboratories
+  report routinely.
+  - **`'elevated'` is gone.** It was a member of this union through 1.6.1 and was
+    never accepted by any version of the SHACL shapes, so any record written with
+    it has been failing validation all along. `'high'`, accepted by every version
+    of the shapes, was missing from the union and is now present.
+  - The list is pinned by a SHA-256 (`LAB_INTERPRETATION_CHECKSUM`) that
+    `tests/interpretation-codes.test.ts` recomputes from the array and compares
+    against a literal. A test that read the shape file was rejected deliberately:
+    this package's CI checks out no `spec` sibling, so such a test would either
+    fail on every clean machine or skip itself, and a test that skips when it
+    cannot find its input reports green while proving nothing.
+- **`labCategory`, `testCode`, `icd10Code` and `snomedCode` are 0..\*.** FHIR R4
+  `Observation.category` is 0..* and `CodeableConcept.coding` is 0..*, and
+  dual-coded problem-list entries and multi-coding lab observations are ordinary
+  EHR output; a record that preserved every coding its source sent was being
+  rejected for preserving it. The fields are typed `MultiValue<string>`, a new
+  exported alias for `T | T[]`.
+  - **Arity is preserved on both sides.** One value in produces one triple and
+    reads back as a bare string; N values in produce N repeated-predicate triples
+    and read back as an N-element array. This keeps every existing single-coded
+    record round-tripping to exactly what it round-tripped to before, and it
+    avoids reporting structure the graph does not carry. RDF has no "list of one"
+    for a repeated predicate. `asArray()` is exported for callers that want one
+    shape to iterate over.
+  - Applied uniformly by field name, so `Condition`, `LabResult`, `VitalSign`,
+    `Procedure`, `Encounter` and `MedicationAdministration` all move together.
+    The serializer resolves the namespace per record type (a `VitalSign` writes
+    `clinical:snomedCode`, a `Condition` writes `health:snomedCode`) but decides
+    cardinality before it has any type context, and no shape still caps any of
+    the four at one.
+  - Emitted as repeated predicates, never an `rdf:List`: the vocabulary declares
+    no order over codings and the shapes count triples.
+- **`VitalInterpretation` is an alias of `LabInterpretation`**, and
+  `VitalSign.interpretation` is typed `VitalInterpretation | string`.
+  `clinical:VitalSignShape` puts no `sh:in` on the property, so the union
+  documents the ratified codes without rejecting a value the validator accepts,
+  the same idiom this SDK already uses for `vitalType`, `planType` and
+  `coverageType`. Existing `VitalSign` code, including `'elevated'`, still
+  compiles.
+- **`SubscriberRelationship` is the full HL7 SubscriberPolicyholder code set**
+  (`child`, `parent`, `spouse`, `common`, `other`, `self`, `injured`), which is
+  what FHIR R4 binds `Coverage.relationship` to. Coverage v1.4 added `common` and
+  `injured`; `parent` had been missing here since the type was introduced. A
+  widening: the fields that use it are already `| string`.
+
+### Added
+
+- **`cascade:sourceIdentity` (core v3.5), the ORIGIN axis.** A canonical,
+  transport-independent identity for the organization a record came from, so a
+  FHIR export and a C-CDA document of the same health system agree. Registered as
+  a predicate, carried in the generated JSON-LD context as a plain term, and
+  typed on `CascadeEntity` because its `rdfs:domain` is `owl:Thing`. Values are
+  scheme-prefixed `org:{slug}` / `ns:{namespace}` / `transport:{label}`. The
+  accessor is a plain optional string: this SDK stores and round-trips the value
+  and deliberately does not validate or derive the scheme, because minting a slug
+  requires the source document that only an importer has, and rejecting an
+  unrecognized value here would discard origin information a producer was
+  entitled to write.
+- `MultiValue<T>` and `asArray()` exports.
+- `LAB_INTERPRETATION_VALUES`, `LAB_INTERPRETATION_CHECKSUM` and
+  `OBSERVATION_INTERPRETATION_CODE_COUNT` exports.
+
+### Fixed
+
+- An empty code array now counts as no coding rather than as a coding, so
+  `testCode: []` no longer suppresses the missing-coding warning on a record that
+  carries no code.
+- The Turtle serializer declares a namespace prefix for every member of a
+  multi-valued code property, not only the first, so two codings from two code
+  systems are both declared.
+
+### Migrating from 1.6.x
+
+- Replace `'elevated'` with a code the shapes accept. For a lab result that is
+  `'H'` (or `'HH'` for a critically high value); the retained word `'high'` is
+  also accepted but is not recommended for new writes.
+- Reading one of the four code properties now yields `string | string[]`. Wrap
+  the read in `asArray()`, for example `for (const code of asArray(condition.icd10Code))`,
+  or narrow with `Array.isArray`. Writing is unchanged: a bare string still
+  compiles and still produces one triple.
+- Nothing needs to be rewritten on disk. Existing Turtle parses to the same
+  values it parsed to before.
+
 ## [1.6.1] - 2026-08-04
 
 No functional change. This release exists to exercise the tag-driven publishing

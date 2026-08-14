@@ -43,6 +43,21 @@ export type {
   AgeGroup,
   BloodType,
   ProcedureStatus,
+  MultiValue,
+} from './models/index.js';
+
+/**
+ * Vocabulary value sets and helpers.
+ *
+ * `LAB_INTERPRETATION_VALUES` is the accepted `interpretation` set (health v2.6 /
+ * clinical v1.14) and the source `LabInterpretation` is derived from;
+ * `asArray()` normalizes a {@link MultiValue} field to an array.
+ */
+export {
+  LAB_INTERPRETATION_VALUES,
+  LAB_INTERPRETATION_CHECKSUM,
+  OBSERVATION_INTERPRETATION_CODE_COUNT,
+  asArray,
 } from './models/index.js';
 
 // Clinical record types

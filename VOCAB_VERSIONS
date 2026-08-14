@@ -2,11 +2,11 @@
 # Compare against spec/VOCAB_VERSIONS to detect drift.
 # Run scripts/check-downstream-versions.sh from spec/ to check all repos at once.
 # Update this file when adding new model/predicate support for a vocabulary version.
-core=3.4
-health=2.5
-clinical=1.13
-coverage=1.3
-checkup=3.2
+core=3.5
+health=2.6
+clinical=1.14
+coverage=1.4
+checkup=3.3
 pots=1.4
 # coverage=1.3: ClaimRecord, BenefitStatement, DenialNotice, AppealRecord interfaces added
 # health=2.3: ProcedureRecord rdfType and predicates corrected from clinical: to health: namespace (REC-5)
@@ -77,3 +77,59 @@ pots=1.4
 #   - workbench@v1-draft.0.5 notes substrate: external oa, ical, skos namespaces
 #     (workbench:followUp is an oa:Motivation individual, reached via the
 #     workbench namespace, not a predicate).
+
+# ── 2026-08-10 sync: health 2.6, clinical 1.14, coverage 1.4, checkup 3.3,
+#    core 3.5. Released in SDK 2.0.0. ──
+#
+# health=2.6 / clinical=1.14: interpretation is no longer a five-word set this
+#     project invented. LAB_INTERPRETATION_VALUES carries the 49 SELECTABLE codes
+#     of HL7 v3 ObservationInterpretation 3.0.0 (the code system FHIR R4 binds
+#     Observation.interpretation to) in the code system's own order, plus the
+#     data-absent-reason code "unknown" and the ten retained legacy words: 60
+#     values. LabInterpretation is DERIVED from that array, so the type and the
+#     runtime list cannot drift. The list is pinned by a SHA-256 recomputed in
+#     test rather than by reading the shape file, because this package's CI
+#     checks out no spec sibling and a test that skipped itself when its input
+#     was missing would report green while proving nothing.
+#     Two pre-existing defects are corrected by the same change: "elevated" was a
+#     member of the union and was never accepted by any version of the shapes,
+#     and "high" was accepted by every version and was missing from the union.
+# health=2.6 / clinical=1.14: labCategory, testCode, icd10Code and snomedCode are
+#     0..*. FHIR R4 Observation.category is 0..* and CodeableConcept.coding is
+#     0..*, so a record that preserved every coding its source sent was being
+#     rejected for preserving it. Represented as MultiValue<string> (a bare value
+#     or an array) and handled ARITY-PRESERVINGLY on both sides: N values in
+#     produce N repeated-predicate triples, N triples read back as N values, and
+#     one value still round-trips as a bare string. Uniform by FIELD NAME across
+#     every model that carries one of the four, because the serializer resolves
+#     the namespace per record type but decides cardinality before it has any
+#     type context, and no shape still caps any of the four at one.
+#     NOT an rdf:List: the vocabulary declares no order and the shapes count
+#     triples. The JSON-LD context keeps these terms plain rather than declaring
+#     @container: @set, because @set means "always an array on compaction" and
+#     this SDK emits a bare value for a single coding.
+# coverage=1.4: SubscriberRelationship completed to the full HL7
+#     SubscriberPolicyholder code system that FHIR R4 Coverage.relationship binds
+#     to (child, parent, spouse, common, other, self, injured). v1.4 added common
+#     and injured; parent had been missing here since the type was introduced.
+#     The other v1.4 change relaxes coverage:coverageType from a closed list to an
+#     advisory warning, matching FHIR's EXTENSIBLE binding; this SDK already typed
+#     that field `CoverageType | string` and rejects nothing, so it needed no
+#     change to be conformant.
+# checkup=3.3: SHACL only. An icd10Code sh:pattern that required a digit in the
+#     second and third characters, so live categories with a letter there (C4A,
+#     D3A, M1A) failed. This SDK validates no lexical patterns and models no
+#     checkup: class, so there is nothing here for the fix to change. The row is
+#     bumped because 3.3 adds no term this SDK is missing, not because code moved.
+# core=3.5: cascade:sourceIdentity, the ORIGIN axis: a canonical,
+#     transport-independent identity for the organization a record came from, so
+#     a FHIR export and a C-CDA document of one health system agree. Registered
+#     as a predicate, carried in the generated JSON-LD context as a plain term
+#     (matching the published context), and typed on CascadeEntity because its
+#     rdfs:domain is owl:Thing. Values are scheme-prefixed org: / ns: /
+#     transport:; the accessor is a plain optional string and this SDK does NOT
+#     validate or derive the scheme. Minting a slug requires the source document,
+#     which only an importer has, and rejecting an unrecognized value here would
+#     discard origin information a producer was entitled to write.
+#     cascade:sourceSystem, whose comment narrowed in the same version, is still
+#     unregistered here and remains a gap.
