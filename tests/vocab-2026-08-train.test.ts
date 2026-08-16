@@ -27,6 +27,7 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 
 import { serialize } from '../src/serializer/turtle-serializer.js';
+import { deserialize } from '../src/deserializer/turtle-parser.js';
 import { getContext } from '../src/jsonld/context.js';
 import {
   LAB_INTERPRETATION_VALUES,
@@ -235,5 +236,27 @@ describe('VitalSign.interpretation is no longer an open binding', () => {
       const v: VitalSign['interpretation'] = code;
       expect(v).toBe(code);
     }
+  });
+});
+
+// ─── 5. Round trips ──────────────────────────────────────────────────────────
+
+describe('the new fields survive a round trip', () => {
+  it('reads back a vital source code written under the clinical: spelling', () => {
+    // A reader has to accept every live spelling; only the writer picks one.
+    // A reverse map that knew only the health: spelling serialized the source
+    // code and then dropped it on read.
+    const turtle = serializeFixture('vital-001');
+    const records = deserialize(turtle, 'VitalSign') as unknown as Array<Record<string, unknown>>;
+    expect(records).toHaveLength(1);
+    expect(records[0]?.['interpretation']).toBe('H');
+    expect(records[0]?.['interpretationSourceCode']).toBe('elevated');
+  });
+
+  it('reads back an absence reason', () => {
+    const turtle = serializeFixture('absent-001');
+    const records = deserialize(turtle, 'LabResultRecord') as unknown as Array<Record<string, unknown>>;
+    expect(records).toHaveLength(1);
+    expect(records[0]?.['dataAbsentReason']).toBeDefined();
   });
 });

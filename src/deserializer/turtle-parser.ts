@@ -53,6 +53,11 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   // VitalSign uses clinical: namespace for these predicates
   [`${NAMESPACES.clinical}snomedCode`]: 'snomedCode',
   [`${NAMESPACES.clinical}interpretation`]: 'interpretation',
+  // health v2.7 / clinical v1.15. Unambiguous: the local name belongs to one
+  // field in either namespace. Without it a vital's verbatim source code is
+  // WRITTEN and then dropped on read, which is the same silent loss the
+  // property exists to prevent, moved from the writer to the reader.
+  [`${NAMESPACES.clinical}interpretationSourceCode`]: 'interpretationSourceCode',
 
   // Procedure and Encounter (EHR-imported) use clinical: for predicates
   // that health: records express under the health: namespace. These aliases
