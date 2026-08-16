@@ -237,7 +237,7 @@ describe('Turtle Serializer', () => {
         } else {
           expect(result.length).toBeGreaterThan(0);
           expect(result).toContain('@prefix');
-          expect(result).toContain('health:ProcedureRecord');
+          expect(result).toContain('clinical:Procedure');
         }
       });
     }

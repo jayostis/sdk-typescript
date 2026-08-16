@@ -242,7 +242,7 @@ describe('Pod Builder', () => {
       expect(paths).toContain('index.ttl');
 
       const procFile = findFile(files, 'clinical/procedures.ttl');
-      expect(procFile.content).toContain('health:ProcedureRecord');
+      expect(procFile.content).toContain('clinical:Procedure');
       expect(procFile.content).toContain('urn:uuid:test-proc-1');
       expect(procFile.content).toContain('Appendectomy');
     });
@@ -490,7 +490,7 @@ describe('Pod Builder', () => {
       const files = builder.build();
 
       const procFile = findFile(files, 'clinical/procedures.ttl');
-      expect(procFile.content).toContain('health:ProcedureRecord');
+      expect(procFile.content).toContain('clinical:Procedure');
       expect(procFile.content).toContain('Appendectomy');
     });
 

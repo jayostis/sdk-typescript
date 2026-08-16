@@ -120,7 +120,7 @@ export function asArray<T>(value: MultiValue<T> | undefined | null): T[] {
  * Every value `health:interpretation` (and the `clinical:interpretation`
  * spelling on a lab result) accepts, in the order the shape file lists them.
  *
- * Three groups, 60 values:
+ * Three groups, 74 values:
  *
  * 1. The 49 SELECTABLE codes of the HL7 v3 ObservationInterpretation code
  *    system, `http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation`
@@ -131,9 +131,12 @@ export function asArray<T>(value: MultiValue<T> | undefined | null): T[] {
  *    (`Carrier`, `AC`, `QCF`, `TOX`, `MS`, `VS`, `HM`, `OBX`, `H>`, `L<`) ARE
  *    included, because a deprecated code is still a defined code and historical
  *    results carry them.
- * 2. `"unknown"`, from
- *    `http://terminology.hl7.org/CodeSystem/data-absent-reason`. Importers
- *    write it when the source Observation carried no interpretation at all.
+ * 2. All 15 codes of
+ *    `http://terminology.hl7.org/CodeSystem/data-absent-reason`, for a source
+ *    Observation whose interpretation element was absent or null-flavoured.
+ *    health v2.6 / clinical v1.14 admitted only `"unknown"`, so `NASK`, `ASKU`
+ *    and `NAV` were all flattened onto it and three different clinical facts
+ *    became one. health v2.7 / clinical v1.15 admit the other 14.
  * 3. The ten lower- and Title-case words of the pre-v2.6 enum, retained so data
  *    written against health v2.5 keeps validating. NOT recommended for new
  *    writes.
@@ -156,8 +159,11 @@ export const LAB_INTERPRETATION_VALUES = [
   'AA', 'H', 'L', 'HH', 'LL', 'HX', 'LX', 'H>', 'HU', 'E', 'L<', 'LU',
   'ND', 'IND', 'NEG', 'POS', 'EXP', 'UNE', 'DET',
   'SYN-R', 'NR', 'RR', 'WR', 'SDD', 'SYN-S',
-  // data-absent-reason
-  'unknown',
+  // data-absent-reason, all 15 codes (health v2.7 / clinical v1.15)
+  'unknown', 'asked-unknown', 'temp-unknown', 'not-asked',
+  'asked-declined', 'masked', 'not-applicable', 'unsupported',
+  'as-text', 'error', 'not-a-number', 'negative-infinity',
+  'positive-infinity', 'not-performed', 'not-permitted',
   // retained from the pre-v2.6 enum
   'normal', 'high', 'low', 'abnormal', 'critical',
   'Normal', 'High', 'Low', 'Abnormal', 'Critical',
@@ -168,7 +174,10 @@ export const OBSERVATION_INTERPRETATION_CODE_COUNT = 49;
 
 /**
  * SHA-256, hex, of `LAB_INTERPRETATION_VALUES.join('\n')` encoded UTF-8, for
- * the list as ratified in **health v2.6 / clinical v1.14**.
+ * the list as ratified in **health v2.7 / clinical v1.15**. The health v2.6 /
+ * clinical v1.14 digest was
+ * `2da0a308329c92456edf7f46d1529c1a2971b79294d0776025328d04773695f2`, over the
+ * same list without the 14 data-absent-reason codes added in this release.
  *
  * Why a checksum rather than a test that reads the shape file: this package is
  * published standalone and its CI checks out no `spec` sibling, so a
@@ -181,7 +190,7 @@ export const OBSERVATION_INTERPRETATION_CODE_COUNT = 49;
  * are moving to.
  */
 export const LAB_INTERPRETATION_CHECKSUM =
-  '2da0a308329c92456edf7f46d1529c1a2971b79294d0776025328d04773695f2';
+  '1ae24bf8ceccfa2a71d870bae21dc91cc7f906d736496ec23ca78b4181ba05b0';
 
 /**
  * Interpretation of a lab result relative to reference ranges.
@@ -261,13 +270,18 @@ export type VitalType =
  * concept, on the same predicate, as {@link LabInterpretation}, so the
  * recommended values are the same set.
  *
- * Unlike a lab result, a vital sign is NOT value-constrained by the shapes:
- * `clinical:VitalSignShape` declares `clinical:interpretation` with a datatype
- * and a cardinality and no `sh:in`. The field on {@link VitalSign} is therefore
- * typed `VitalInterpretation | string`, matching how this SDK already models
- * every other open binding (`vitalType`, `planType`, `coverageType`): the union
- * documents and autocompletes the ratified codes without rejecting a value the
- * validator would accept.
+ * clinical v1.15 binds `clinical:VitalSignShape`'s interpretation to this same
+ * value set, so the reason the field on {@link VitalSign} was typed
+ * `VitalInterpretation | string` (that the vital shape carried no `sh:in`) no
+ * longer holds, and that union collapsed to `string`, which documented nothing.
+ * The field is now typed `VitalInterpretation`.
+ *
+ * The binding's SEVERITY is `sh:Warning`, not `sh:Violation`: a vital carrying
+ * a value outside the set is REPORTED, not rejected, and is raised to a
+ * violation in a later clinical version. That is a rule about VALIDATING data
+ * that already exists, which is a different question from what a producer
+ * should write. A value in neither ratified set goes verbatim on
+ * `interpretationSourceCode`, with the nearest ratified reading here.
  */
 export type VitalInterpretation = LabInterpretation;
 

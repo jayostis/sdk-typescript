@@ -1,5 +1,68 @@
 # Changelog
 
+## [3.0.0] - 2026-08-15
+
+Vocabulary sync: core 3.5 to 3.6, health 2.6 to 2.7, clinical 1.14 to 1.15.
+
+**Major because one published type narrows and one record type changes what it
+serializes to.** `VitalSign.interpretation` no longer accepts an arbitrary
+string, and procedure records move to a different RDF class and name predicate.
+
+### Changed (BREAKING)
+
+- `VitalSign.interpretation` is now `VitalInterpretation`, not
+  `VitalInterpretation | string`. The union was justified by
+  `clinical:VitalSignShape` carrying no `sh:in`, which clinical v1.15 changes,
+  and in the meantime TypeScript collapsed `VitalInterpretation | string` to
+  `string`, so the type documented nothing and accepted anything. A source code
+  in neither ratified value set goes verbatim on the new
+  `interpretationSourceCode` with the nearest ratified reading on
+  `interpretation`; that pairing is what makes narrowing lossless.
+- Procedure records serialize as `clinical:Procedure` with
+  `clinical:procedureName`, not `health:ProcedureRecord` with
+  `health:procedureName`. No vocabulary has ever defined either health: spelling
+  and no shape targeted them, so procedure records this SDK wrote ran against
+  zero constraints. A consumer querying the old spellings must be updated.
+
+### Added
+
+Core v3.6:
+- `cascade:dataAbsentReason`, registered and in the generated JSON-LD context.
+  Why a record's primary VALUE is absent, with semantics that are exactly FHIR
+  R4 `Observation.dataAbsentReason`. It was previously dropped on the floor by
+  the serializer.
+- `cascade:sourceSystem`, registered and in the generated context. It has been
+  in the published context since core v3.0 and was never registered here, so
+  the INGESTION axis could not round-trip while ORIGIN could.
+
+Health v2.7 and clinical v1.15:
+- `interpretationSourceCode`, registered in both spellings and typed on
+  `VitalSign`. A lab writes the `health:` spelling and a vital the `clinical:`
+  one, so the verbatim code always sits beside the interpretation it explains.
+- `LAB_INTERPRETATION_VALUES` goes from 60 to 74 values, adding the 14
+  data-absent-reason codes it lacked. `LAB_INTERPRETATION_CHECKSUM` re-pinned to
+  `1ae24bf8ceccfa2a71d870bae21dc91cc7f906d736496ec23ca78b4181ba05b0`, shown
+  failing against the previous digest before re-pinning.
+- `healthProcedureName` registered, so a name carried only on the deprecated
+  spelling survives serialization. It was silently dropped before, and a
+  procedure record could serialize with no name at all.
+- `tsconfig.typecheck.json` and an `npm run typecheck` script, wired into CI.
+  `tsconfig.json` excludes test files and vitest does not typecheck, so a
+  type-level assertion in a test was previously invisible to both `npm test` and
+  `npm run build`. Widening `VitalSign.interpretation` back leaves all 604 tests
+  passing and is caught only by this step, which is precisely why it exists.
+
+### Cross-SDK note
+
+The two SDKs disagreed about vital interpretation in opposite directions: this
+one accepted any string, the Python SDK rejected anything outside the set. The
+ratified shapes settle it as a severity split, and both SDKs implement that same
+split in this round. `clinical:VitalSignShape` binds the value set at
+`sh:Warning`, so an out-of-set value on a vital is REPORTED and the record stays
+valid; the lab shapes bind it at `sh:Violation`. This SDK does not validate, so
+it carries the stance in its types: the 74-value set is what a producer should
+write, and `interpretationSourceCode` is where anything else goes.
+
 ## [2.0.0] - 2026-08-10
 
 Vocabulary sync: core 3.4 → 3.5, health 2.5 → 2.6, clinical 1.13 → 1.14,

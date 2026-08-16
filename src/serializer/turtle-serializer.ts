@@ -48,6 +48,10 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   VitalSign: {
     snomedCode: 'clinical:snomedCode',
     interpretation: 'clinical:interpretation',
+    // health v2.7 / clinical v1.15: the verbatim escape hatch follows the
+    // property it explains into the clinical: namespace, so a consumer reading
+    // one always finds the other on the same side.
+    interpretationSourceCode: 'clinical:interpretationSourceCode',
   },
   // Core v3.4: the export-manifest classes carry cascade:notes, not the
   // health:notes that health records use. Same JSON key, different predicate.

@@ -1,0 +1,27 @@
+{
+  // Typechecks the tests as well as src.
+  //
+  // tsconfig.json deliberately excludes `**/*.test.ts` because the build emits
+  // only src to dist. The side effect is that nothing typechecks the tests at
+  // all: vitest transpiles without typechecking, so a type error in a test is
+  // invisible to `npm test`, and `npm run build` never looks at the file. A
+  // type-level assertion written in a test would therefore prove nothing.
+  //
+  // This config is what makes `@ts-expect-error` assertions real: it fails when
+  // an expected error does NOT occur, which is exactly how a narrowed public
+  // type is pinned against silently widening again.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  // Scoped to src plus the one test file that carries type-level assertions,
+  // NOT to tests/**. Because nothing has ever typechecked this directory, the
+  // existing suites carry a backlog of pre-existing type errors (records built
+  // without required fields, properties read off the base record type, an
+  // unused local). Pulling them in here would mean this config could never go
+  // green, so the guard it provides would be switched off on day one. Widening
+  // the include as those are cleaned up is the intended direction.
+  "include": ["src/**/*.ts", "tests/vocab-2026-08-train.test.ts"],
+  "exclude": ["node_modules", "dist"]
+}

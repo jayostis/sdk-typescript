@@ -180,10 +180,16 @@ export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; na
     nameKey: 'supplementName',
     namePred: 'clinical:supplementName',
   },
+  // clinical v1.15: clinical:Procedure is the class clinical:ProcedureShape
+  // targets. No vocabulary has ever defined health:ProcedureRecord or
+  // health:procedureName and no shape targeted either, so procedure records
+  // written under those spellings ran against zero constraints.
+  // health:procedureName is still READ during the migration window; see
+  // healthProcedureName below.
   procedures: {
-    rdfType: 'health:ProcedureRecord',
+    rdfType: 'clinical:Procedure',
     nameKey: 'procedureName',
-    namePred: 'health:procedureName',
+    namePred: 'clinical:procedureName',
   },
   encounters: {
     rdfType: 'clinical:Encounter',
@@ -602,8 +608,13 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   familyName: 'foaf:familyName',
   bloodType: 'health:bloodType',
 
-  // ── Procedure predicates (health: vocabulary) ──
-  procedureName: 'health:procedureName',
+  // ── Procedure predicates ──
+  // clinical:procedureName is canonical (clinical v1.15). The health: spelling
+  // is what a C-CDA import path writes on records it types clinical:Procedure;
+  // it is accepted for the migration window and both halves are removed
+  // together when the window closes.
+  procedureName: 'clinical:procedureName',
+  healthProcedureName: 'health:procedureName',
   cptCode: 'health:cptCode',
   procedureStatus: 'health:procedureStatus',
   performer: 'health:performer',
@@ -626,6 +637,19 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   // Core v3.5: the ORIGIN axis. rdfs:domain is owl:Thing, so it may appear on
   // any subject; the typed accessor lives on CascadeEntity for that reason.
   sourceIdentity: 'cascade:sourceIdentity',
+  // The INGESTION axis. Published in the JSON-LD context since core v3.0 and
+  // never registered here, so it could not round-trip while the ORIGIN axis
+  // above could. NOT a reconciliation key: one batch routinely carries several
+  // organizations.
+  sourceSystem: 'cascade:sourceSystem',
+  // Core v3.6: why this record's primary VALUE is absent. Bound to the 15
+  // codes of http://terminology.hl7.org/CodeSystem/data-absent-reason, and
+  // meaningful only when that value is in fact absent.
+  dataAbsentReason: 'cascade:dataAbsentReason',
+  // health v2.7 / clinical v1.15: the source's own interpretation code,
+  // verbatim, when it is a member of neither ratified value set. A vital sign
+  // writes the clinical: spelling; see the serializer's type overrides.
+  interpretationSourceCode: 'health:interpretationSourceCode',
 
   // ── Activity snapshot predicates ──
   date: 'health:date',

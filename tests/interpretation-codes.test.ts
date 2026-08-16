@@ -1,5 +1,5 @@
 /**
- * health v2.6 / clinical v1.14: the accepted `interpretation` value set.
+ * health v2.7 / clinical v1.15: the accepted `interpretation` value set.
  *
  * The set is pinned by a SHA-256 checksum rather than by reading the shape
  * file. This SDK is published standalone and its CI checks out no `spec`
@@ -29,10 +29,10 @@ function checksumOf(values: readonly string[]): string {
   return createHash('sha256').update(values.join('\n'), 'utf8').digest('hex');
 }
 
-describe('interpretation value set (health v2.6 / clinical v1.14)', () => {
+describe('interpretation value set (health v2.7 / clinical v1.15)', () => {
   it('pins the list with a checksum recomputed from the in-code array', () => {
     expect(checksumOf(LAB_INTERPRETATION_VALUES)).toBe(
-      '2da0a308329c92456edf7f46d1529c1a2971b79294d0776025328d04773695f2',
+      '1ae24bf8ceccfa2a71d870bae21dc91cc7f906d736496ec23ca78b4181ba05b0',
     );
   });
 
@@ -40,17 +40,20 @@ describe('interpretation value set (health v2.6 / clinical v1.14)', () => {
     expect(LAB_INTERPRETATION_CHECKSUM).toBe(checksumOf(LAB_INTERPRETATION_VALUES));
   });
 
-  it('carries 60 values: 49 selectable ObservationInterpretation codes + unknown + 10 retained words', () => {
+  it('carries 74 values: 49 selectable ObservationInterpretation codes + 15 data-absent-reason codes + 10 retained words', () => {
     expect(OBSERVATION_INTERPRETATION_CODE_COUNT).toBe(49);
-    expect(LAB_INTERPRETATION_VALUES).toHaveLength(60);
-    expect(new Set(LAB_INTERPRETATION_VALUES).size).toBe(60);
+    expect(LAB_INTERPRETATION_VALUES).toHaveLength(74);
+    expect(new Set(LAB_INTERPRETATION_VALUES).size).toBe(74);
   });
 
   it('preserves the code system order the shape file lists', () => {
     expect(LAB_INTERPRETATION_VALUES[0]).toBe('EX');
     expect(LAB_INTERPRETATION_VALUES[48]).toBe('SYN-S');
+    // The data-absent-reason block runs 49 to 63 as of health v2.7; it was a
+    // single element ('unknown') through v2.6.
     expect(LAB_INTERPRETATION_VALUES[49]).toBe('unknown');
-    expect(LAB_INTERPRETATION_VALUES[59]).toBe('Critical');
+    expect(LAB_INTERPRETATION_VALUES[63]).toBe('not-permitted');
+    expect(LAB_INTERPRETATION_VALUES[73]).toBe('Critical');
   });
 
   it('accepts the result families the previous five-word enum could not express', () => {
