@@ -16,9 +16,9 @@
 #   non-ratified ones. The two SDKs disagree about vitals in opposite directions
 #   and should be fixed together.
 #
-core=3.5
-health=2.6
-clinical=1.14
+core=3.6
+health=2.7
+clinical=1.15
 coverage=1.4
 checkup=3.3
 pots=1.4
@@ -147,3 +147,18 @@ pots=1.4
 #     discard origin information a producer was entitled to write.
 #     cascade:sourceSystem, whose comment narrowed in the same version, is still
 #     unregistered here and remains a gap.
+
+# core=3.6: cascade:dataAbsentReason registered and in the generated context;
+#     the serializer dropped it entirely before. cascade:sourceSystem
+#     registered too: it has been in the published context since core v3.0 and
+#     was never registered here, so the INGESTION axis could not round-trip
+#     while ORIGIN could.
+# health=2.7 / clinical=1.15: interpretationSourceCode registered in BOTH
+#     spellings (health: on labs, clinical: on vitals) and typed on VitalSign.
+#     LAB_INTERPRETATION_VALUES moves 60 to 74 (the 14 data-absent-reason codes
+#     it lacked) and the checksum is re-pinned. VitalSign.interpretation
+#     narrows from `VitalInterpretation | string`, which TypeScript collapsed
+#     to `string`: clinical v1.15 binds the vital shape, so the open binding
+#     that justified the union is gone. Procedure records retarget onto
+#     clinical:Procedure / clinical:procedureName, with health:procedureName
+#     registered so a name carried only on the deprecated spelling survives.

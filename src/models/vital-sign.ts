@@ -81,12 +81,30 @@ export interface VitalSign extends CascadeRecord {
   /**
    * Clinical interpretation of the vital sign value.
    *
-   * `clinical:VitalSignShape` puts no `sh:in` on this property, so the union is
-   * advisory: it documents and autocompletes the ratified HL7 v3
-   * ObservationInterpretation codes without rejecting a value the validator
-   * accepts. Prefer a code from {@link VitalInterpretation}.
+   * clinical v1.15 binds `clinical:VitalSignShape`'s interpretation to the
+   * 74-value set, so this is no longer an open binding and the previous
+   * `VitalInterpretation | string` type (which TypeScript collapses to
+   * `string`, documenting nothing) is gone.
+   *
+   * A source code in neither ratified value set does not go here: it goes
+   * verbatim on {@link VitalSign.interpretationSourceCode}, with the nearest
+   * ratified reading on this property. That pairing is why the type can be
+   * narrowed without losing what the source said.
    *
    * Maps to `clinical:interpretation` in Turtle serialization.
    */
-  interpretation?: VitalInterpretation | string;
+  interpretation?: VitalInterpretation;
+
+  /**
+   * The interpretation code the SOURCE wrote, copied verbatim, for the case
+   * where it is a member of neither value set `interpretation` is bound to
+   * (health v2.7 / clinical v1.15).
+   *
+   * Deliberately unconstrained in its VALUE: a value set or a pattern here
+   * would recreate exactly the loss the property exists to prevent. Single
+   * valued, because the interpretation it explains is single valued.
+   *
+   * Maps to `clinical:interpretationSourceCode` in Turtle serialization.
+   */
+  interpretationSourceCode?: string;
 }

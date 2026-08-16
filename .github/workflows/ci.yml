@@ -52,6 +52,14 @@ jobs:
         working-directory: sdk-typescript
         run: npm run build
 
+      # vitest transpiles without typechecking and tsconfig.json excludes test
+      # files, so a type-level assertion in a test is invisible to both `npm
+      # test` and `npm run build`. This step is what makes the @ts-expect-error
+      # assertions on narrowed public types real.
+      - name: Typecheck
+        working-directory: sdk-typescript
+        run: npm run typecheck
+
       - name: Test
         working-directory: sdk-typescript
         run: npm test
