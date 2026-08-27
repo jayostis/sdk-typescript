@@ -22,6 +22,10 @@
   // unused local). Pulling them in here would mean this config could never go
   // green, so the guard it provides would be switched off on day one. Widening
   // the include as those are cleaned up is the intended direction.
-  "include": ["src/**/*.ts", "tests/vocab-2026-08-train.test.ts"],
+  "include": [
+    "src/**/*.ts",
+    "tests/vocab-2026-08-train.test.ts",
+    "tests/data-absent-reason.test.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
