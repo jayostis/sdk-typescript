@@ -24,7 +24,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { serialize } from '../src/serializer/turtle-serializer.js';
-import { cascade, inputOf, parseTurtle, shaclCheck } from './support/rdf.js';
+import { cascade, inputOf, parseTurtle, sh, shaclCheck } from './support/rdf.js';
 
 describe('core v3.6: cascade:dataAbsentReason is written onto the record', () => {
   describe('a lab result with no value, stating a ratified reason', () => {
@@ -58,18 +58,28 @@ describe('core v3.6: cascade:dataAbsentReason is judged by the ratified shapes',
   it('accepts a record that carries no value and states a ratified reason', async () => {
     // The record the property exists for. cascade:DataAbsentReasonShape targets
     // subjects OF the property, so absence is never itself a finding.
-    const verdict = await shaclCheck(inputOf('absent-001'));
+    const report = await shaclCheck(inputOf('absent-001'));
 
-    expect(verdict.violations).toEqual([]);
-    expect(verdict.conforms).toBe(true);
+    expect(report.results).toEqual([]);
+    expect(report.conforms).toBe(true);
   });
 
   it('rejects a code outside the 15-member data-absent-reason value set', async () => {
-    // Produced by sh:in on cascade:DataAbsentReasonShape, declared once in
-    // spec, with no validation code in this repository.
-    const verdict = await shaclCheck(inputOf('absent-002'));
+    const report = await shaclCheck(inputOf('absent-002'));
+    expect(report.conforms).toBe(false);
+    expect(report.results).toHaveLength(1);
 
-    expect(verdict.conforms).toBe(false);
-    expect(verdict.violations.join(' ')).toContain('dataAbsentReason');
+    // Assert the RULE, not the message. sh:in on cascade:DataAbsentReasonShape
+    // is what fired, declared once in spec with no validation code here. The
+    // message is prose spec owns: rewording it must not break this test, and a
+    // different constraint that happened to mention the property must not
+    // satisfy it.
+    // Compared as IRIs rather than as terms: the report's terms and the
+    // namespace's are different implementations of the same RDF/JS interface,
+    // so toEqual on them compares constructors and fails on identical IRIs.
+    const [violation] = report.results;
+    expect(violation?.sourceConstraintComponent.value).toBe(sh.InConstraintComponent?.value);
+    expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
+    expect(violation?.value.value).toBe('UNK');
   });
 });

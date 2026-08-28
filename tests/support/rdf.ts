@@ -29,6 +29,7 @@ import { Parser } from 'n3';
 import env from '@zazuko/env';
 import SHACLValidator from 'rdf-validate-shacl';
 import type { AnyPointer } from 'clownface';
+import type { ValidationReport } from 'rdf-validate-shacl/src/validation-report.js';
 
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
@@ -165,28 +166,30 @@ function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeR
   );
 }
 
-export interface ShaclVerdict {
-  conforms: boolean;
-  /** `path: message` per result, so a failure names the constraint. */
-  violations: string[];
-}
+/**
+ * The SHACL vocabulary, for naming the constraint a result came from.
+ *
+ * `sh:InConstraintComponent`, `sh:MaxCountConstraintComponent` and the rest are
+ * the RULE's identity. Assert on those rather than on `message`, which is prose
+ * owned by `spec`: rewording a `sh:message` would break a text assertion
+ * without any behaviour changing, and a DIFFERENT constraint whose message
+ * happens to mention the property would satisfy one.
+ */
+export const sh = env.namespace('http://www.w3.org/ns/shacl#');
 
 /**
  * Serialize a record and validate the resulting graph against the real shapes.
  *
+ * Returns the library's own ValidationReport unchanged. Each result carries
+ * path, value, focusNode, severity, sourceConstraintComponent and message as
+ * RDF terms — a wrapper that flattened those into strings would throw away the
+ * constraint identity, which is the thing worth asserting on.
+ *
  * Throws — rather than returning a verdict — when no vendored shape covers the
  * record's vocabulary. See `assertCovered`.
  */
-export async function shaclCheck(record: CascadeRecord): Promise<ShaclVerdict> {
+export async function shaclCheck(record: CascadeRecord): Promise<ValidationReport> {
   const dataset = env.dataset(new Parser().parse(serialize(record)));
   assertCovered(dataset, record);
-
-  const report = await shacl.validate(dataset);
-  return {
-    conforms: report.conforms,
-    violations: report.results.map((r) => {
-      const path = 'value' in (r.path ?? {}) ? String((r.path as { value: string }).value) : '?';
-      return `${path}: ${r.message.map((m) => m.value).join(' ') || r.severity?.value || 'violation'}`;
-    }),
-  };
+  return shacl.validate(dataset);
 }
