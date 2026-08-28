@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { inputOf, shaclCheck } from './support/rdf.js';
+import { loadCascadeRecordFixture, shaclCheck } from './support/rdf.js';
 
 describe('shaclCheck: one verdict per call', () => {
   it('does not cross verdicts between concurrent callers', async () => {
@@ -18,8 +18,8 @@ describe('shaclCheck: one verdict per call', () => {
     // BOTH verdicts describe the second record. absent-001 conforms and
     // absent-002 does not, so a crossed pair is visible as two equal verdicts.
     const [ratified, unmapped] = await Promise.all([
-      shaclCheck(inputOf('absent-001')),
-      shaclCheck(inputOf('absent-002')),
+      shaclCheck(loadCascadeRecordFixture('absent-001').input),
+      shaclCheck(loadCascadeRecordFixture('absent-002').input),
     ]);
 
     expect(ratified.conforms).toBe(true);
@@ -33,10 +33,10 @@ describe('shaclCheck: a vocabulary with no vendored shapes is not a pass', () =>
     // clinical:Medication validated against a graph holding no clinical shape
     // and came back { conforms: true, violations: [] } — indistinguishable from
     // a record that genuinely satisfies every clinical constraint.
-    await expect(shaclCheck(inputOf('med-001'))).rejects.toThrow(/clinical/);
+    await expect(shaclCheck(loadCascadeRecordFixture('med-001').input)).rejects.toThrow(/clinical/);
   });
 
   it('refuses a coverage: record for the same reason', async () => {
-    await expect(shaclCheck(inputOf('claim-001'))).rejects.toThrow(/coverage/);
+    await expect(shaclCheck(loadCascadeRecordFixture('claim-001').input)).rejects.toThrow(/coverage/);
   });
 });

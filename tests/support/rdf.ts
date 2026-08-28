@@ -33,7 +33,7 @@ import type { ValidationReport } from 'rdf-validate-shacl/src/validation-report.
 
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
-import type { CascadeRecord } from '../../src/models/common.js';
+import type { CascadeEntity, CascadeRecord } from '../../src/models/common.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = resolve(here, '../../../conformance/fixtures');
@@ -55,18 +55,50 @@ export const cascade = env.namespace(NAMESPACES.cascade);
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
+/**
+ * A conformance fixture, whatever kind of subject it carries.
+ *
+ * `input` is a `CascadeEntity` — id and type — because not every fixture is a
+ * health record. `pod-001` is an `ldp:BasicContainer`: a directory listing with
+ * no `dataProvenance`, because nobody "reported" a directory.
+ */
 export interface Fixture {
-  input: Record<string, unknown>;
+  /** The fixture's own one-line account of what it is. */
+  description: string;
+  input: CascadeEntity;
   expectedOutput: { turtle: string };
+  /** The verdict the corpus declares this input should earn. */
+  shouldAccept: boolean;
+}
+
+/** A fixture whose input is a health record: `dataProvenance` and `schemaVersion` present. */
+export interface CascadeRecordFixture extends Fixture {
+  input: CascadeRecord;
 }
 
 export function loadFixture(id: string): Fixture {
   return JSON.parse(readFileSync(resolve(fixturesDir, `${id}.json`), 'utf-8')) as Fixture;
 }
 
-/** The fixture's `input`, typed for the SDK's entry points. */
-export function inputOf(id: string): CascadeRecord {
-  return loadFixture(id).input as unknown as CascadeRecord;
+/**
+ * Load a fixture and verify its input really is a health record.
+ *
+ * The narrowing is CHECKED, not asserted. A cast would let
+ * `loadCascadeRecordFixture('pod-001')` hand back a directory listing dressed
+ * as a record, and the mistake would surface somewhere unrelated; this fails at
+ * the point someone picked the wrong loader, and says which one to use instead.
+ */
+export function loadCascadeRecordFixture(id: string): CascadeRecordFixture {
+  const fixture = loadFixture(id);
+  const { dataProvenance, schemaVersion } = fixture.input;
+
+  if (!dataProvenance || !schemaVersion) {
+    throw new Error(
+      `${id} is not a record fixture — dataProvenance=${dataProvenance}, `
+      + `schemaVersion=${schemaVersion}. Use loadFixture() for pod and container fixtures.`,
+    );
+  }
+  return fixture as CascadeRecordFixture;
 }
 
 // ─── Reading a serialized record ────────────────────────────────────────────
@@ -79,7 +111,7 @@ export function inputOf(id: string): CascadeRecord {
  * serialized and parsed in one step would hide it.
  *
  * @example
- * const record = inputOf('absent-003');
+ * const record = loadCascadeRecordFixture('absent-003').input;
  * const node = parseTurtle(serialize(record)).namedNode(record.id);
  * expect(node.out(cascade.dataAbsentReason).values)
  *   .toEqual(['not-asked', 'asked-unknown']);
@@ -150,7 +182,7 @@ const namespaceOf = (iri: string): string =>
  * every clinical constraint. A thrown error is the only outcome a test cannot
  * mistake for a pass.
  */
-function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeRecord): void {
+function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeEntity): void {
   const types = env.clownface({ dataset }).namedNode(record.id).out(rdf.type).values;
   const uncovered = types.filter((iri) => !COVERED_NAMESPACES.has(namespaceOf(iri)));
   if (uncovered.length === 0) return;
