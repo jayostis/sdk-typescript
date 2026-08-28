@@ -38,7 +38,9 @@ Install the recommended **Vitest** extension — VS Code offers it on first open
 
 A breakpoint is not tied to the test you launch from. Set one anywhere in `src/`, debug the test that exercises it, and execution stops there.
 
-Two things to know if the debugger misbehaves, both learned the hard way:
+Verified against `vitest.explorer` v1.50.8: a breakpoint in `src/serializer/turtle-serializer.ts` binds and is hit when debugging a single `it`, and `F11` steps into the function under the cursor rather than over it. Neither of the settings below was needed.
+
+They are recorded because both were real against a hand-rolled debug configuration, and are the first two things to try if you run vitest under one:
 
 - **Breakpoints never bind.** Vitest runs each file in a worker thread by default and the debugger can fail to attach. Running single-threaded fixes it — `--poolOptions.threads.singleThread`, or `--pool=forks --poolOptions.forks.singleFork` for a plainer target.
 - **"Step into" silently steps over.** That is `smartStep`, which skips code that does not map cleanly to source — which, against vitest's on-the-fly TypeScript transpile, is most of it. Turn it off.
