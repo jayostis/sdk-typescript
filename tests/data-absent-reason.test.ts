@@ -2,10 +2,14 @@
  * core v3.6 — `cascade:dataAbsentReason`: why a record's primary VALUE is
  * absent, bound to the 15 codes of the HL7 data-absent-reason code system.
  *
- * One describe per fixture, titled with the fixture's own description. Where
- * the fixture is serialized correctly today, it is asked two things: what this
- * SDK WRITES, and what verdict that output EARNS from spec's shapes. The second
- * is a three-way agreement — SDK, shapes, and the fixture's declared
+ * One describe per fixture. Its title spells the fixture's description out as a
+ * literal, so the file and the test output both read as the corpus does without
+ * anyone loading a fixture to find out; the first `it` is what keeps that
+ * literal honest, comparing it against what the fixture actually says.
+ *
+ * Where the fixture is serialized correctly today, it is asked two things: what
+ * this SDK WRITES, and what verdict that output EARNS from spec's shapes. The
+ * second is a three-way agreement — SDK, shapes, and the fixture's declared
  * `shouldAccept` — so a failure says they disagree, not which one is wrong.
  *
  * Claims that hold only WHILE a defect exists are not here; they belong on that
@@ -27,13 +31,12 @@ const absent001 = loadCascadeRecordFixture('absent-001');
 const absent002 = loadCascadeRecordFixture('absent-002');
 const absent003 = loadCascadeRecordFixture('absent-003');
 
-describe(`absent-001 — ${absent001.description}`, () => {
-  // Restating the description asserts nothing and breaks on an upstream
-  // reword. Kept for legibility, cheap to delete.
-  it('is the fixture this file thinks it is', () => {
-    expect(absent001.description).toBe(
-      'Happy path: lab result with no value, carrying a ratified reason for the absence',
-    );
+describe('absent-001 — Happy path: lab result with no value, carrying a ratified reason for the absence', () => {
+  // `task.suite` is the enclosing describe. Asserting the title against the
+  // fixture rather than repeating the string here keeps one copy of it, in the
+  // place a reader sees first, and still fails if the corpus is reworded.
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(absent001.description);
     expect(absent001.shouldAccept).toBe(true);
   });
 
@@ -52,11 +55,9 @@ describe(`absent-001 — ${absent001.description}`, () => {
   });
 });
 
-describe(`absent-002 — ${absent002.description}`, () => {
-  it('is the fixture this file thinks it is', () => {
-    expect(absent002.description).toBe(
-      'Negative: raw HL7 v3 NullFlavor code written straight into cascade:dataAbsentReason',
-    );
+describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight into cascade:dataAbsentReason', () => {
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(absent002.description);
     expect(absent002.shouldAccept).toBe(false);
   });
 
@@ -83,7 +84,7 @@ describe(`absent-002 — ${absent002.description}`, () => {
   });
 });
 
-describe(`absent-003 — ${absent003.description}`, () => {
+describe('absent-003 — Negative: two cascade:dataAbsentReason values on one record', () => {
   // Identity only. BOTH claims this fixture would otherwise carry are red at
   // HEAD, and for ONE cause — #2: `dataAbsentReason` here is an array, which
   // `emitField` matches under no branch, so serialize() writes no triple at all.
@@ -98,10 +99,8 @@ describe(`absent-003 — ${absent003.description}`, () => {
   // branch, committed red. That is this file's own rule at the top, applied to
   // the second half as well as the first — a suite that is red on a defect it
   // has declared out of scope cannot tell you anything new when it goes red.
-  it('is the fixture this file thinks it is', () => {
-    expect(absent003.description).toBe(
-      'Negative: two cascade:dataAbsentReason values on one record',
-    );
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(absent003.description);
     expect(absent003.shouldAccept).toBe(false);
   });
 });
