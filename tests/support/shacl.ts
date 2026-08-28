@@ -1,97 +1,25 @@
 /**
- * Graph and SHACL helpers shared by the fixture-verification suites.
+ * Validating a serialized record against the shapes `spec` publishes.
  *
- * A plain module, not a `.test.ts`: vitest collects tests per file, so importing
- * a helper out of a test file drags that file's tests into the importer.
- * Measured — a file declaring one test ran five.
+ * Importing this indexes 125 KB of vendored Turtle into a SHACLValidator at
+ * module scope — ~350 ms, on top of `graph.ts`'s ~500 ms for the RDF libraries.
+ * That is why fixture loading lives in `fixtures.ts`, which imports in 27 ms: a
+ * suite that only reads fixtures should not pay either bill.
  */
 
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { Parser } from 'n3';
 import env from '@zazuko/env';
 import SHACLValidator from 'rdf-validate-shacl';
-import type { AnyPointer } from 'clownface';
 import type { ValidationReport } from 'rdf-validate-shacl/src/validation-report.js';
 
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
 import type { CascadeEntity, CascadeRecord } from '../../src/models/common.js';
+import { parseDataset } from './graph.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = resolve(here, '../../../conformance/fixtures');
-const shapesDir = resolve(here, '../shapes');
-
-// ─── Vocabulary ─────────────────────────────────────────────────────────────
-
-/**
- * `cascade.dataAbsentReason` rather than a CURIE string or a full IRI.
- *
- * The local name stays hand-written at each call site rather than looked up from
- * `PROPERTY_PREDICATES`: deriving it would make the test agree with the code by
- * construction, and a wrong predicate would become invisible.
- */
-export const cascade = env.namespace(NAMESPACES.cascade);
-
-// ─── Fixtures ───────────────────────────────────────────────────────────────
-
-/**
- * A conformance fixture, whatever kind of subject it carries.
- *
- * `input` is a `CascadeEntity` because not every fixture is a health record —
- * `pod-001` is an `ldp:BasicContainer` with no `dataProvenance`, a directory
- * listing rather than an observation.
- */
-export interface Fixture {
-  description: string;
-  input: CascadeEntity;
-  expectedOutput: { turtle: string };
-  /** The verdict the corpus declares this input should earn. */
-  shouldAccept: boolean;
-}
-
-/** A fixture whose input is a health record: `dataProvenance` and `schemaVersion` present. */
-export interface CascadeRecordFixture extends Fixture {
-  input: CascadeRecord;
-}
-
-export function loadFixture(id: string): Fixture {
-  return JSON.parse(readFileSync(resolve(fixturesDir, `${id}.json`), 'utf-8')) as Fixture;
-}
-
-/** Load a fixture, checking rather than asserting that its input is a health record. */
-export function loadCascadeRecordFixture(id: string): CascadeRecordFixture {
-  const fixture = loadFixture(id);
-  const { dataProvenance, schemaVersion } = fixture.input;
-
-  if (!dataProvenance || !schemaVersion) {
-    throw new Error(
-      `${id} is not a record fixture — dataProvenance=${dataProvenance}, `
-      + `schemaVersion=${schemaVersion}. Use loadFixture() for pod and container fixtures.`,
-    );
-  }
-  return fixture as CascadeRecordFixture;
-}
-
-// ─── Reading a serialized record ────────────────────────────────────────────
-
-/**
- * Turtle text as a traversable graph.
- *
- * Takes TEXT, not a record, so the `serialize()` call stays in the test where a
- * reader can see what is under test. A helper that did both would hide it.
- */
-export function parseTurtle(turtle: string): AnyPointer {
-  return env.clownface({ dataset: parseDataset(turtle) });
-}
-
-/** Turtle text as a dataset — what `assertCovered` and the validator take. */
-export function parseDataset(turtle: string): ReturnType<typeof env.dataset> {
-  return env.dataset(new Parser().parse(turtle));
-}
-
-// ─── SHACL ──────────────────────────────────────────────────────────────────
+const shapesDir = resolve(dirname(fileURLToPath(import.meta.url)), '../shapes');
 
 /** `prefix` is the key in `NAMESPACES` whose namespace this file's shapes constrain. */
 interface VendoredShape {

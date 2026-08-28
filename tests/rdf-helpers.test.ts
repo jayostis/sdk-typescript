@@ -8,7 +8,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { NAMESPACES } from '../src/vocabularies/namespaces.js';
-import { assertCovered, loadCascadeRecordFixture, parseDataset, shaclCheck } from './support/rdf.js';
+import { loadCascadeRecordFixture } from './support/fixtures.js';
+import { parseDataset } from './support/graph.js';
+import { assertCovered, shaclCheck } from './support/shacl.js';
 
 describe('shaclCheck never certifies what it did not check', () => {
   it('refuses a record whose vocabulary we hold no shapes for', async () => {

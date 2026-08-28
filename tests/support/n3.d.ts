@@ -9,7 +9,7 @@
  * n3 v2 added to `Parser.parse`, dropped exports) typechecked green and could
  * still misbehave at runtime.
  *
- * The surface below is exactly what `tests/support/rdf.ts` calls, read off
+ * The surface below is exactly what `tests/support/graph.ts` calls, read off
  * `n3@2`'s own `lib/N3Parser.js`. Using anything not declared here is a compile
  * error, which is the point: it forces whoever adds the call to check the real
  * v2 signature rather than inherit a v1 guess. Delete this file the day

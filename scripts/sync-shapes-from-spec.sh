@@ -5,7 +5,7 @@
 # subset, not a mirror.
 #
 # WHAT TO EDIT TO ADD ONE. tests/shapes/vendored.json, and nothing else. This
-# script, scripts/check-shapes-drift.mjs and tests/support/rdf.ts all read that
+# script, scripts/check-shapes-drift.mjs and tests/support/shacl.ts all read that
 # one file, so the copy, the drift check and the SHACL coverage guard cannot
 # disagree by construction. They used to hold four hand-maintained lists: adding
 # a vocabulary here but not to the drift check reported `ORPHAN ... spec

@@ -10,7 +10,7 @@ read by tests only. Never imported by `src/`, never published.
 
 Synced from `spec@678ae0d`.
 
-A deliberate subset, not a mirror. `tests/support/rdf.ts` refuses to return a
+A deliberate subset, not a mirror. `tests/support/shacl.ts` refuses to return a
 SHACL verdict for a graph these shapes are silent on — an uncovered type, or a
 predicate from a vocabulary not vendored here — rather than reporting the
 vacuous `conforms: true` a graph with no matching shape produces. Adding a
@@ -36,7 +36,7 @@ re-run the sync script. Nothing else.**
 |---|---|
 | `scripts/sync-shapes-from-spec.sh` | which files to copy, and from where |
 | `scripts/check-shapes-drift.mjs` | which files must be present, and their upstream path |
-| `tests/support/rdf.ts` | which files to load, and which namespaces a verdict may cover |
+|  `tests/support/shacl.ts` | which files to load, and which namespaces a verdict may cover |
 
 These were four hand-maintained lists, and nothing enforced agreement between
 them. Both directions failed quietly: a file synced but not registered with the

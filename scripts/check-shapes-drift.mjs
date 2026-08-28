@@ -35,7 +35,7 @@ const die = (msg) => {
  * Vendored file -> the `ontologies/` subpath spec publishes it at.
  *
  * Read from tests/shapes/vendored.json rather than written out here.
- * `scripts/sync-shapes-from-spec.sh` and `tests/support/rdf.ts` read the same
+ * `scripts/sync-shapes-from-spec.sh` and `tests/support/shacl.ts` read the same
  * file, so the copy, this check and the SHACL coverage guard cannot disagree
  * about which vocabularies are vendored. When those were separate
  * hand-maintained lists, a vocabulary added to the sync script alone was

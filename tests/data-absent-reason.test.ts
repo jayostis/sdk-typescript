@@ -31,7 +31,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { serialize } from '../src/serializer/turtle-serializer.js';
-import { cascade, loadCascadeRecordFixture, parseTurtle, sh, shaclCheck } from './support/rdf.js';
+import { loadCascadeRecordFixture } from './support/fixtures.js';
+import { cascade, parseTurtle } from './support/graph.js';
+import { sh, shaclCheck } from './support/shacl.js';
 
 const absent001 = loadCascadeRecordFixture('absent-001');
 const absent002 = loadCascadeRecordFixture('absent-002');
