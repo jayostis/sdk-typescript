@@ -13,7 +13,7 @@
  *   1  drift found
  *   2  cannot check
  *
- * Usage: node scripts/check-shapes-drift.mjs [--spec <dir>]
+ * Usage: node scripts/check-shapes-drift.mjs [--spec <dir> | --spec=<dir>]
  *        CASCADE_SPEC_DIR=<dir> node scripts/check-shapes-drift.mjs
  */
 
@@ -36,15 +36,25 @@ const die = (msg) => {
 };
 
 const argv = process.argv.slice(2);
-const flag = argv.indexOf('--spec');
+
+// Both spellings of the flag, and nothing else accepted. An indexOf('--spec')
+// alone does not match `--spec=<dir>`, and an unmatched argument is silently
+// dropped: the run then falls back to CASCADE_SPEC_DIR or the sibling and
+// answers OK/DRIFTED about a tree the caller never named. A typo is the same
+// hazard, so an unrecognized argument dies rather than being ignored.
+let specArg;
+for (let i = 0; i < argv.length; i++) {
+  const arg = argv[i];
+  if (arg === '--spec') specArg = argv[++i] || die('--spec given with no directory');
+  else if (arg.startsWith('--spec=')) specArg = arg.slice('--spec='.length) || die('--spec= given with no directory');
+  else die(`unrecognized argument: ${arg}. Usage: node scripts/check-shapes-drift.mjs [--spec <dir> | --spec=<dir>]`);
+}
+
 // `||`, not `??`: `??` only falls back on null/undefined, so an unset CI input
 // arrives as "" and survives to resolve(''), which returns the cwd. That is a
 // directory, so the sibling fallback is skipped and the run dies naming the
 // wrong tree instead of saying there is no spec checkout. Same for `--spec ''`.
-const specRoot = resolve(
-  flag !== -1 ? argv[flag + 1] || die('--spec given with no directory')
-    : process.env.CASCADE_SPEC_DIR || join(REPO, '..', 'spec'),
-);
+const specRoot = resolve(specArg || process.env.CASCADE_SPEC_DIR || join(REPO, '..', 'spec'));
 
 // statSync, not Dirent: a spec checkout reached through a symlink answers
 // isDirectory() false on a Dirent, and a walk that skips it finds nothing.
@@ -75,14 +85,38 @@ for (const name of vendored) {
     continue;
   }
   const upstream = join(specRoot, 'ontologies', sub, name);
-  let same;
+  const local = join(VENDORED_DIR, name);
+
+  // A missing upstream file is DRIFT, not an infrastructure fault. Spec deleting
+  // or renaming a shapes file is the loudest drift there is — the vendored copy
+  // now mirrors nothing — and exit 1 is what carries the re-sync hint. Dying
+  // with 2 here would route the one case the operator can fix to "page a human".
+  // Any other errno (EACCES, EISDIR) genuinely is "cannot check".
+  let upstreamBytes;
   try {
-    same = readFileSync(upstream).equals(readFileSync(join(VENDORED_DIR, name)));
+    upstreamBytes = readFileSync(upstream);
   } catch (e) {
-    die(`cannot read ${upstream}: ${e.message}`);
+    if (e.code !== 'ENOENT') die(`cannot read ${upstream}: ${e.message}`);
+    // Counted as compared: a verdict was reached. Skipping the increment would
+    // trip the shortfall check below and turn this back into exit 2.
+    compared++;
+    problems.push(`DRIFTED  tests/shapes/${name} — spec no longer publishes ontologies/${sub}/${name}`);
+    continue;
   }
+
+  // The vendored side keeps exit 2: readdirSync just listed this file, so a
+  // failure here is the filesystem misbehaving, not anything spec did.
+  let localBytes;
+  try {
+    localBytes = readFileSync(local);
+  } catch (e) {
+    die(`cannot read ${local}: ${e.message}`);
+  }
+
   compared++;
-  if (!same) problems.push(`DRIFTED  tests/shapes/${name} — differs from ontologies/${sub}/${name}`);
+  if (!upstreamBytes.equals(localBytes)) {
+    problems.push(`DRIFTED  tests/shapes/${name} — differs from ontologies/${sub}/${name}`);
+  }
 }
 
 // A run that compared nothing must not report success. Print the diagnostics

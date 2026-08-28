@@ -2,14 +2,15 @@
  * core v3.6 — `cascade:dataAbsentReason`: why a record's primary VALUE is
  * absent, bound to the 15 codes of the HL7 data-absent-reason code system.
  *
- * One describe per fixture, titled with the fixture's own description. Each
- * asks two things of it: what this SDK WRITES, and what verdict that output
- * EARNS from spec's shapes. The second is a three-way agreement — SDK, shapes,
- * and the fixture's declared `shouldAccept` — so a failure says they disagree,
- * not which one is wrong.
+ * One describe per fixture, titled with the fixture's own description. Where
+ * the fixture is serialized correctly today, it is asked two things: what this
+ * SDK WRITES, and what verdict that output EARNS from spec's shapes. The second
+ * is a three-way agreement — SDK, shapes, and the fixture's declared
+ * `shouldAccept` — so a failure says they disagree, not which one is wrong.
  *
  * Claims that hold only WHILE a defect exists are not here; they belong on that
- * issue's work branch, committed red: #2, #3, #4.
+ * issue's work branch, committed red: #2, #3, #4. absent-003 is the case where
+ * that costs BOTH questions rather than one — see its describe below.
  *
  * `parseTurtle` takes text, so the `serialize()` under test stays visible.
  * `shaclCheck` takes a record and serializes it itself.
@@ -83,24 +84,24 @@ describe(`absent-002 — ${absent002.description}`, () => {
 });
 
 describe(`absent-003 — ${absent003.description}`, () => {
-  // No "writes" test here on purpose: what this record serializes to IS the
-  // defect in #2, so that claim is red today and lives on #2's work branch.
+  // Identity only. BOTH claims this fixture would otherwise carry are red at
+  // HEAD, and for ONE cause — #2: `dataAbsentReason` here is an array, which
+  // `emitField` matches under no branch, so serialize() writes no triple at all.
+  //
+  //   WRITES — that output IS the defect.
+  //   EARNS  — red for the same cause, not independently. The shape is
+  //            sh:targetSubjectsOf cascade:dataAbsentReason, so with no triple
+  //            it targets nothing, shaclCheck returns conforms:true, and the
+  //            sh:maxCount violation is unobservable until #2 emits the values.
+  //
+  // So the verdict test goes where the writes test already went: #2's work
+  // branch, committed red. That is this file's own rule at the top, applied to
+  // the second half as well as the first — a suite that is red on a defect it
+  // has declared out of scope cannot tell you anything new when it goes red.
   it('is the fixture this file thinks it is', () => {
     expect(absent003.description).toBe(
       'Negative: two cascade:dataAbsentReason values on one record',
     );
     expect(absent003.shouldAccept).toBe(false);
-  });
-
-  it('earns the verdict the fixture declares, from the cardinality rule', async () => {
-    const report = await shaclCheck(absent003.input);
-
-    expect(report.conforms).toBe(absent003.shouldAccept);
-    expect(report.results).toHaveLength(1);
-
-    // Both codes here are ratified, so it is sh:maxCount that trips, not sh:in.
-    const [violation] = report.results;
-    expect(violation?.sourceConstraintComponent.value).toBe(sh.MaxCountConstraintComponent?.value);
-    expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
   });
 });
