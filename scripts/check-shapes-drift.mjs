@@ -2,6 +2,8 @@
 /**
  * Fail when `tests/shapes/` no longer matches `spec`.
  *
+ * Content is compared with line endings normalized — see `normalize` below.
+ *
  * The vendored copies exist so SHACL-backed tests run without a `spec` sibling.
  * A copy that goes stale silently is worse than no copy: a suite asserting last
  * month's constraints looks like it is working.
@@ -75,6 +77,23 @@ try {
   die(`cannot read ${VENDORED_DIR}: ${e.message}`);
 }
 
+/**
+ * Compare content, not line endings.
+ *
+ * `spec` is not line-ending normalized: at 678ae0d it stores health.shapes.ttl
+ * with CRLF and core.shapes.ttl with LF, and has no .gitattributes. Copying on
+ * Windows and committing under core.autocrlf=true then stores LF here, so a
+ * byte comparison answers differently depending on the platform it runs on —
+ * OK on Windows, where both working trees are CRLF, and DRIFTED on Linux, where
+ * ours is LF and spec's is not. Observed: 1756 CR bytes, the whole of the
+ * difference, on a file whose constraints were identical.
+ *
+ * A line ending is not a constraint. This check exists to catch a vendored copy
+ * asserting last month's rules, and normalizing costs it nothing it was ever
+ * meant to detect.
+ */
+const normalize = (buf) => buf.toString('utf8').replace(/\r\n/g, '\n');
+
 const problems = [];
 let compared = 0;
 
@@ -114,7 +133,7 @@ for (const name of vendored) {
   }
 
   compared++;
-  if (!upstreamBytes.equals(localBytes)) {
+  if (normalize(upstreamBytes) !== normalize(localBytes)) {
     problems.push(`DRIFTED  tests/shapes/${name} — differs from ontologies/${sub}/${name}`);
   }
 }
@@ -136,4 +155,4 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log(`OK: ${compared} vendored file(s) byte-identical to spec.`);
+console.log(`OK: ${compared} vendored file(s) match spec (line endings normalized).`);
