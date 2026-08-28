@@ -3,18 +3,26 @@
 Copies of the shape files from [`spec`](https://github.com/the-cascade-protocol/spec),
 read by tests only. Never imported by `src/`, never published.
 
-| file | source | constrains |
-|---|---|---|
-| `core.shapes.ttl` | `spec/ontologies/core/v1/core.shapes.ttl` | `cascade:` |
-| `health.shapes.ttl` | `spec/ontologies/health/v1/health.shapes.ttl` | `health:` |
+| file | source |
+|---|---|
+| `core.shapes.ttl` | `spec/ontologies/core/v1/core.shapes.ttl` |
+| `health.shapes.ttl` | `spec/ontologies/health/v1/health.shapes.ttl` |
 
 Synced from `spec@678ae0d`.
 
 A deliberate subset, not a mirror. `tests/support/shacl.ts` refuses to return a
-SHACL verdict for a graph these shapes are silent on — an uncovered type, or a
-predicate from a vocabulary not vendored here — rather than reporting the
-vacuous `conforms: true` a graph with no matching shape produces. Adding a
-vocabulary here is what makes it checkable.
+SHACL verdict for a graph these shapes are silent on — a type no `sh:targetClass`
+selects, or a predicate no `sh:path` declares — rather than reporting the vacuous
+`conforms: true` a graph with no matching shape produces. Adding a vocabulary
+here is what makes it checkable.
+
+**The unit of coverage is a declaration, not a vocabulary.** `shacl.ts` reads the
+`sh:targetClass` and `sh:path` IRIs out of the loaded graph and asks whether the
+record's types and predicates are among them. A file constrains neither less nor
+more than the vocabulary it is named for, and both directions occur here:
+`core.shapes.ttl` declares `sh:path dct:title` — `dcterms:` has no shapes file in
+spec and can never be vendored — while `health:notes` sits in a vendored
+vocabulary and no shape declares a path for it.
 
 ## `vendored.json` — the one list
 
@@ -22,12 +30,14 @@ vocabulary here is what makes it checkable.
 the set is written down:
 
 ```json
-{ "core.shapes.ttl": { "specPath": "core/v1", "prefix": "cascade" } }
+{ "core.shapes.ttl": { "specPath": "core/v1" } }
 ```
 
-`specPath` is the `ontologies/` subdirectory spec publishes the file at.
-`prefix` is the key in the SDK's own `NAMESPACES` for the namespace those
-shapes constrain — core publishes its terms under `cascade:`.
+`specPath` is the `ontologies/` subdirectory spec publishes the file at, and is
+the only field. There used to be a `prefix` naming the namespace the file was
+taken to constrain, and coverage was decided from it; a namespace is the wrong
+grain for that question, and deriving it from the shapes graph instead removed
+the field as a thing that can be wrong.
 
 Three consumers read it, so **to vendor a vocabulary, edit this file and
 re-run the sync script. Nothing else.**
@@ -36,7 +46,7 @@ re-run the sync script. Nothing else.**
 |---|---|
 | `scripts/sync-shapes-from-spec.sh` | which files to copy, and from where |
 | `scripts/check-shapes-drift.mjs` | which files must be present, and their upstream path |
-|  `tests/support/shacl.ts` | which files to load, and which namespaces a verdict may cover |
+|  `tests/support/shacl.ts` | which files to load |
 
 These were four hand-maintained lists, and nothing enforced agreement between
 them. Both directions failed quietly: a file synced but not registered with the
@@ -73,8 +83,12 @@ drift check.
 and `[[`, which are errors under dash.
 
 The drift check runs in CI as the `shapes-drift` job, which is the only place
-`spec` is checked out. Exit 1 there means these copies are stale and need
-re-syncing; exit 2 means the check could not run at all, which is an
-infrastructure fault rather than drift. A constraint that changed upstream may
-turn a passing assertion red after a re-sync — that is the check working, not a
-regression.
+`spec` is checked out. Exit 2 means the check could not run at all, which is an
+infrastructure fault rather than drift. Exit 1 is a copy that no longer matches
+spec, and the run prints the remedy for each problem it found rather than one
+shared line — **an orphan is not fixed by re-syncing.** The sync script only
+copies the files the manifest lists and has no delete step, so a file left behind
+after a vocabulary was dropped from `vendored.json` survives a re-sync and comes
+back red next run; `git rm` it, or add it to the manifest if it belongs there. A
+constraint that changed upstream may turn a passing assertion red after a
+re-sync — that is the check working, not a regression.

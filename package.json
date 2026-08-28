@@ -44,6 +44,7 @@
     "fhir"
   ],
   "devDependencies": {
+    "@rdfjs/types": "^2.0.1",
     "@types/node": "^25.5.0",
     "@zazuko/env": "^3.0.1",
     "clownface": "^2.0.3",

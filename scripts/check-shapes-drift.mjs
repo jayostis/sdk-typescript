@@ -122,13 +122,43 @@ try {
  */
 const normalize = (buf) => buf.toString('utf8').replace(/\r\n/g, '\n');
 
+// `bash`, not `sh`: the sync script is #!/usr/bin/env bash and uses BASH_SOURCE
+// and [[ ]], both of which are a Bad substitution / syntax error under dash,
+// which is what /bin/sh is on Debian, Ubuntu and ubuntu-latest runners.
+const RESYNC = 'Re-sync:  bash scripts/sync-shapes-from-spec.sh';
+
+// An orphan needs its OWN remedy. The sync script only ever COPIES the files the
+// manifest lists — it has no delete step — so re-syncing leaves an orphan exactly
+// where it was and reports success, and the next run is identically red. The two
+// ways to get one have opposite answers, and only the reader knows which applies:
+// a file left behind after a vocabulary was dropped from vendored.json wants
+// `git rm`, and one copied in without being registered wants the manifest entry.
+const DE_ORPHAN = 'Orphans:  git rm the file, or add it to tests/shapes/vendored.json — '
+  + 'the sync script only copies, so it will never remove one.';
+
+/**
+ * Every problem line, then each remedy that applies, once.
+ *
+ * `problems` holds entries rather than strings because a DRIFTED and an ORPHAN
+ * no longer share one answer: printing RESYNC under an orphan sends the reader
+ * to a command that cannot fix it.
+ */
+const report = (entries) => {
+  console.error(entries.map((e) => e.line).join('\n'));
+  console.error('');
+  for (const remedy of [...new Set(entries.map((e) => e.remedy))]) console.error(remedy);
+};
+
 const problems = [];
 let compared = 0;
 
 for (const name of vendored) {
   const sub = UPSTREAM[name];
   if (!sub) {
-    problems.push(`ORPHAN   tests/shapes/${name} — vendored.json lists no such shape`);
+    problems.push({
+      line: `ORPHAN   tests/shapes/${name} — vendored.json lists no such shape`,
+      remedy: DE_ORPHAN,
+    });
     continue;
   }
   const upstream = join(specRoot, 'ontologies', sub, name);
@@ -147,7 +177,10 @@ for (const name of vendored) {
     // Counted as compared: a verdict was reached. Skipping the increment would
     // trip the shortfall check below and turn this back into exit 2.
     compared++;
-    problems.push(`DRIFTED  tests/shapes/${name} — spec no longer publishes ontologies/${sub}/${name}`);
+    problems.push({
+      line: `DRIFTED  tests/shapes/${name} — spec no longer publishes ontologies/${sub}/${name}`,
+      remedy: RESYNC,
+    });
     continue;
   }
 
@@ -162,14 +195,12 @@ for (const name of vendored) {
 
   compared++;
   if (normalize(upstreamBytes) !== normalize(localBytes)) {
-    problems.push(`DRIFTED  tests/shapes/${name} — differs from ontologies/${sub}/${name}`);
+    problems.push({
+      line: `DRIFTED  tests/shapes/${name} — differs from ontologies/${sub}/${name}`,
+      remedy: RESYNC,
+    });
   }
 }
-
-// `bash`, not `sh`: the sync script is #!/usr/bin/env bash and uses BASH_SOURCE
-// and [[ ]], both of which are a Bad substitution / syntax error under dash,
-// which is what /bin/sh is on Debian, Ubuntu and ubuntu-latest runners.
-const RESYNC = '\nRe-sync:  bash scripts/sync-shapes-from-spec.sh';
 
 // A run that compared nothing must not report success.
 //
@@ -182,21 +213,26 @@ const RESYNC = '\nRe-sync:  bash scripts/sync-shapes-from-spec.sh';
 // staring at a red shapes-drift job got a count and no filename. Diff the two
 // lists instead. Print BEFORE dying, because die() never returns.
 if (compared < Object.keys(UPSTREAM).length) {
-  for (const name of Object.keys(UPSTREAM).filter((n) => !vendored.includes(n))) {
-    console.error(`MISSING  tests/shapes/${name} — vendored.json lists it, but it is not present`);
-  }
-  if (problems.length) console.error(problems.join('\n'));
-  // The re-sync hint is the actionable answer here too: a vendored copy that is
-  // absent is restored by the same command as one that is stale. The exit code
-  // stays 2 rather than joining the drift path at 1 — nothing was compared, so
-  // this run has no opinion on whether the copies that ARE present match spec.
-  console.error(RESYNC);
+  // The re-sync hint is the actionable answer for a MISSING file: a vendored copy
+  // that is absent is restored by the same command as one that is stale. An
+  // ORPHAN caught in the same run still carries its own, which is why these go
+  // through `report` rather than printing one shared string. The exit code stays
+  // 2 rather than joining the drift path at 1 — nothing was compared, so this run
+  // has no opinion on whether the copies that ARE present match spec.
+  report([
+    ...Object.keys(UPSTREAM)
+      .filter((n) => !vendored.includes(n))
+      .map((name) => ({
+        line: `MISSING  tests/shapes/${name} — vendored.json lists it, but it is not present`,
+        remedy: RESYNC,
+      })),
+    ...problems,
+  ]);
   die(`compared ${compared} of ${Object.keys(UPSTREAM).length} expected files; every check above would pass vacuously.`);
 }
 
 if (problems.length) {
-  console.error(problems.join('\n'));
-  console.error(RESYNC);
+  report(problems);
   process.exit(1);
 }
 

@@ -1,4 +1,4 @@
 {
-  "core.shapes.ttl": { "specPath": "core/v1", "prefix": "cascade" },
-  "health.shapes.ttl": { "specPath": "health/v1", "prefix": "health" }
+  "core.shapes.ttl": { "specPath": "core/v1" },
+  "health.shapes.ttl": { "specPath": "health/v1" }
 }
