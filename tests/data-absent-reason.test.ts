@@ -67,7 +67,7 @@ describe('absent-001 — Happy path: lab result with no value, carrying a ratifi
   // three-way for three of the four data triples and silent about the fourth,
   // which is exactly the vacuous verdict this file's EARNS question exists to
   // be the opposite of. `assertCovered` now refuses the graph outright; the
-  // refusal is pinned in tests/rdf-helpers.test.ts.
+  // refusal is pinned in tests/support/shacl.test.ts.
   //
   // What it also hid is worth recording: absent-001.json's expectedOutput.turtle
   // declares `health:loincCode`, the SDK writes `clinical:loincCode`, and

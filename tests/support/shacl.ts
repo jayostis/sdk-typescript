@@ -73,7 +73,7 @@ if (VENDORED_SHAPES.length === 0) {
  * graph. `validate()` awaits only `loadOwlImports()`; `setDataGraph`,
  * `validateAll` and `getReport` all run synchronously after it, so concurrent
  * calls cannot interleave, and `validateAll` calls `initReport()`.
- * `tests/rdf-helpers.test.ts` pins that against a release that adds an await.
+ * `tests/support/shacl.test.ts` pins that against a release that adds an await.
  */
 const shacl = new SHACLValidator(
   parseDataset(

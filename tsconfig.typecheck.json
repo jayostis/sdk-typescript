@@ -26,7 +26,8 @@
     "src/**/*.ts",
     "tests/vocab-2026-08-train.test.ts",
     "tests/data-absent-reason.test.ts",
-    "tests/rdf-helpers.test.ts",
+    "tests/support/shacl.test.ts",
+    "tests/support/fixtures.test.ts",
     "tests/support/n3.d.ts"
   ],
   "exclude": ["node_modules", "dist"]

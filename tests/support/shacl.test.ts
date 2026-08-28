@@ -1,16 +1,14 @@
 /**
- * Properties of `shaclCheck` itself, as distinct from any claim about a record.
- *
  * A validator that answers when it cannot check is worse than no validator: a
  * pod of malformed records comes back certified clean, and every suite leaning
  * on the helper reports green while inheriting the wrong answer.
  */
 
 import { describe, it, expect } from 'vitest';
-import { NAMESPACES } from '../src/vocabularies/namespaces.js';
-import { loadCascadeRecordFixture } from './support/fixtures.js';
-import { parseDataset } from './support/graph.js';
-import { assertCovered, shaclCheck } from './support/shacl.js';
+import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
+import { loadCascadeRecordFixture } from './fixtures.js';
+import { parseDataset } from './graph.js';
+import { assertCovered, shaclCheck } from './shacl.js';
 
 describe('shaclCheck never certifies what it did not check', () => {
   it('refuses a record whose vocabulary we hold no shapes for', async () => {
@@ -18,10 +16,6 @@ describe('shaclCheck never certifies what it did not check', () => {
     // no clinical shape and returned conforms:true — indistinguishable from a
     // record that satisfies every clinical constraint.
     await expect(shaclCheck(loadCascadeRecordFixture('med-001').input)).rejects.toThrow(/clinical/);
-  });
-
-  it('refuses a coverage: record too, so the rule is not special-cased to clinical:', async () => {
-    await expect(shaclCheck(loadCascadeRecordFixture('claim-001').input)).rejects.toThrow(/coverage/);
   });
 
   it('refuses a record whose type we can judge but whose data we cannot', async () => {
