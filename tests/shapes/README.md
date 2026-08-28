@@ -8,7 +8,7 @@ read by tests only. Never imported by `src/`, never published.
 | `core.shapes.ttl` | `spec/ontologies/core/v1/core.shapes.ttl` |
 | `health.shapes.ttl` | `spec/ontologies/health/v1/health.shapes.ttl` |
 
-Synced from `spec@5a56ab4`.
+Synced from `spec@678ae0d`.
 
 A deliberate subset, not a mirror. `tests/support/rdf.ts` refuses to return a
 SHACL verdict for a record in any other vocabulary rather than reporting the
