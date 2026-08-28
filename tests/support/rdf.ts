@@ -117,24 +117,76 @@ export function loadCascadeRecordFixture(id: string): CascadeRecordFixture {
  *   .toEqual(['not-asked', 'asked-unknown']);
  */
 export function parseTurtle(turtle: string): AnyPointer {
-  return env.clownface({ dataset: env.dataset(new Parser().parse(turtle)) });
+  return env.clownface({ dataset: parseDataset(turtle) });
+}
+
+/**
+ * Turtle text as a dataset — what `assertCovered` and the validator take.
+ *
+ * Exported so `tests/rdf-helpers.test.ts` can hand `assertCovered` a graph
+ * `serialize()` cannot currently produce. One definition rather than three:
+ * `parseTurtle` and `shaclCheck` both build their dataset this way.
+ */
+export function parseDataset(turtle: string): ReturnType<typeof env.dataset> {
+  return env.dataset(new Parser().parse(turtle));
 }
 
 // ─── SHACL ──────────────────────────────────────────────────────────────────
 
 /**
- * The vocabularies vendored in `tests/shapes/`, and the namespace IRIs their
- * shapes constrain. Core publishes its terms under the `cascade:` prefix.
+ * One entry per vendored shapes file, as `tests/shapes/vendored.json` records it.
  *
- * A DELIBERATE SUBSET, not a mirror — `scripts/sync-shapes-from-spec.sh` copies
- * exactly these. The two lists move together: a file added there without its
- * namespace added here would still be loaded, but a record in that vocabulary
- * would keep being refused; a namespace added here without its file would let a
- * record through to a graph holding no shapes for it, which is the false green
- * `assertCovered` exists to stop.
+ * `prefix` is the key in `NAMESPACES` for the namespace that file's shapes
+ * constrain — core publishes its terms under `cascade:`.
  */
-const VENDORED_SHAPES = ['core.shapes.ttl', 'health.shapes.ttl'];
-const COVERED_NAMESPACES = new Set<string>([NAMESPACES.cascade, NAMESPACES.health]);
+interface VendoredShape {
+  specPath: string;
+  prefix: string;
+}
+
+/**
+ * The vocabularies vendored in `tests/shapes/`, and the namespace IRIs their
+ * shapes constrain.
+ *
+ * A DELIBERATE SUBSET, not a mirror. Both facts are READ from
+ * `tests/shapes/vendored.json`, which is also what `sync-shapes-from-spec.sh`
+ * copies and what `check-shapes-drift.mjs` checks — one list, three consumers.
+ * As four hand-maintained lists they could disagree in two directions, and
+ * nothing enforced agreement: a file synced without its namespace registered
+ * here was loaded but every record in it kept being refused, and a namespace
+ * registered here without its file let a record through to a graph holding no
+ * shapes for it — the false green `assertCovered` exists to stop.
+ *
+ * readFileSync rather than an import: `resolveJsonModule` would type it, but
+ * the runtime attribute is spelled `assert` on this package's Node 18 floor and
+ * `with` on current Node, and neither spelling parses on both.
+ */
+const MANIFEST = JSON.parse(
+  readFileSync(resolve(shapesDir, 'vendored.json'), 'utf-8'),
+) as Record<string, VendoredShape>;
+
+const IRI_OF = new Map<string, string>(Object.entries(NAMESPACES).map(([p, iri]) => [p, iri as string]));
+
+const VENDORED_SHAPES = Object.keys(MANIFEST).sort();
+const COVERED_NAMESPACES = new Set<string>(
+  Object.entries(MANIFEST).map(([file, { prefix }]) => {
+    const iri = IRI_OF.get(prefix);
+    // The manifest is untyped input, and an unknown prefix is the failure this
+    // indirection could introduce: `undefined` in COVERED_NAMESPACES matches no
+    // namespace, so every record in that vocabulary would be refused with a
+    // message insisting the file is not vendored when it is.
+    if (!iri) {
+      throw new Error(
+        `tests/shapes/vendored.json: ${file} names prefix "${prefix}", which NAMESPACES does not declare.`,
+      );
+    }
+    return iri;
+  }),
+);
+
+if (VENDORED_SHAPES.length === 0) {
+  throw new Error('tests/shapes/vendored.json lists no shapes, so every SHACL verdict would be vacuous.');
+}
 
 /**
  * The vendored shapes, as one graph.
@@ -155,16 +207,21 @@ const COVERED_NAMESPACES = new Set<string>([NAMESPACES.cascade, NAMESPACES.healt
  * release that adds an await.
  */
 const shacl = new SHACLValidator(
-  env.dataset(
-    new Parser().parse(
-      VENDORED_SHAPES
-        .map((f) => readFileSync(resolve(shapesDir, f), 'utf-8'))
-        .join('\n'),
-    ),
+  parseDataset(
+    VENDORED_SHAPES
+      .map((f) => readFileSync(resolve(shapesDir, f), 'utf-8'))
+      .join('\n'),
   ),
 );
 
-const rdf = env.namespace('http://www.w3.org/1999/02/22-rdf-syntax-ns#');
+/**
+ * `rdf:type` is how SHACL SELECTS a shape, not a property any shape constrains,
+ * so this namespace is exempt from the predicate sweep in `assertCovered`.
+ * Nothing else is: a shapes graph that does not constrain a predicate has
+ * nothing to say about the triple carrying it, whichever vocabulary it is from.
+ */
+const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const rdf = env.namespace(RDF_NS);
 
 /** IRI -> the prefix `NAMESPACES` declares for it, so a message reads as a CURIE. */
 const PREFIX_OF = new Map(Object.entries(NAMESPACES).map(([prefix, iri]) => [iri as string, prefix]));
@@ -173,28 +230,75 @@ const PREFIX_OF = new Map(Object.entries(NAMESPACES).map(([prefix, iri]) => [iri
 const namespaceOf = (iri: string): string =>
   iri.slice(0, Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1);
 
+/** An IRI as a CURIE, so a message reads the way the Turtle does. */
+const curieOf = (iri: string): string => {
+  const ns = namespaceOf(iri);
+  return `${PREFIX_OF.get(ns) ?? ns}:${iri.slice(ns.length)}`;
+};
+
 /**
- * Refuse a record whose vocabulary has no vendored shapes.
+ * Refuse a record the vendored shapes cannot actually judge.
  *
  * Without this, `shaclCheck` on a `clinical:Medication` validates against a
  * graph that declares no clinical shape and returns `{ conforms: true,
  * violations: [] }` — a verdict indistinguishable from one earned by satisfying
  * every clinical constraint. A thrown error is the only outcome a test cannot
  * mistake for a pass.
+ *
+ * Three ways the verdict can be vacuous, and all three throw:
+ *
+ * 1. NO TYPE on the subject. A graph whose subject carries no `rdf:type` is
+ *    precisely a graph no `sh:targetClass` selects. This case FAILED OPEN
+ *    before — `uncovered.length === 0` concluded "nothing is uncovered" from
+ *    "nothing was found", the inverse of the contract. Latent rather than live:
+ *    `serialize()` emits `a <type>` for every type in TYPE_MAPPING and throws
+ *    for any other, so no record reaches this with an untyped subject today.
+ *    (`n3` leaves a relative IRI unresolved when no `baseIRI` is given, so even
+ *    the empty and relative `id`s round-trip to a subject `namedNode(record.id)`
+ *    addresses.) It becomes reachable the day `serialize()` mints a subject
+ *    rather than echoing `record.id`, and it is cheaper to close than to detect.
+ *
+ * 2. AN UNCOVERED TYPE — no vendored shape targets the record at all.
+ *
+ * 3. AN UNCOVERED PREDICATE. Checking only types made this oracle blind to the
+ *    triples themselves: a record whose type is `cascade:`/`health:` sailed
+ *    through carrying predicates from a vocabulary `tests/shapes/` holds nothing
+ *    for, and `expect(report.results).toEqual([])` then asserted the absence of
+ *    violations no shape could have raised. Live, not hypothetical:
+ *    `serialize(absent-001)` writes `clinical:loincCode`, for which no vendored
+ *    shape declares an `sh:path`.
+ *
+ * The sweep is over the whole dataset rather than the record subject alone,
+ * because a blank-node sub-structure's predicates are validated too.
  */
-function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeEntity): void {
+export function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeEntity): void {
   const types = env.clownface({ dataset }).namedNode(record.id).out(rdf.type).values;
-  const uncovered = types.filter((iri) => !COVERED_NAMESPACES.has(namespaceOf(iri)));
-  if (uncovered.length === 0) return;
+  if (types.length === 0) {
+    throw new Error(
+      `shaclCheck found no rdf:type on <${record.id}> in the serialized graph, so it cannot tell `
+      + 'whether any vendored shape targets it; the verdict would be a vacuous conforms:true.',
+    );
+  }
 
-  const named = uncovered
-    .map((iri) => `${PREFIX_OF.get(namespaceOf(iri)) ?? namespaceOf(iri)}:${iri.slice(namespaceOf(iri).length)}`)
-    .join(', ');
+  refuse('judge', types.filter((iri) => !COVERED_NAMESPACES.has(namespaceOf(iri))));
+
+  const predicates = new Set<string>();
+  for (const quad of dataset) predicates.add(quad.predicate.value);
+  refuse(
+    'judge the triples on',
+    [...predicates].filter((iri) => namespaceOf(iri) !== RDF_NS && !COVERED_NAMESPACES.has(namespaceOf(iri))),
+  );
+}
+
+/** Throw naming what the vendored shapes are silent about, or return if nothing is. */
+function refuse(verb: string, uncovered: string[]): void {
+  if (uncovered.length === 0) return;
   throw new Error(
-    `shaclCheck cannot judge ${named}: tests/shapes/ vendors ${VENDORED_SHAPES.join(' and ')} only, `
-    + 'so no shape in the graph targets it and the verdict would be a vacuous conforms:true. '
-    + 'Vendor the vocabulary (add it to scripts/sync-shapes-from-spec.sh, re-run it, and extend '
-    + 'UPSTREAM in scripts/check-shapes-drift.mjs), or assert on the graph with parseTurtle instead.',
+    `shaclCheck cannot ${verb} ${uncovered.map(curieOf).join(', ')}: tests/shapes/ vendors `
+    + `${VENDORED_SHAPES.join(' and ')} only, so nothing in the shapes graph constrains that and the `
+    + 'verdict would be a vacuous conforms:true. Vendor the vocabulary (add it to '
+    + 'tests/shapes/vendored.json and re-run scripts/sync-shapes-from-spec.sh), or assert on the '
+    + 'graph with parseTurtle instead.',
   );
 }
 
@@ -217,11 +321,11 @@ export const sh = env.namespace('http://www.w3.org/ns/shacl#');
  * RDF terms — a wrapper that flattened those into strings would throw away the
  * constraint identity, which is the thing worth asserting on.
  *
- * Throws — rather than returning a verdict — when no vendored shape covers the
- * record's vocabulary. See `assertCovered`.
+ * Throws — rather than returning a verdict — when the vendored shapes cannot
+ * judge the record's type or one of its predicates. See `assertCovered`.
  */
 export async function shaclCheck(record: CascadeRecord): Promise<ValidationReport> {
-  const dataset = env.dataset(new Parser().parse(serialize(record)));
+  const dataset = parseDataset(serialize(record));
   assertCovered(dataset, record);
   return shacl.validate(dataset);
 }

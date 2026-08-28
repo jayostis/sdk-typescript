@@ -26,16 +26,44 @@ import { fileURLToPath } from 'node:url';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDORED_DIR = join(REPO, 'tests', 'shapes');
 
-/** Vendored file -> the `ontologies/` subpath spec publishes it at. */
-const UPSTREAM = {
-  'core.shapes.ttl': 'core/v1',
-  'health.shapes.ttl': 'health/v1',
-};
-
 const die = (msg) => {
   console.error(`CANNOT CHECK: ${msg}`);
   process.exit(2);
 };
+
+/**
+ * Vendored file -> the `ontologies/` subpath spec publishes it at.
+ *
+ * Read from tests/shapes/vendored.json rather than written out here.
+ * `scripts/sync-shapes-from-spec.sh` and `tests/support/rdf.ts` read the same
+ * file, so the copy, this check and the SHACL coverage guard cannot disagree
+ * about which vocabularies are vendored. When those were separate
+ * hand-maintained lists, a vocabulary added to the sync script alone was
+ * reported here as `ORPHAN ... spec publishes no such file` — false, and it
+ * pointed the reader at the wrong repository.
+ *
+ * readFileSync rather than an import: JSON import attributes are spelled
+ * `assert` on the Node 18 floor this package declares and `with` on current
+ * Node, and neither spelling parses on both.
+ */
+const MANIFEST = join(VENDORED_DIR, 'vendored.json');
+let UPSTREAM;
+try {
+  UPSTREAM = Object.fromEntries(
+    Object.entries(JSON.parse(readFileSync(MANIFEST, 'utf8')))
+      .map(([name, entry]) => [name, entry.specPath]),
+  );
+} catch (e) {
+  die(`cannot read ${MANIFEST}: ${e.message}`);
+}
+
+// An empty manifest leaves every vendored file an ORPHAN and `compared` at 0 of
+// 0, which satisfies the shortfall check below and prints "OK: 0 vendored
+// file(s) match spec" — the exact reading this file exits 2 to prevent.
+if (Object.keys(UPSTREAM).length === 0) die(`${MANIFEST} lists no shapes, so there is nothing to check.`);
+for (const [name, sub] of Object.entries(UPSTREAM)) {
+  if (!sub) die(`${MANIFEST}: ${name} has no specPath, so its upstream location is unknown.`);
+}
 
 const argv = process.argv.slice(2);
 
@@ -100,7 +128,7 @@ let compared = 0;
 for (const name of vendored) {
   const sub = UPSTREAM[name];
   if (!sub) {
-    problems.push(`ORPHAN   tests/shapes/${name} — spec publishes no such file`);
+    problems.push(`ORPHAN   tests/shapes/${name} — vendored.json lists no such shape`);
     continue;
   }
   const upstream = join(specRoot, 'ontologies', sub, name);
@@ -138,20 +166,37 @@ for (const name of vendored) {
   }
 }
 
-// A run that compared nothing must not report success. Print the diagnostics
-// BEFORE dying: an ORPHAN line names the file that caused the shortfall, which
-// is the one fact that identifies the cause, and die() never returns.
+// `bash`, not `sh`: the sync script is #!/usr/bin/env bash and uses BASH_SOURCE
+// and [[ ]], both of which are a Bad substitution / syntax error under dash,
+// which is what /bin/sh is on Debian, Ubuntu and ubuntu-latest runners.
+const RESYNC = '\nRe-sync:  bash scripts/sync-shapes-from-spec.sh';
+
+// A run that compared nothing must not report success.
+//
+// `compared` counts every name in vendored.json that reached a verdict —
+// matched, differed, or gone from spec — so the ONLY input that falls short is
+// a listed file MISSING from tests/shapes/. An ORPHAN is an EXTRA file and can
+// never cause a shortfall, so the orphan lines this used to print said nothing
+// about why the count was low, and on the one input that does produce a
+// shortfall `problems` is empty and nothing was printed at all: an operator
+// staring at a red shapes-drift job got a count and no filename. Diff the two
+// lists instead. Print BEFORE dying, because die() never returns.
 if (compared < Object.keys(UPSTREAM).length) {
+  for (const name of Object.keys(UPSTREAM).filter((n) => !vendored.includes(n))) {
+    console.error(`MISSING  tests/shapes/${name} — vendored.json lists it, but it is not present`);
+  }
   if (problems.length) console.error(problems.join('\n'));
+  // The re-sync hint is the actionable answer here too: a vendored copy that is
+  // absent is restored by the same command as one that is stale. The exit code
+  // stays 2 rather than joining the drift path at 1 — nothing was compared, so
+  // this run has no opinion on whether the copies that ARE present match spec.
+  console.error(RESYNC);
   die(`compared ${compared} of ${Object.keys(UPSTREAM).length} expected files; every check above would pass vacuously.`);
 }
 
 if (problems.length) {
   console.error(problems.join('\n'));
-  // `bash`, not `sh`: the script is #!/usr/bin/env bash and uses BASH_SOURCE and
-  // [[ ]], both of which are a Bad substitution / syntax error under dash, which
-  // is what /bin/sh is on Debian, Ubuntu and ubuntu-latest runners.
-  console.error('\nRe-sync:  bash scripts/sync-shapes-from-spec.sh');
+  console.error(RESYNC);
   process.exit(1);
 }
 

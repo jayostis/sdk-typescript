@@ -3,17 +3,48 @@
 Copies of the shape files from [`spec`](https://github.com/the-cascade-protocol/spec),
 read by tests only. Never imported by `src/`, never published.
 
-| file | source |
-|---|---|
-| `core.shapes.ttl` | `spec/ontologies/core/v1/core.shapes.ttl` |
-| `health.shapes.ttl` | `spec/ontologies/health/v1/health.shapes.ttl` |
+| file | source | constrains |
+|---|---|---|
+| `core.shapes.ttl` | `spec/ontologies/core/v1/core.shapes.ttl` | `cascade:` |
+| `health.shapes.ttl` | `spec/ontologies/health/v1/health.shapes.ttl` | `health:` |
 
 Synced from `spec@678ae0d`.
 
 A deliberate subset, not a mirror. `tests/support/rdf.ts` refuses to return a
-SHACL verdict for a record in any other vocabulary rather than reporting the
-vacuous `conforms: true` a graph with no matching shape would produce, so
-adding a vocabulary here is what makes it checkable.
+SHACL verdict for a graph these shapes are silent on — an uncovered type, or a
+predicate from a vocabulary not vendored here — rather than reporting the
+vacuous `conforms: true` a graph with no matching shape produces. Adding a
+vocabulary here is what makes it checkable.
+
+## `vendored.json` — the one list
+
+`vendored.json` is the table above in machine-readable form, and the only place
+the set is written down:
+
+```json
+{ "core.shapes.ttl": { "specPath": "core/v1", "prefix": "cascade" } }
+```
+
+`specPath` is the `ontologies/` subdirectory spec publishes the file at.
+`prefix` is the key in the SDK's own `NAMESPACES` for the namespace those
+shapes constrain — core publishes its terms under `cascade:`.
+
+Three consumers read it, so **to vendor a vocabulary, edit this file and
+re-run the sync script. Nothing else.**
+
+| consumer | what it takes from the manifest |
+|---|---|
+| `scripts/sync-shapes-from-spec.sh` | which files to copy, and from where |
+| `scripts/check-shapes-drift.mjs` | which files must be present, and their upstream path |
+| `tests/support/rdf.ts` | which files to load, and which namespaces a verdict may cover |
+
+These were four hand-maintained lists, and nothing enforced agreement between
+them. Both directions failed quietly: a file synced but not registered with the
+drift check was reported as `ORPHAN … spec publishes no such file` — false, and
+it pointed the reader at the wrong repository — and a namespace registered in
+`rdf.ts` without its file let a record through to a shapes graph holding
+nothing for it, producing the vacuous `conforms: true` the guard exists to
+refuse. One list removes the class rather than documenting it.
 
 ## Why these are vendored rather than read from a sibling checkout
 
