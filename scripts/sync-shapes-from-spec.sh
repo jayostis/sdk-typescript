@@ -11,10 +11,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPEC="${SPEC_ROOT:-$ROOT/../spec}"
+# CASCADE_SPEC_DIR is the name scripts/check-shapes-drift.mjs reads, and the name
+# it prints when it cannot find spec. Two names for one location is how someone
+# syncs from one checkout and then drift-checks against a different one.
+SPEC="${CASCADE_SPEC_DIR:-$ROOT/../spec}"
 DEST="$ROOT/tests/shapes"
 
-[[ -d "$SPEC" ]] || { echo "Error: no spec checkout at $SPEC — set SPEC_ROOT" >&2; exit 1; }
+[[ -d "$SPEC" ]] || { echo "Error: no spec checkout at $SPEC — set CASCADE_SPEC_DIR" >&2; exit 1; }
 
 for vocab in core health; do
   cp "$SPEC/ontologies/$vocab/v1/$vocab.shapes.ttl" "$DEST/$vocab.shapes.ttl"

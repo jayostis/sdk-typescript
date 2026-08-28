@@ -12,8 +12,11 @@
  *   #3   a record with no value but a stated reason passes validate()
  *   #4   validate() faults an unmapped code and a repeated one
  *
- * Helpers are in `tests/support/rdf.ts`. They never call `serialize()` — the
- * call under test belongs in the test.
+ * Helpers are in `tests/support/rdf.ts`, and they differ on this point.
+ * `parseTurtle` takes TEXT, so the `serialize()` call under test stays visible
+ * in the graph tests below. `shaclCheck` takes a RECORD and serializes it
+ * itself — so the SHACL tests judge freshly serialized output, NOT the
+ * fixture's declared `expectedOutput.turtle`, which nothing here reads.
  *
  * @see spec/ontologies/core/v1/core.ttl         cascade:dataAbsentReason
  * @see spec/ontologies/core/v1/core.shapes.ttl  cascade:DataAbsentReasonShape

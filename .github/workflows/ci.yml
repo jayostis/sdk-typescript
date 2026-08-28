@@ -63,3 +63,43 @@ jobs:
       - name: Test
         working-directory: sdk-typescript
         run: npm test
+
+  # Separate from the `test` matrix on purpose. The vendored shapes are one set
+  # of bytes, so the answer cannot depend on the Node version, and running this
+  # per matrix leg would only clone `spec` twice.
+  #
+  # This is the ONLY job that checks out `spec`. The `test` job deliberately
+  # does not have it — that is why the shapes are vendored at all (see
+  # tests/shapes/README.md), and this job is what stops the copies going stale
+  # while the SHACL suite asserts last month's constraints and stays green.
+  shapes-drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out sdk-typescript
+        uses: actions/checkout@v4
+        with:
+          path: sdk-typescript
+
+      # A SIBLING of the checkout, which is where check-shapes-drift.mjs looks
+      # by default. CASCADE_SPEC_DIR would override it; there is nothing to
+      # override here.
+      - name: Check out spec as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/spec
+          path: spec
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      # No `npm ci`: check-shapes-drift.mjs imports node:fs, node:path and
+      # node:url only. Exit 1 is drift — re-sync with
+      # `bash scripts/sync-shapes-from-spec.sh`. Exit 2 is "cannot check", an
+      # infrastructure fault rather than a stale copy; the two are kept distinct
+      # so a red run here says which one happened.
+      - name: Check vendored shapes against spec
+        working-directory: sdk-typescript
+        run: npm run check:shapes-drift

@@ -90,6 +90,20 @@ export function parseTurtle(turtle: string): AnyPointer {
 // ─── SHACL ──────────────────────────────────────────────────────────────────
 
 /**
+ * The vocabularies vendored in `tests/shapes/`, and the namespace IRIs their
+ * shapes constrain. Core publishes its terms under the `cascade:` prefix.
+ *
+ * A DELIBERATE SUBSET, not a mirror — `scripts/sync-shapes-from-spec.sh` copies
+ * exactly these. The two lists move together: a file added there without its
+ * namespace added here would still be loaded, but a record in that vocabulary
+ * would keep being refused; a namespace added here without its file would let a
+ * record through to a graph holding no shapes for it, which is the false green
+ * `assertCovered` exists to stop.
+ */
+const VENDORED_SHAPES = ['core.shapes.ttl', 'health.shapes.ttl'];
+const COVERED_NAMESPACES = new Set<string>([NAMESPACES.cascade, NAMESPACES.health]);
+
+/**
  * The vendored shapes, as one graph.
  *
  * Read from `tests/shapes/`, NOT from a `spec` sibling: CI checks out
@@ -97,16 +111,59 @@ export function parseTurtle(turtle: string): AnyPointer {
  * machines or skip itself — and a test that skips when it cannot find its input
  * reports green having asserted nothing. `scripts/check-shapes-drift.mjs` is
  * what keeps the copy honest. See tests/shapes/README.md.
+ *
+ * ONE VALIDATOR, SHARED. `SHACLValidator.validate()` awaits only
+ * `loadOwlImports()`; everything that touches instance state — `setDataGraph`,
+ * `validateAll`, `getReport` — runs synchronously after that await, so two
+ * concurrent calls cannot interleave between them, and `validateAll` calls
+ * `initReport()`, so results do not accumulate. Constructing one indexes the
+ * whole shapes graph, which is why this is not done per call.
+ * `tests/rdf-helpers.test.ts` pins the no-crossing property against a future
+ * release that adds an await.
  */
 const shacl = new SHACLValidator(
   env.dataset(
     new Parser().parse(
-      ['core.shapes.ttl', 'health.shapes.ttl']
+      VENDORED_SHAPES
         .map((f) => readFileSync(resolve(shapesDir, f), 'utf-8'))
         .join('\n'),
     ),
   ),
 );
+
+const rdf = env.namespace('http://www.w3.org/1999/02/22-rdf-syntax-ns#');
+
+/** IRI -> the prefix `NAMESPACES` declares for it, so a message reads as a CURIE. */
+const PREFIX_OF = new Map(Object.entries(NAMESPACES).map(([prefix, iri]) => [iri as string, prefix]));
+
+/** The namespace part of an IRI: everything through the last `#` or `/`. */
+const namespaceOf = (iri: string): string =>
+  iri.slice(0, Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1);
+
+/**
+ * Refuse a record whose vocabulary has no vendored shapes.
+ *
+ * Without this, `shaclCheck` on a `clinical:Medication` validates against a
+ * graph that declares no clinical shape and returns `{ conforms: true,
+ * violations: [] }` — a verdict indistinguishable from one earned by satisfying
+ * every clinical constraint. A thrown error is the only outcome a test cannot
+ * mistake for a pass.
+ */
+function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeRecord): void {
+  const types = env.clownface({ dataset }).namedNode(record.id).out(rdf.type).values;
+  const uncovered = types.filter((iri) => !COVERED_NAMESPACES.has(namespaceOf(iri)));
+  if (uncovered.length === 0) return;
+
+  const named = uncovered
+    .map((iri) => `${PREFIX_OF.get(namespaceOf(iri)) ?? namespaceOf(iri)}:${iri.slice(namespaceOf(iri).length)}`)
+    .join(', ');
+  throw new Error(
+    `shaclCheck cannot judge ${named}: tests/shapes/ vendors ${VENDORED_SHAPES.join(' and ')} only, `
+    + 'so no shape in the graph targets it and the verdict would be a vacuous conforms:true. '
+    + 'Vendor the vocabulary (add it to scripts/sync-shapes-from-spec.sh, re-run it, and extend '
+    + 'UPSTREAM in scripts/check-shapes-drift.mjs), or assert on the graph with parseTurtle instead.',
+  );
+}
 
 export interface ShaclVerdict {
   conforms: boolean;
@@ -114,9 +171,17 @@ export interface ShaclVerdict {
   violations: string[];
 }
 
-/** Serialize a record and validate the resulting graph against the real shapes. */
+/**
+ * Serialize a record and validate the resulting graph against the real shapes.
+ *
+ * Throws — rather than returning a verdict — when no vendored shape covers the
+ * record's vocabulary. See `assertCovered`.
+ */
 export async function shaclCheck(record: CascadeRecord): Promise<ShaclVerdict> {
-  const report = await shacl.validate(env.dataset(new Parser().parse(serialize(record))));
+  const dataset = env.dataset(new Parser().parse(serialize(record)));
+  assertCovered(dataset, record);
+
+  const report = await shacl.validate(dataset);
   return {
     conforms: report.conforms,
     violations: report.results.map((r) => {

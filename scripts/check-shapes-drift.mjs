@@ -37,9 +37,13 @@ const die = (msg) => {
 
 const argv = process.argv.slice(2);
 const flag = argv.indexOf('--spec');
+// `||`, not `??`: `??` only falls back on null/undefined, so an unset CI input
+// arrives as "" and survives to resolve(''), which returns the cwd. That is a
+// directory, so the sibling fallback is skipped and the run dies naming the
+// wrong tree instead of saying there is no spec checkout. Same for `--spec ''`.
 const specRoot = resolve(
-  flag !== -1 ? argv[flag + 1] ?? die('--spec given with no directory')
-    : process.env.CASCADE_SPEC_DIR ?? join(REPO, '..', 'spec'),
+  flag !== -1 ? argv[flag + 1] || die('--spec given with no directory')
+    : process.env.CASCADE_SPEC_DIR || join(REPO, '..', 'spec'),
 );
 
 // statSync, not Dirent: a spec checkout reached through a symlink answers
@@ -50,7 +54,17 @@ try {
   die(`no spec checkout at ${specRoot}. Clone it as a sibling, pass --spec, or set CASCADE_SPEC_DIR.`);
 }
 
-const vendored = readdirSync(VENDORED_DIR).filter((f) => f.endsWith('.ttl')).sort();
+// Guarded: an unreadable tests/shapes/ — sparse checkout, a packaging step that
+// omits tests/ — would otherwise throw, and an uncaught throw exits 1, the code
+// this file's header reserves for "drift found". A gate reading that sends
+// someone to re-sync files that are not there.
+let vendored;
+try {
+  vendored = readdirSync(VENDORED_DIR).filter((f) => f.endsWith('.ttl')).sort();
+} catch (e) {
+  die(`cannot read ${VENDORED_DIR}: ${e.message}`);
+}
+
 const problems = [];
 let compared = 0;
 
@@ -71,14 +85,20 @@ for (const name of vendored) {
   if (!same) problems.push(`DRIFTED  tests/shapes/${name} — differs from ontologies/${sub}/${name}`);
 }
 
-// A run that compared nothing must not report success.
+// A run that compared nothing must not report success. Print the diagnostics
+// BEFORE dying: an ORPHAN line names the file that caused the shortfall, which
+// is the one fact that identifies the cause, and die() never returns.
 if (compared < Object.keys(UPSTREAM).length) {
+  if (problems.length) console.error(problems.join('\n'));
   die(`compared ${compared} of ${Object.keys(UPSTREAM).length} expected files; every check above would pass vacuously.`);
 }
 
 if (problems.length) {
   console.error(problems.join('\n'));
-  console.error('\nRe-sync:  sh scripts/sync-shapes-from-spec.sh');
+  // `bash`, not `sh`: the script is #!/usr/bin/env bash and uses BASH_SOURCE and
+  // [[ ]], both of which are a Bad substitution / syntax error under dash, which
+  // is what /bin/sh is on Debian, Ubuntu and ubuntu-latest runners.
+  console.error('\nRe-sync:  bash scripts/sync-shapes-from-spec.sh');
   process.exit(1);
 }
 
