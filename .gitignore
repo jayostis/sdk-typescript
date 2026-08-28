@@ -1,3 +1,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Editor config: share what describes the project, keep what describes a person.
+# Denying the directory first means a settings.json or a credentials file dropped
+# here later is ignored by default rather than riding along in someone's commit.
+.vscode/*
+!.vscode/extensions.json
+!.vscode/tasks.json
