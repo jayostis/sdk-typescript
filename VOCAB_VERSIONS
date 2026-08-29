@@ -16,10 +16,10 @@
 #   non-ratified ones. The two SDKs disagree about vitals in opposite directions
 #   and should be fixed together.
 #
-core=3.6
-health=2.7
-clinical=1.15
-coverage=1.4
+core=3.7
+health=2.8
+clinical=1.16
+coverage=1.5
 checkup=3.3
 pots=1.4
 # coverage=1.3: ClaimRecord, BenefitStatement, DenialNotice, AppealRecord interfaces added
@@ -162,3 +162,95 @@ pots=1.4
 #     that justified the union is gone. Procedure records retarget onto
 #     clinical:Procedure / clinical:procedureName, with health:procedureName
 #     registered so a name carried only on the deprecated spelling survives.
+
+# ── 2026-08-27 wave-4 sync: core 3.7, health 2.8, clinical 1.16,
+#    coverage 1.5. All 24 terms implemented. ──
+#
+# core=3.7: pod attachments. cascade:Attachment plus all seven properties
+#     (hasAttachment, attachmentPath, attachmentMediaType, contentHash,
+#     hashAlgorithm, byteSize, attachmentTitle), a model, a TYPE_MAPPING entry,
+#     full serialize/deserialize and JSON-LD context coverage.
+#     AN ATTACHMENT IS A SUBJECT WITH ITS OWN IRI, NOT AN INLINE SUB-NODE.
+#     cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI, so the record
+#     and the attachment can live in different files; a blank node would fail
+#     the shape. hasAttachment is therefore an IRI edge (URI_FIELDS +
+#     IRI_ARRAY_FIELDS), 0..*, and its context term is @type: @id with
+#     @container: @set. byteSize is the only typed literal (xsd:integer).
+#     THE BYTES ARE NOT MODELLED. Cascade stores them as an ordinary
+#     content-addressed file and this SDK touches only the metadata node: it
+#     neither reads, writes, hashes nor verifies attachment bytes, and does not
+#     validate that attachmentPath is pod-relative or that contentHash is
+#     lowercase hex. Those are sh:Violation constraints in core.shapes.ttl and
+#     this package validates no lexical patterns.
+# clinical=1.16: fifteen terms. The eight flat encounter facts
+#     (encounterClassDisplay, encounterClassSystem, encounterReason 0..*,
+#     admitSource, dischargeDisposition) and the participation structure
+#     (EncounterParticipant, hasParticipant, participantName, participantRole,
+#     participantRoleCode 0..*, participantSpecialty) are on the Encounter
+#     model; businessIdentifier is on CascadeEntity because the ontology
+#     deliberately declares no rdfs:domain for it.
+#     A PARTICIPATION IS AN INLINE BLANK NODE — the opposite ruling from
+#     core v3.7's attachment, and deliberately so.
+#     clinical:EncounterParticipantShape omits sh:nodeKind sh:IRI precisely so
+#     a serializer may write one for a structural sub-node, since nothing points
+#     at a participation from another file. Modelled on the core v3.4
+#     clinicalSummary / wellnessSummary precedent (BLANK_NODE_TYPES plus
+#     reconstruction on read), extended in two ways that precedent did not need:
+#     the edge REPEATS, so an array of blank nodes is written and every one is
+#     rebuilt on read; and the nested predicates are qualified per parent field
+#     (BLANK_NODE_PREDICATE_PREFIXES), because the writer hardcoded cascade:.
+#     A blanket PROPERTY_PREDICATES lookup was rejected: a `name` inside an
+#     emergencyContact is cascade:name while the top-level `name` is foaf:name,
+#     so it would have silently rewritten stable output.
+#     encounterClassSystem is written as a PLAIN STRING LITERAL although the
+#     ontology ranges it xsd:anyURI; clinical:EncounterShape accepts anyURI OR
+#     string via sh:or, explicitly because serializers differ on which they
+#     write for a URI-valued literal.
+#     businessIdentifier values are the FHIR token form "{system}|{value}" where
+#     the source states a system. This SDK round-trips the string verbatim and
+#     does NOT split, parse or validate it, and cannot invent a system.
+# clinical=1.16: the three document terms (documentReferenceStatus,
+#     documentAuthorName, authenticatorName) are registered as PREDICATES ONLY.
+#     Their rdfs:domain is clinical:ClinicalDocument, a class this SDK does not
+#     model, so there is nothing here to attach them to — the same position the
+#     core v3.4 device-source terms (sourceType, dataTypes, version) are in.
+#     They serialize and deserialize on whatever subject a caller writes them
+#     to; leaving them unregistered would have dropped them silently. A
+#     ClinicalDocument model is the follow-up.
+#     The two DOMAINS DROPPED in v1.16 (providerName off CoverageRecord,
+#     verificationStatus off Condition) and the ONE DEPRECATION
+#     (clinical:observationStatus) need no change here: this SDK encodes no
+#     domains, and observationStatus was never registered.
+# coverage=1.5: coverage:status, the four fm-status codes, typed as the closed
+#     union CoverageStatus. Closed rather than `CoverageStatus | string` for the
+#     reason clinical v1.15 closed VitalSign.interpretation: the FHIR binding is
+#     REQUIRED and the shape constrains the value at sh:Violation. Contrast
+#     coverageType, which stays open because Coverage.type is bound EXTENSIBLY.
+#     WRITTEN VIA A RECORD-TYPE OVERRIDE, not a PROPERTY_PREDICATES row: the
+#     `status` key already resolves to health:status. The override is declared
+#     for 'InsurancePlan' ONLY and not for 'CoverageRecord', because
+#     coverage:status has rdfs:domain coverage:InsurancePlan and asserting it on
+#     a clinical:CoverageRecord subject would entail to a reasoner that the
+#     subject is an InsurancePlan.
+#     KNOWN GAP, pre-existing and NOT introduced here: TYPE_MAPPING resolves
+#     both 'InsurancePlan' and 'CoverageRecord' to rdfType
+#     clinical:CoverageRecord, so this SDK cannot emit a coverage:InsurancePlan
+#     subject at all and coverage's own shapes never see these records. The
+#     practical consequence is that coverage:status is a ONE-WAY trip: the class
+#     is lost on read, so re-serializing what came back writes health:status.
+#     Pinned by test rather than fixed, because retargeting the class changes
+#     what every existing InsurancePlan record serializes as.
+# health=2.8: SHACL only; no class or property added, removed or renamed.
+#     health:LabResultRecordShape gains clinical:status bound to the 8 codes of
+#     Observation.status, and health:AllergyRecordShape gains clinical:status
+#     and clinical:verificationStatus bound to the AllergyIntolerance sets.
+#     This SDK validates no value sets, so the row is bumped because 2.8 adds no
+#     term this SDK is missing, not because code moved.
+#
+# NOT COVERED BY CONFORMANCE FIXTURES. The conformance repo carries no fixture
+#     exercising any of these 24 terms (no attachment- family, and the existing
+#     encounter- fixtures predate v1.16), so every assertion in
+#     tests/vocab-2026-08-27-wave4.test.ts is written against this SDK's own
+#     round trip rather than against a ratified oracle. Fixtures are the
+#     follow-up; until they exist, cross-implementation agreement with
+#     sdk-python and cascade-cli on these terms is UNVERIFIED.
