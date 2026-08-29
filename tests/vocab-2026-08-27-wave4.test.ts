@@ -177,8 +177,11 @@ describe('wave-4 term census', () => {
     // Read from this repo's own file, never from a spec sibling: this package's
     // CI checks out no spec checkout, and a test that skipped itself when its
     // input was missing would report green while proving nothing.
+    // Split on \r?\n, not \n: git checks this file out with CRLF wherever
+    // core.autocrlf is on, which is the default on Windows, and splitting on \n
+    // alone leaves a trailing \r on every row so `core=3.8` never matches.
     const rows = readFileSync(resolve(__dirname, '../VOCAB_VERSIONS'), 'utf-8')
-      .split('\n')
+      .split(/\r?\n/)
       .filter((line) => /^[a-z]+=/.test(line));
     expect(rows).toContain('core=3.8');
     expect(rows).toContain('health=2.8');
