@@ -337,11 +337,11 @@ describe('Turtle Serializer', () => {
     // branch it reaches today — so the fork's job is to RETURN CONTROL, not to
     // become a new default.
     //
-    // Characterisation, not red: the first two of these pass at HEAD, where no
-    // fork exists at all. They are the guard on the change rather than the
-    // reason for it, and they say nothing until the fork lands.
+    // The first two are characterisation: they hold whether or not the fork
+    // exists, so they are the guard on that change rather than the reason for
+    // it, and only a mutation proves they can speak at all.
     //
-    // The third one IS red (#15). An ARRAY on a registered field no term claims
+    // The third is a different kind of claim. An ARRAY on a registered field no term claims
     // falls off the end of the type-driven chain and is written nowhere: every
     // branch below the fork tests for a string, a number, a boolean or an
     // object, so the value vanishes and the record serializes as though the
