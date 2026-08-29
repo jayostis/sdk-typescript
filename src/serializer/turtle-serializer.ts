@@ -677,6 +677,15 @@ function serializeRecord(record: CascadeEntity): string {
     // term above removes it. This fires on no fixture that exists today, and
     // on any field added tomorrow that nobody gave a rule.
     if (Array.isArray(value)) {
+      // An EMPTY array carries nothing to lose, so the reasoning above does not
+      // reach it: no triple is the faithful graph for it, and it is what every
+      // arity table already writes for one (IRI_LIST_FIELDS, MULTI_VALUE_FIELDS
+      // and ARRAY_FIELDS each return early on an empty array). A field with no
+      // rule must not be stricter than a field with one — a caller that
+      // normalises an absent optional to `[]` is not the caller this throw is
+      // for, and PodBuilder.build maps serialize over every record it holds, so
+      // one such record would fail a whole pod build over an absent field.
+      if (value.length === 0) return;
       throw new Error(`No serialization rule for array-valued '${key}' (predicate ${pred})`);
     }
   };

@@ -407,6 +407,23 @@ describe('Turtle Serializer', () => {
         serialize({ ...base, resultValue: ['4.2', '4.3'] } as unknown as CascadeRecord),
       ).toThrow(/resultValue/);
     });
+
+    it('writes nothing for an empty array it has no rule for, rather than throwing', () => {
+      // The throw above is for a value that would be LOST. An empty array is
+      // not one: it carries nothing to write, and no triple is the faithful
+      // graph for it. Every arity table that handles an array returns early on
+      // an empty one — IRI_LIST_FIELDS, MULTI_VALUE_FIELDS and ARRAY_FIELDS all
+      // do — so a field with no rule at all must not be STRICTER than a field
+      // with one.
+      //
+      // The case is a caller that normalises an absent optional to `[]`, which
+      // is exactly what `asArray` hands back. `PodBuilder.build` maps
+      // `serialize` over every record it holds, so one such record would take a
+      // whole pod build down over a field carrying no data.
+      const withEmpty = serialize({ ...base, resultValue: [] } as unknown as CascadeRecord);
+
+      expect(triples(withEmpty)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
+    });
   });
 
   describe('Error handling', () => {

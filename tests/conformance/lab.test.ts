@@ -40,18 +40,9 @@ import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
 import { health, parseTurtle } from '../support/graph.js';
-import type { CascadeRecord } from '../../src/models/common.js';
+import type { LabResult } from '../../src/models/lab-result.js';
 
 const lab013 = loadCascadeRecordFixture('lab-013');
-
-/**
- * `CascadeRecord` does not declare `interpretationSourceCode`. The property is
- * registered in `PROPERTY_PREDICATES` and owned by a term module, but no model
- * interface carries it yet, so the read below is widened HERE rather than cast
- * away — an `any` would switch typechecking off for the one assertion that
- * needs it most.
- */
-type RecordWithSourceCode = CascadeRecord & { interpretationSourceCode?: string | string[] };
 
 describe('lab-013 — Negative: two health:interpretationSourceCode values on one record', () => {
   // `task.suite` is the enclosing describe. Asserting the title against the
@@ -79,7 +70,7 @@ describe('lab-013 — Negative: two health:interpretationSourceCode values on on
     // written and is collapsed on the way back, so re-serializing what came
     // back writes a single code that sh:maxCount 1 has nothing to object to:
     // the same clean verdict on incomplete data, arriving from the other end.
-    const parsed = deserializeOne<RecordWithSourceCode>(
+    const parsed = deserializeOne<LabResult>(
       serialize(lab013.input),
       lab013.input.type,
     );

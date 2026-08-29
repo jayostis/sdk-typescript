@@ -104,4 +104,24 @@ export interface LabResult extends CascadeRecord {
    * Maps to `clinical:hasEncounter` (clinical v1.10).
    */
   hasEncounter?: string;
+
+  /**
+   * The interpretation code the SOURCE wrote, copied verbatim, for the case
+   * where it is a member of neither value set `interpretation` is bound to
+   * (health v2.7).
+   *
+   * Deliberately unconstrained in its VALUE: a value set or a pattern here
+   * would recreate exactly the loss the property exists to prevent.
+   *
+   * Repeatable, for the same reason the writer emits a triple per value:
+   * `health:LabResultRecordShape` caps this at `sh:maxCount 1`, and a shape can
+   * only judge what reached the graph, so a merged record carrying two source
+   * codes has to arrive with both for the cap to have anything to report —
+   * which is what `lab-013` is the fixture for. The reader returns every triple
+   * it finds, so a record that went in with two comes back with two — narrow
+   * with {@link asArray} before reaching for a string method.
+   *
+   * Maps to one `health:interpretationSourceCode` triple per value.
+   */
+  interpretationSourceCode?: MultiValue<string>;
 }

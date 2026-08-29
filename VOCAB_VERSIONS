@@ -154,7 +154,12 @@ pots=1.4
 #     was never registered here, so the INGESTION axis could not round-trip
 #     while ORIGIN could.
 # health=2.7 / clinical=1.15: interpretationSourceCode registered in BOTH
-#     spellings (health: on labs, clinical: on vitals) and typed on VitalSign.
+#     spellings (health: on labs, clinical: on vitals) and typed on VitalSign
+#     AND on LabResult, as MultiValue<string>. The arity is the writer's and the
+#     reader's: a triple per value out, every triple back, so a model saying
+#     `string` described data this SDK does not produce and a caller's
+#     `.trim()` typechecked and threw. sh:maxCount 1 on both shapes is a rule
+#     about validating a graph, not about what a reader may find in one.
 #     LAB_INTERPRETATION_VALUES moves 60 to 74 (the 14 data-absent-reason codes
 #     it lacked) and the checksum is re-pinned. VitalSign.interpretation
 #     narrows from `VitalInterpretation | string`, which TypeScript collapsed
