@@ -13,6 +13,7 @@
  */
 
 export * from './term.js';
+export * from './data-absent-reason.js';
 
 import type { Term } from './term.js';
 

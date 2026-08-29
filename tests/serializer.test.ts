@@ -11,6 +11,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { serialize } from '../src/serializer/turtle-serializer.js';
 import type { CascadeRecord } from '../src/models/common.js';
+import { triples } from './support/graph.js';
 
 // ─── Fixture Loading ────────────────────────────────────────────────────────
 
@@ -326,6 +327,59 @@ describe('Turtle Serializer', () => {
 
       expect(result).toContain('clinical:effectivePeriodStart "2020-01-01T00:00:00Z"^^xsd:dateTime');
       expect(result).toContain('clinical:providerName "Blue Cross Blue Shield"');
+    });
+  });
+
+  describe('Fields no term claims', () => {
+    // What `emitField` must keep doing once a term lookup is forked in ahead of
+    // its type-driven chain (#2). `termFor` is undefined for all 252 registered
+    // fields that no term module claims, and every one of them has to reach the
+    // branch it reaches today — so the fork's job is to RETURN CONTROL, not to
+    // become a new default.
+    //
+    // Characterisation, not red: both of these pass at HEAD, where no fork
+    // exists at all. They are the guard on the change rather than the reason
+    // for it, and they say nothing until the fork lands.
+    //
+    // Asserted on the graph via `triples()` rather than with `toContain` on the
+    // Turtle text, because the discriminator IS the datatype: a fork that
+    // claimed this field under a `literal` rule would write "4.2" where the
+    // serializer writes a bare 4.2, and both spellings contain the substring.
+
+    const base: Record<string, unknown> = {
+      id: 'urn:uuid:fork0000-aaaa-bbbb-cccc-ddddeeeeffff',
+      type: 'LabResultRecord',
+      testName: 'Serum Potassium',
+      dataProvenance: 'EHRVerified',
+      schemaVersion: '1.3',
+    };
+
+    const SUBJECT = '<urn:uuid:fork0000-aaaa-bbbb-cccc-ddddeeeeffff>';
+
+    it('leaves a registered field with no term on its type-driven branch', () => {
+      // `resultValue` is registered (health:resultValue) and no term module
+      // claims it. A non-integer number takes the decimal branch, and RDF 1.1
+      // types a bare 4.2 as xsd:decimal — the predicate and the datatype are
+      // both written out here rather than derived from PROPERTY_PREDICATES,
+      // which would make the test agree with the code by construction.
+      const result = serialize({ ...base, resultValue: 4.2 } as unknown as CascadeRecord);
+
+      expect(triples(result)).toContain(
+        `${SUBJECT} <https://ns.cascadeprotocol.org/health/v1#resultValue> `
+        + '"4.2"^^<http://www.w3.org/2001/XMLSchema#decimal>',
+      );
+    });
+
+    it('skips a field with no registered predicate in silence', () => {
+      // A stray non-Cascade key is not an error — `emitField` returns at
+      // `if (!pred) return;` and writes nothing. The fork sits ABOVE that
+      // guard, so a fork that threw, or that wrote a triple under a blank
+      // predicate, would show up as a difference between these two graphs.
+      // Comparing whole graphs rather than asserting one absence also catches a
+      // fork that quietly changed some OTHER field on the way past.
+      const withStray = serialize({ ...base, notAThing: 'ignore me' } as unknown as CascadeRecord);
+
+      expect(triples(withStray)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
     });
   });
 
