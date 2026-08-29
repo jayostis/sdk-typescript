@@ -193,9 +193,30 @@ export class SubjectBuilder {
    * no-op, so a caller holding `term.outputsFor(record)` needs no guard for an
    * absent field.
    *
-   * STUB: writes nothing.
+   * Every {@link Output} carries a finished value, so each case here has one
+   * method to call and one way to pass its arguments: the prefix, the datatype
+   * and the escaping were all decided in the term, where they are pure data.
    */
-  addAll(_outputs: Output[]): this {
+  addAll(outputs: Output[]): this {
+    for (const output of outputs) {
+      switch (output.kind) {
+        case 'literal':
+          this.literal(output.predicate, output.value, output.datatype);
+          break;
+        case 'uri':
+          this.uri(output.predicate, output.value);
+          break;
+        case 'uriList':
+          this.uriList(output.predicate, output.items);
+          break;
+        case 'blankNode':
+          this.blankNode(output.predicate, (b) => {
+            b.type(output.rdfType);
+            b.addAll(output.children);
+          });
+          break;
+      }
+    }
     return this;
   }
 
