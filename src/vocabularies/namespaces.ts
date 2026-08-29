@@ -337,6 +337,27 @@ export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; na
     nameKey: 'date',
     namePred: 'cascade:date',
   },
+  // ── Clinical v1.16 — one participation in an encounter ──
+  // A STRUCTURAL SUB-NODE, written as an inline blank node under
+  // clinical:hasParticipant, the same way an export manifest carries its
+  // cascade:RecordSummary. It is registered here for the same two reasons
+  // 'record-summaries' is: the JSON-LD context takes its type aliases from this
+  // map, and a subject that some other producer wrote out standalone should
+  // still resolve on read.
+  'encounter-participants': {
+    rdfType: 'clinical:EncounterParticipant',
+    nameKey: 'participantName',
+    namePred: 'clinical:participantName',
+  },
+  // ── Core v3.7 — pod attachment metadata ──
+  // NOT a sub-node. cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI
+  // on the object of cascade:hasAttachment, so an attachment is a subject with
+  // its own IRI and lives in its own file; a blank node would fail that shape.
+  attachments: {
+    rdfType: 'cascade:Attachment',
+    nameKey: 'attachmentTitle',
+    namePred: 'cascade:attachmentTitle',
+  },
 } as const;
 
 // ─── Record Type to Mapping Key ─────────────────────────────────────────────
@@ -387,6 +408,8 @@ export const TYPE_TO_MAPPING_KEY: Record<string, string> = {
   InteractionScenario: 'interaction-scenarios',
   DailyActivitySnapshot: 'daily-activity',
   DailySleepSnapshot: 'daily-sleep',
+  EncounterParticipant: 'encounter-participants',
+  Attachment: 'attachments',
 };
 
 // ─── Deprecated Type Aliases (clinical v1.13) ───────────────────────────────
@@ -627,6 +650,74 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   encounterStart: 'clinical:encounterStart',
   encounterEnd: 'clinical:encounterEnd',
 
+  // ── Clinical v1.16 — the rest of the Encounter.class Coding ──
+  // The CODE stays in encounterClass for round-trip. Encounter.class is bound
+  // only EXTENSIBLY, so a conformant server may send a local code such as "5":
+  // the display makes it readable and the system is the only thing that tells a
+  // ratified ActEncounterCode apart from a local category that looks like one.
+  encounterClassDisplay: 'clinical:encounterClassDisplay',
+  // Ranged xsd:anyURI in the ontology, but written as a plain string literal:
+  // clinical:EncounterShape accepts anyURI OR string via sh:or, explicitly
+  // because serializers differ on which they write for a URI-valued literal.
+  encounterClassSystem: 'clinical:encounterClassSystem',
+
+  // ── Clinical v1.16 — why the visit happened, and the admission signals ──
+  // encounterReason is 0..* (Encounter.reasonCode). NONE of the three carries a
+  // value set: FHIR binds reasonCode and admitSource only PREFERRED and
+  // dischargeDisposition only EXAMPLE, and an enum on an example-strength
+  // binding rejects conformant data by construction. admitSource is the signal
+  // that separates an admission from an office visit — through v1.15 there was
+  // nowhere to put it, so that distinction was unrecoverable from the pod.
+  encounterReason: 'clinical:encounterReason',
+  admitSource: 'clinical:admitSource',
+  dischargeDisposition: 'clinical:dischargeDisposition',
+
+  // ── Clinical v1.16 — encounter participation ──
+  // hasParticipant is an ObjectProperty, 0..*, whose object is a structural
+  // sub-node written INLINE as a blank node (see BLANK_NODE_TYPES in the
+  // serializer). The four participant properties below are its fields; they are
+  // registered here rather than only nested so the reverse predicate map
+  // resolves them when the blank node is rebuilt on read.
+  //
+  // The rejected alternative was a flat family of role-qualified predicates on
+  // the encounter. It fails twice over: the role vocabulary is EXTENSIBLE, so a
+  // fixed family silently drops local roles, and a visit routinely carries
+  // several participants in the SAME role.
+  hasParticipant: 'clinical:hasParticipant',
+  participantName: 'clinical:participantName',
+  participantRole: 'clinical:participantRole',
+  // 0..*, and deliberately unenumerated: Encounter.participant.type is bound
+  // EXTENSIBLY, so rejecting a local code would discard the participant with it.
+  participantRoleCode: 'clinical:participantRoleCode',
+  participantSpecialty: 'clinical:participantSpecialty',
+
+  // ── Clinical v1.16 — business identifier (DOMAIN-FREE, 0..*) ──
+  // The .identifier element every FHIR resource carries. NOT sourceRecordId,
+  // which is the server-assigned logical id (Resource.id): the two id spaces do
+  // not join, and one predicate holding both made a stored value
+  // uninterpretable. Values are the FHIR token form "{system}|{value}" where the
+  // source states a system, otherwise the bare value. This SDK round-trips the
+  // string and does not parse or validate the token form.
+  businessIdentifier: 'clinical:businessIdentifier',
+
+  // ── Clinical v1.16 — document status, authorship and attestation ──
+  // PREDICATES ONLY: this SDK models no clinical:ClinicalDocument class, so
+  // there is nothing here to attach them to, exactly as with the core v3.4
+  // device-source terms (sourceType / dataTypes / version). Registering them
+  // still makes them round-trip on whatever subject a caller writes them to;
+  // leaving them out would drop them silently.
+  //
+  // documentReferenceStatus is DocumentReference.status (current | superseded |
+  // entered-in-error) and is a different assertion from the docStatus
+  // clinical:status carries. "entered-in-error" is in BOTH value sets and means
+  // different things in each, which is why they cannot share a predicate.
+  documentReferenceStatus: 'clinical:documentReferenceStatus',
+  // 0..*. clinical:providerName is sh:maxCount 1 on the document shapes, so
+  // every author past the first was being discarded on import.
+  documentAuthorName: 'clinical:documentAuthorName',
+  // Who SIGNED the document, routinely not who wrote it.
+  authenticatorName: 'clinical:authenticatorName',
+
   // ── Family history predicates ──
   // Note: `relationship` is shared with Coverage predicates above (clinical:relationship)
   onsetAge: 'health:onsetAge',
@@ -830,6 +921,34 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   // in the deserializer); which one is written is decided per record type by
   // TYPE_PREDICATE_OVERRIDES in the serializer.
   sampleCount: 'cascade:sampleCount',
+
+  // ── Core v3.7 — pod attachments ──
+  // The bytes are a FILE, not a literal. FHIR permits inline base64
+  // (Attachment.data) or a pointer (Attachment.url); Cascade takes the second,
+  // because Turtle in a pod is parse-critical and read in full by every
+  // consumer, so an unbounded base64 literal is paid for by readers that will
+  // never open the attachment.
+  //
+  // hasAttachment is 0..* and its object is ALWAYS AN IRI, never a blank node:
+  // cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI so that the
+  // record and the attachment can live in different files. This is the one place
+  // core v3.7 and clinical v1.16 diverge on sub-node shape — a participation is
+  // pointed at from nowhere and may be a blank node, an attachment may not.
+  hasAttachment: 'cascade:hasAttachment',
+  // Pod-RELATIVE, never absolute and never a file: URL: a pod is copied,
+  // exported and re-rooted, and both break on the first of those.
+  attachmentPath: 'cascade:attachmentPath',
+  attachmentMediaType: 'cascade:attachmentMediaType',
+  // LOWERCASE HEX, no algorithm prefix — the value is also the file's name
+  // under attachments/{algorithm}/, and base64's alphabet contains "/" and is
+  // case-sensitive. That equality is what makes the store verifiable.
+  contentHash: 'cascade:contentHash',
+  // Named explicitly, and deliberately NOT FHIR's: Attachment.hash fixes SHA-1,
+  // and a collision-capable digest in a content-addressed store is a mechanism
+  // for one document to silently replace another. IANA RFC 6920 tokens.
+  hashAlgorithm: 'cascade:hashAlgorithm',
+  byteSize: 'cascade:byteSize',
+  attachmentTitle: 'cascade:attachmentTitle',
 
   // ── Core predicates (cascade: vocabulary) ──
   dataProvenance: 'cascade:dataProvenance',

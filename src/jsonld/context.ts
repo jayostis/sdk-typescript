@@ -91,7 +91,18 @@ export function getContext(): object {
   // (clinical v1.10-v1.12 graph edges).
   const iriSetFields = new Set([
     'indicationReference', 'parsedIndicationReference', 'linkedCondition',
+    // core v3.7: the attachment edge. Repeatable, and its object is always an
+    // IRI (cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI).
+    'hasAttachment',
   ]);
+
+  // Repeated object properties whose object is an inline NODE rather than a
+  // bare IRI (clinical v1.16 hasParticipant). `@container: @set` keeps a single
+  // participation an array on compaction, matching the model's
+  // `EncounterParticipant[]`. Deliberately NOT given `@type: @id`: that coerces
+  // a value to an IRI reference, which would misread the embedded blank node
+  // these edges actually carry.
+  const nodeSetFields = new Set(['hasParticipant']);
 
   // Fields that need xsd:dateTime typing
   const dateTimeFields = new Set([
@@ -128,6 +139,8 @@ export function getContext(): object {
     'sampleCount',
     // health v2.5 — daily snapshot
     'exerciseMinutes', 'standHours',
+    // core v3.7 — attachment size in bytes
+    'byteSize',
   ]);
 
   // Fields that need xsd:decimal/double typing
@@ -151,6 +164,8 @@ export function getContext(): object {
       context[key] = { '@id': pred, '@type': '@id', '@container': '@list' };
     } else if (iriSetFields.has(key)) {
       context[key] = { '@id': pred, '@type': '@id', '@container': '@set' };
+    } else if (nodeSetFields.has(key)) {
+      context[key] = { '@id': pred, '@container': '@set' };
     } else if (dateTimeFields.has(key)) {
       context[key] = { '@id': pred, '@type': 'xsd:dateTime' };
     } else if (dateOnlyFields.has(key)) {
