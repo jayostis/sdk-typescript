@@ -2,7 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Integration branches too, not only main. A merge into epic/** is a push to
+    # a non-main branch, so nothing ran on it: #9 and #17 were both checked as
+    # pull requests and the branch they landed on was never tested as a whole.
+    #
+    # Takes effect immediately once merged — a push trigger is read from the
+    # workflow file on the branch being pushed, unlike workflow_dispatch, which
+    # is only offered from the default branch.
+    branches: [main, 'epic/**']
   pull_request:
 
 permissions:
