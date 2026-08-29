@@ -36,6 +36,23 @@ export const health = env.namespace(NAMESPACES.health);
 export const clinical = env.namespace(NAMESPACES.clinical);
 
 /**
+ * `vcard:`, which a record's data lands in only by mistake.
+ *
+ * `PROPERTY_PREDICATES` registers `contactPhone` as `vcard:hasTelephone`, but a
+ * blank node's CHILD predicates are built from the node's prefix and the JSON
+ * key rather than looked up there, so an emergency contact's phone is
+ * `cascade:contactPhone`. Both spellings are live vocabulary, so only asking
+ * the graph for the wrong one pins the right one.
+ */
+export const vcard = env.namespace(NAMESPACES.vcard);
+
+/**
+ * `rdf:`, for `rdf:type` — the one predicate a typed blank node carries that is
+ * not in `NAMESPACES`, which lists the vocabularies this SDK writes data under.
+ */
+export const rdf = env.namespace('http://www.w3.org/1999/02/22-rdf-syntax-ns#');
+
+/**
  * Turtle text as a traversable graph.
  *
  * Takes TEXT, not a record, so the `serialize()` call stays in the test where a
