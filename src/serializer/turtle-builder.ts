@@ -23,6 +23,8 @@
  * @module serializer
  */
 
+import type { Output } from '../terms/term.js';
+
 // ─── String Escaping ────────────────────────────────────────────────────────
 
 /**
@@ -179,6 +181,21 @@ export class SubjectBuilder {
       return `        ${p}${sep}`;
     });
     this._predicates.push(`${predicate} [\n${innerLines.join('\n')}\n    ]`);
+    return this;
+  }
+
+  /**
+   * Write every {@link Output} a term produced, dispatching each to the
+   * builder method for its kind.
+   *
+   * A dispatcher, not a second implementation: the Turtle produced for each
+   * kind is identical to calling that method directly. An empty array is a
+   * no-op, so a caller holding `term.outputsFor(record)` needs no guard for an
+   * absent field.
+   *
+   * STUB: writes nothing.
+   */
+  addAll(_outputs: Output[]): this {
     return this;
   }
 
