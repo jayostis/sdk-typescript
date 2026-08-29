@@ -1,5 +1,6 @@
 import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
+import { termFor } from '../terms/index.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -387,12 +388,61 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /** Validate a single CascadeRecord for structural correctness. */
+/**
+ * Too many values for a field whose vocabulary caps them.
+ *
+ * The first check here that is not hand-transcribed. Every rule above restates
+ * a constraint `spec` already declares — `sh:minCount`, `sh:in` — retyped from
+ * a shapes file nothing diffs it against, which is why they drift in both
+ * directions at once: `resultValue` is required here and has no `sh:minCount`
+ * anywhere, while `health:interpretation`'s value set is unchecked and
+ * `lab-010` is accepted with a value the shapes reject.
+ *
+ * This reads the cap off the term instead, so one declaration answers both the
+ * writer and the validator. `termFor` is undefined for every field no module
+ * claims, which is nearly all of them: this reports on the handful that are
+ * termed and stays silent on the rest. Silent is the honest answer for a field
+ * whose cardinality nothing in this SDK knows — the alternative is guessing at
+ * 1 and rejecting conformant records, which is the defect above, reproduced.
+ *
+ * The COUNT is what the graph would carry, not what the JSON looks like: a bare
+ * scalar is one value and an array is its length, because `emitField` writes one
+ * triple per member either way. An absent field is nothing to count.
+ */
+function validateCardinality(record: CascadeEntity): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const rec: RecordFields = { ...record };
+
+  for (const [field, value] of Object.entries(rec)) {
+    const term = termFor(field);
+    // An absent maxCount is UNCONSTRAINED, not unknown — `cascade:PatientProfileShape`
+    // declares none for `cascade:emergencyContact`, so a profile may name several
+    // people to call. Reading it as 1 would reject a conformant record.
+    if (!term || term.maxCount === undefined) continue;
+    if (value === undefined || value === null) continue;
+
+    const count = Array.isArray(value) ? value.length : 1;
+    if (count <= term.maxCount) continue;
+
+    errors.push({
+      field,
+      message:
+        `${field} carries ${count} values; the vocabulary permits at most ` +
+        `${term.maxCount}`,
+      severity: 'error',
+    });
+  }
+
+  return errors;
+}
+
 export function validate(record: CascadeEntity): ValidationResult {
   const baseErrors = validateBase(record);
   const typeErrors = validateTypeSpecific(record);
+  const cardinalityErrors = validateCardinality(record);
   const warningErrors = validateWarnings(record);
 
-  const allErrors = [...baseErrors, ...typeErrors];
+  const allErrors = [...baseErrors, ...typeErrors, ...cardinalityErrors];
   const allWarnings = warningErrors;
 
   return {
