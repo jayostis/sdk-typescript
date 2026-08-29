@@ -337,9 +337,20 @@ describe('Turtle Serializer', () => {
     // branch it reaches today — so the fork's job is to RETURN CONTROL, not to
     // become a new default.
     //
-    // Characterisation, not red: both of these pass at HEAD, where no fork
-    // exists at all. They are the guard on the change rather than the reason
-    // for it, and they say nothing until the fork lands.
+    // Characterisation, not red: the first two of these pass at HEAD, where no
+    // fork exists at all. They are the guard on the change rather than the
+    // reason for it, and they say nothing until the fork lands.
+    //
+    // The third one IS red (#15). An ARRAY on a registered field no term claims
+    // falls off the end of the type-driven chain and is written nowhere: every
+    // branch below the fork tests for a string, a number, a boolean or an
+    // object, so the value vanishes and the record serializes as though the
+    // field had been absent. That is how `lab-013`'s two source codes were lost,
+    // and adding one field to one arity table fixes that fixture without
+    // closing the hole. The two silent cases above stay silent — a scalar with
+    // no term keeps its default, and a stray key is still not an error — so
+    // what is asserted here is narrow: an array is the one value the chain
+    // cannot write, and it has to say so instead of dropping it.
     //
     // Asserted on the graph via `triples()` rather than with `toContain` on the
     // Turtle text, because the discriminator IS the datatype: a fork that
@@ -380,6 +391,21 @@ describe('Turtle Serializer', () => {
       const withStray = serialize({ ...base, notAThing: 'ignore me' } as unknown as CascadeRecord);
 
       expect(triples(withStray)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
+    });
+
+    it('throws on an array it has no rule for rather than writing nothing', () => {
+      // `resultValue` again: registered (health:resultValue), claimed by no
+      // term, and in none of the arity tables. Two values are not a valid
+      // resultValue and nobody should send them — but a caller who does is
+      // owed an error naming the field, not a graph that quietly says the
+      // record had no result at all.
+      //
+      // A constructed record and not a fixture, deliberately: once the terms
+      // land no fixture in the corpus reaches this branch, and one that did
+      // would be a bug to fix rather than a case to test.
+      expect(() =>
+        serialize({ ...base, resultValue: ['4.2', '4.3'] } as unknown as CascadeRecord),
+      ).toThrow(/resultValue/);
     });
   });
 

@@ -34,6 +34,7 @@ import {
   LAB_INTERPRETATION_CHECKSUM,
 } from '../src/models/common.js';
 import { PROPERTY_PREDICATES, TYPE_MAPPING } from '../src/vocabularies/namespaces.js';
+import { clinical, parseTurtle } from './support/graph.js';
 import type { CascadeRecord } from '../src/models/common.js';
 import type { VitalSign } from '../src/models/vital-sign.js';
 
@@ -147,6 +148,32 @@ describe('interpretationSourceCode (health v2.7 / clinical v1.15)', () => {
     const turtle = serializeFixture('vital-001');
     expect(turtle).toContain('clinical:interpretationSourceCode "elevated"');
     expect(turtle).not.toContain('health:interpretationSourceCode');
+  });
+
+  it('declares the clinical: prefix on a record whose only clinical: field is this one', () => {
+    // The `toContain` above passes whether or not the matching `@prefix` line
+    // is in the header, and on vital-001 it could not fail either way:
+    // `snomedCode` re-prefixes to clinical: on a VitalSign too, so the
+    // declaration is there regardless of what this field does. The case that
+    // can fail is a record carrying no other clinical: field, and the way to
+    // ask it is to PARSE rather than string-match — an undeclared prefix is
+    // invisible to `toContain` and fatal to a reader, so `parseTurtle`
+    // throwing is itself the assertion, and the values are what it should say
+    // once it parses.
+    //
+    // Worth keeping past this issue: every future per-type predicate has to
+    // resolve the same way in the header as in the subject block, and this is
+    // the shape that notices when it does not.
+    const turtle = serialize({
+      id: 'urn:uuid:00000000-0000-4000-8000-0000000000bb',
+      type: 'VitalSign',
+      interpretationSourceCode: 'elevated',
+      dataProvenance: 'ClinicalGenerated',
+      schemaVersion: '1.3',
+    } as unknown as CascadeRecord);
+
+    const node = parseTurtle(turtle).namedNode('urn:uuid:00000000-0000-4000-8000-0000000000bb');
+    expect(node.out(clinical.interpretationSourceCode).values).toEqual(['elevated']);
   });
 
   it('writes the health: spelling on a lab result', () => {

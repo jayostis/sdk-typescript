@@ -23,6 +23,19 @@ import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
 export const cascade = env.namespace(NAMESPACES.cascade);
 
 /**
+ * The other two namespaces a record's own data lands in, for the same reason
+ * and read the same way.
+ *
+ * Both are needed by one assertion rather than by two: a field whose predicate
+ * is re-prefixed per record type — `interpretationSourceCode` under `health:`
+ * on a lab result and `clinical:` on a vital sign — is only pinned by asking
+ * the graph both questions, since a term that resolved the wrong one writes a
+ * triple that is perfectly valid under the other namespace.
+ */
+export const health = env.namespace(NAMESPACES.health);
+export const clinical = env.namespace(NAMESPACES.clinical);
+
+/**
  * Turtle text as a traversable graph.
  *
  * Takes TEXT, not a record, so the `serialize()` call stays in the test where a
