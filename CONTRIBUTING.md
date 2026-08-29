@@ -32,6 +32,21 @@ npm run build
 
 Install the hooks once: `sh scripts/install-hooks.sh`. The pre-commit hook blocks commits to `src/models/` or `src/vocabularies/` without updating `VOCAB_VERSIONS`.
 
+### Debugging a test
+
+Install the recommended **Vitest** extension — VS Code offers it on first open, from `.vscode/extensions.json`. It puts Run and Debug next to every `describe` and `it`, and reads vitest's own discovery, so a moved or renamed suite needs no configuration on your side.
+
+A breakpoint is not tied to the test you launch from. Set one anywhere in `src/`, debug the test that exercises it, and execution stops there.
+
+Verified against `vitest.explorer` v1.50.8: a breakpoint in `src/serializer/turtle-serializer.ts` binds and is hit when debugging a single `it`, and `F11` steps into the function under the cursor rather than over it. Neither of the settings below was needed.
+
+They are recorded because both were real against a hand-rolled debug configuration, and are the first two things to try if you run vitest under one:
+
+- **Breakpoints never bind.** Vitest runs each file in a worker thread by default and the debugger can fail to attach. Running single-threaded fixes it — `--poolOptions.threads.singleThread`, or `--pool=forks --poolOptions.forks.singleFork` for a plainer target.
+- **"Step into" silently steps over.** That is `smartStep`, which skips code that does not map cleanly to source — which, against vitest's on-the-fly TypeScript transpile, is most of it. Turn it off.
+
+There is deliberately no `launch.json` in this repository. One existed, pinned a suite by filename, and went stale the first time that file moved.
+
 ## What must be green before review
 
 ```bash
