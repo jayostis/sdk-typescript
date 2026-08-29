@@ -26,6 +26,21 @@
  *   be confused with `AIExtracted` (grounded extraction) or `EHRVerified`.
  *   Maps to `cascade:AIAsserted` (subClassOf `cascade:ConsumerGenerated`).
  * - `EHRVerified` -- Data verified against electronic health records
+ * - `PatientReported` -- Information originating from the patient's own account
+ *   and recorded by ANOTHER party or system: history related to a clinician,
+ *   imported questionnaire responses. Added in core v3.8.
+ *
+ *   THE DISTINCTION FROM `SelfReported` IS WHO KEYED IT IN, not who it came
+ *   from. Both originate with the patient; `SelfReported` is the patient
+ *   entering data directly, `PatientReported` is their account reaching the
+ *   record through an intermediary who may have summarized, paraphrased or
+ *   mis-transcribed it. A consumer weighing how directly a claim is attested
+ *   needs the two kept apart.
+ *
+ *   `cascade:PatientReported` is a direct subclass of `cascade:DataProvenance`
+ *   and deliberately sits under NEITHER `ClinicalGenerated` nor
+ *   `ConsumerGenerated`: a patient's report reaches records through either
+ *   setting, so filing it under one would make the other case unrepresentable.
  */
 export type ProvenanceType =
   | 'ClinicalGenerated'
@@ -34,7 +49,8 @@ export type ProvenanceType =
   | 'AIExtracted'
   | 'AIGenerated'
   | 'AIAsserted'
-  | 'EHRVerified';
+  | 'EHRVerified'
+  | 'PatientReported';
 
 /**
  * Provenance class indicating the specific import mechanism or tracking method.
@@ -324,6 +340,58 @@ export type CoverageType =
   | 'supplemental';
 
 /**
+ * Lifecycle state of a coverage record itself: whether the plan is in force,
+ * was cancelled, is still a draft, or was entered in error (coverage v1.5).
+ *
+ * The four codes of FHIR R4 `Coverage.status`, a REQUIRED binding to
+ * `http://hl7.org/fhir/ValueSet/fm-status`. Closed rather than
+ * `CoverageStatus | string` for the reason clinical v1.15 closed
+ * `VitalSign.interpretation`: `coverage:InsurancePlanShape` constrains the
+ * VALUE at `sh:Violation`, so the open binding that would justify a union does
+ * not exist here. (Contrast {@link CoverageType}, which stays open because FHIR
+ * binds `Coverage.type` EXTENSIBLY.)
+ *
+ * FHIR marks `Coverage.status` a MODIFIER element, which is why this is not a
+ * nice-to-have: a cancelled plan read as an active one is a wrong answer to "am
+ * I covered", not a missing one.
+ *
+ * DISTINCT FROM `effectiveStart` / `effectiveEnd`. A date range says when the
+ * plan is meant to apply; the status says what the payer currently asserts
+ * about the record. A plan whose effective period has not ended can still be
+ * cancelled.
+ *
+ * Maps to `coverage:status` in Turtle serialization.
+ */
+export type CoverageStatus =
+  | 'active'
+  | 'cancelled'
+  | 'draft'
+  | 'entered-in-error';
+
+/**
+ * Status of the REFERENCE to a clinical document (clinical v1.16): whether this
+ * pod entry is the current pointer to the document, has been replaced by a
+ * later one, or was created in error.
+ *
+ * The three codes of FHIR R4 `DocumentReference.status`, a required binding.
+ *
+ * DISTINCT FROM the document's own `docStatus` (preliminary | final | amended |
+ * entered-in-error), which `clinical:status` carries. FHIR keeps these as two
+ * elements because they answer different questions: a document can be a final,
+ * unamended clinical note whose reference has since been superseded by a
+ * corrected filing. Folding them onto one predicate is not merely lossy, it is
+ * ambiguous exactly where ambiguity costs most — `"entered-in-error"` appears
+ * in BOTH value sets and means the reference was filed in error in one and that
+ * the clinical content is repudiated in the other.
+ *
+ * Maps to `clinical:documentReferenceStatus` in Turtle serialization.
+ */
+export type DocumentReferenceStatus =
+  | 'current'
+  | 'superseded'
+  | 'entered-in-error';
+
+/**
  * Subscriber relationship to the plan holder: the full HL7 SubscriberPolicyholder
  * code system (`http://terminology.hl7.org/CodeSystem/subscriber-relationship`)
  * that FHIR R4 binds `Coverage.relationship` to.
@@ -464,6 +532,59 @@ export interface CascadeEntity {
    * Maps to `cascade:sourceIdentity` in Turtle serialization.
    */
   sourceIdentity?: string;
+
+  /**
+   * Identifier(s) the source system PUBLISHES for the real-world thing this
+   * record describes, as opposed to the server row it happens to live in
+   * (clinical v1.16). On an encounter this is `Encounter.identifier`, US Core
+   * Must Support; a visit or contact serial number is the ordinary value.
+   *
+   * Typed on `CascadeEntity` because the vocabulary deliberately declares NO
+   * `rdfs:domain`: the `.identifier` element exists on every FHIR resource, so
+   * restricting it to encounters would be false.
+   *
+   * REPEATABLE, 0..*. A resource that publishes three identifiers has three,
+   * and keeping only one discards the very value another transport may key on.
+   *
+   * VALUE FORM. Where the source states an `Identifier.system`, the value is
+   * the FHIR token form `"{system}|{value}"`, which is the ratified way to
+   * write a system-qualified identifier as one string and is what makes two
+   * identifiers comparable across transports without a side table. Where the
+   * source states no system, the bare value is written. An implementation MUST
+   * NOT invent a system. This SDK stores and round-trips the string and does
+   * NOT parse, split or validate the token form.
+   *
+   * DISTINCT FROM {@link CascadeEntity.sourceRecordId}, which holds the
+   * server-assigned LOGICAL id (FHIR `Resource.id`). The two id spaces do not
+   * join: the same string in each means nothing in common. A converter that
+   * has been writing a business identifier to `sourceRecordId` must move it.
+   *
+   * Maps to one `clinical:businessIdentifier` triple per value.
+   */
+  businessIdentifier?: MultiValue<string>;
+
+  /**
+   * Binary renderings of this record, referenced BY IRI (core v3.7): the PDF a
+   * DiagnosticReport was issued as, the scanned page behind a
+   * DocumentReference. Each value is the `id` of a `cascade:Attachment`.
+   *
+   * REPEATABLE, because both source elements
+   * (`DiagnosticReport.presentedForm`, `DocumentReference.content.attachment`)
+   * are: one report legitimately has a PDF and an HTML rendering of the same
+   * content.
+   *
+   * Typed on `CascadeEntity` because the vocabulary leaves the domain
+   * unrestricted — "any record that can be rendered as a document" — and
+   * constrains it by SHACL instead, matching `clinical:hasEncounter` and the
+   * other cross-class edges.
+   *
+   * Never a blank node: `cascade:HasAttachmentEdgeShape` declares
+   * `sh:nodeKind sh:IRI` so that the record and the attachment can live in
+   * different files.
+   *
+   * Maps to one `cascade:hasAttachment` triple per IRI.
+   */
+  hasAttachment?: MultiValue<string>;
 
   /**
    * Free-text notes associated with this subject.

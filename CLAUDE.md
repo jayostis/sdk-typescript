@@ -47,7 +47,9 @@ Check `VOCAB_VERSIONS` at the repo root. Compare against `spec/VOCAB_VERSIONS` t
 See `VOCAB_VERSIONS` comments. Remaining items:
 - **Core v2.8**: `fhirResourceType` is still unregistered. `layerPromotionStatus`, `fhirJson` and `sourceRecordDate` are present.
 - **Health v2.0/v2.5**: the eight history-container object properties (`restingHeartRateHistory`, `dailyActivityHistory`, ...) and the reading classes they range over are unmodelled. The six wellness containers are registered as constants only; this SDK does not serialize a `health:HealthProfile`.
-- **Blank-node reads**: only `clinicalSummary` / `wellnessSummary` are reconstructed into nested objects. The patient-profile sub-structures (`emergencyContact`, `address`, `preferredPharmacy`) serialize as blank nodes but come back as blank-node identifiers.
+- **Blank-node reads**: only `clinicalSummary` / `wellnessSummary` and (since clinical v1.16) `hasParticipant` are reconstructed into nested objects. The patient-profile sub-structures (`emergencyContact`, `address`, `preferredPharmacy`) serialize as blank nodes but come back as blank-node identifiers.
+- **Coverage class**: `TYPE_MAPPING` resolves both `InsurancePlan` and `CoverageRecord` to `clinical:CoverageRecord`, so `coverage:InsurancePlan` is never emitted and coverage's own shapes never validate these records. `coverage:status` (v1.5) is consequently one-way: it writes correctly, but the class is lost on read so a re-serialize writes `health:status`.
+- **No `ClinicalDocument` model**: clinical v1.16's `documentReferenceStatus`, `documentAuthorName` and `authenticatorName` are registered as predicates with no model to attach them to.
 - **Conformance coverage**: the fixture-driven harnesses load a subset of the fixture families. `dailyvital-`, `device-`, `encounter-`, `medadmin-`, `imaging-`, `social-`, `proxy-`, `claim-`, `benefit-` and `denial-` are not exercised by any test.
 - **Silent skips**: `tests/deserializer.test.ts` uses `if (!recordType) return;`, so an unmapped `dataType` reports a pass without asserting anything. Prefer an explicit assertion over an early return.
 

@@ -21,6 +21,8 @@ export type {
   ImmunizationStatus,
   PlanType,
   CoverageType,
+  CoverageStatus,
+  DocumentReferenceStatus,
   SubscriberRelationship,
   BiologicalSex,
   AgeGroup,
@@ -47,7 +49,8 @@ export type { LabResult } from './lab-result.js';
 export type { VitalSign } from './vital-sign.js';
 export type { Immunization } from './immunization.js';
 export type { Procedure } from './procedure.js';
-export type { Encounter } from './encounter.js';
+// Encounter, and the participation sub-node it carries inline (clinical v1.16)
+export type { Encounter, EncounterParticipant } from './encounter.js';
 export type { FamilyHistory } from './family-history.js';
 export type { Coverage } from './coverage.js';
 export type { MedicationAdministration } from './medication-administration.js';
@@ -108,3 +111,7 @@ export type {
   DailySleepSnapshot,
   SleepQuality,
 } from './daily-snapshot.js';
+
+// Pod attachment metadata (core v3.7). A subject with its own IRI, NOT an
+// inline sub-node: cascade:HasAttachmentEdgeShape requires sh:nodeKind sh:IRI.
+export type { Attachment } from './attachment.js';

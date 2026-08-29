@@ -17,6 +17,7 @@ import type {
   CascadeRecord,
   PlanType,
   CoverageType,
+  CoverageStatus,
   SubscriberRelationship,
 } from './common.js';
 
@@ -36,6 +37,29 @@ export interface Coverage extends CascadeRecord {
    * Maps to `clinical:providerName` or `coverage:providerName` in Turtle serialization.
    */
   providerName: string;
+
+  /**
+   * Lifecycle state of the coverage record itself (coverage v1.5): whether the
+   * plan is in force, was cancelled, is still a draft, or was entered in error.
+   *
+   * FHIR R4 `Coverage.status`, `code` 1..1 with a REQUIRED binding. Through
+   * coverage v1.4 `coverage:InsurancePlan` had no status property at all, so an
+   * importer reading a conformant Coverage resource had to discard the one
+   * element FHIR requires it to carry. `claimStatus` and `adjudicationStatus`
+   * are NOT substitutes: they belong to the denial/appeal workflow and describe
+   * what happened to a claim, not whether the plan is in force.
+   *
+   * Optional here even though the source element is 1..1, matching the shape,
+   * which deliberately omits `sh:minCount`: no producer has yet had the chance
+   * to write it, and requiring it would turn every existing plan record red.
+   *
+   * WRITTEN ONLY on a record typed `InsurancePlan`. `status` already resolves to
+   * `health:status` for a condition, so the `coverage:` spelling is selected by
+   * a record-type override in the serializer.
+   *
+   * Maps to `coverage:status` in Turtle serialization.
+   */
+  status?: CoverageStatus;
 
   /**
    * Member identifier for the insured individual.
