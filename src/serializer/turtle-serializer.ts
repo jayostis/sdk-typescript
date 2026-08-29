@@ -304,7 +304,6 @@ const BLANK_NODE_TYPES: Record<string, string> = {
   // fact `src/terms/` owns — and the copy that a reader looking for the
   // `rdf:type` of a contact would find first (#27).
   // Core v3.4: an export manifest carries its per-domain summaries inline.
-  clinicalSummary: 'cascade:RecordSummary',
   wellnessSummary: 'cascade:RecordSummary',
   // Clinical v1.16: one participation in an encounter.
   // clinical:EncounterParticipantShape deliberately omits sh:nodeKind sh:IRI
@@ -486,8 +485,23 @@ function sortedPrefixes(prefixes: Map<string, string>): [string, string][] {
  * Dispatches based on the `type` field of the record. The output matches
  * the conformance fixture expected Turtle format.
  *
+ * **This writer is FAITHFUL, never a gate.** It writes what it is given —
+ * including data the shapes reject. A field capped at `sh:maxCount 1` and handed
+ * two values gets two triples, because a shape can only judge what reached the
+ * graph: a writer that dropped the second would hand the validator a record with
+ * nothing left to violate, and a clean verdict on incomplete data is the failure
+ * this SDK is least able to detect. Cardinality and value sets belong to
+ * {@link validate}. `conformance/fixtures/lab-013.json` exists to be written and
+ * then rejected, and a writer that refused it could not produce it at all.
+ *
+ * It still refuses to INVENT. A value with no expressible form — a scalar where
+ * a rule declares a blank node, a nested array — throws naming the field, since
+ * writing nothing is silent loss and writing something is fabrication. That is a
+ * different question from whether the data is valid.
+ *
  * @param record - Any CascadeRecord (Medication, Condition, VitalSign, etc.)
  * @returns A complete Turtle document string
+ * @throws when a value has no serializable form, or the record type is unknown
  */
 export function serialize(record: CascadeEntity): string {
   return serializeRecord(record);
@@ -622,36 +636,6 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
-    // Boolean fields
-    if (isBooleanField(key, value)) {
-      sub.boolean(pred, value as boolean);
-      return;
-    }
-
-    // Integer fields
-    if (INTEGER_FIELDS.has(key) && typeof value === 'number') {
-      sub.integer(pred, value);
-      return;
-    }
-
-    // Number fields (plain, untyped literals like clinical:value,
-    // referenceRangeLow, health:steps, health:durationHours). RDF 1.1 already
-    // types a bare 8432 as xsd:integer and a bare 7.4 as xsd:decimal.
-    if (typeof value === 'number') {
-      if (Number.isInteger(value)) {
-        sub.number(pred, value);
-      } else {
-        sub.decimal(pred, value);
-      }
-      return;
-    }
-
-    // URI fields
-    if (URI_FIELDS.has(key) && typeof value === 'string') {
-      sub.uri(pred, value);
-      return;
-    }
-
     // Array fields (repeated predicates for URI lists, RDF list for string lists)
     if (Array.isArray(value) && ARRAY_FIELDS.has(key)) {
       if (value.length === 0) return;
@@ -667,13 +651,61 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
-    // Date-only fields
+    // Everything left is written MEMBER BY MEMBER — one triple per value, in
+    // the order given, whether the caller passed a scalar or an array.
+    //
+    // The mirror of the reader's `convertObject`. Arity and form are separate
+    // questions: the branches above decide the shape of the FIELD (an rdf:List,
+    // a set of blank nodes), and `emitMember` decides the form of one VALUE.
+    // Keeping them apart is what lets a repeated predicate come back off the
+    // graph and go straight out again — a document carrying two health:reaction
+    // triples is read as two values and written as two triples, where a writer
+    // that only understood scalars had to drop one or refuse the record.
+    for (const member of Array.isArray(value) ? value : [value]) {
+      if (member === undefined || member === null) continue;
+      emitMember(key, pred, member);
+    }
+  };
+
+  /**
+   * One value of a field, in whatever form its type calls for.
+   *
+   * Every branch here is about the VALUE, never the field's arity, which is why
+   * the same function serves a scalar and each member of an array.
+   */
+  const emitMember = (key: string, pred: string, value: unknown): void => {
+    if (isBooleanField(key, value)) {
+      sub.boolean(pred, value as boolean);
+      return;
+    }
+
+    if (INTEGER_FIELDS.has(key) && typeof value === 'number') {
+      sub.integer(pred, value);
+      return;
+    }
+
+    // Plain, untyped numeric literals (clinical:value, referenceRangeLow,
+    // health:steps). RDF 1.1 types a bare 8432 as xsd:integer and 7.4 as
+    // xsd:decimal.
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) {
+        sub.number(pred, value);
+      } else {
+        sub.decimal(pred, value);
+      }
+      return;
+    }
+
+    if (URI_FIELDS.has(key) && typeof value === 'string') {
+      sub.uri(pred, value);
+      return;
+    }
+
     if (isDateOnlyField(key) && typeof value === 'string') {
       sub.date(pred, value);
       return;
     }
 
-    // DateTime fields
     if (isDateTimeField(key, record.type) && typeof value === 'string') {
       sub.dateTime(pred, value);
       return;
@@ -686,39 +718,21 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
-    // Default: string literal
     if (typeof value === 'string') {
       sub.literal(pred, value);
       return;
     }
 
-    // Reached only when every branch above declined, and an ARRAY is the only
-    // value that can get here: `isBooleanField` takes every boolean, the bare
-    // `typeof value === 'number'` branch takes every number, the blank-node
-    // branch takes every non-array object, and the default above takes every
-    // string. An array with no rule matched no branch and would be written
-    // NOWHERE — the record serializes as though the field had been absent,
-    // which is how lab-013's two source codes were lost. A caller is owed an
-    // error naming the field instead of a graph that quietly disagrees.
-    //
-    // Safe to throw here because nothing in the corpus reaches it: scanning
-    // the 90 wrapped fixtures for an array-valued field with a registered
-    // predicate, no entry in any of the five rule sets and no term module
-    // returned one result — `interpretationSourceCode` on lab-013 — and the
-    // term above removes it. This fires on no fixture that exists today, and
-    // on any field added tomorrow that nobody gave a rule.
-    if (Array.isArray(value)) {
-      // An EMPTY array carries nothing to lose, so the reasoning above does not
-      // reach it: no triple is the faithful graph for it, and it is what every
-      // arity table already writes for one (IRI_LIST_FIELDS, MULTI_VALUE_FIELDS
-      // and ARRAY_FIELDS each return early on an empty array). A field with no
-      // rule must not be stricter than a field with one — a caller that
-      // normalises an absent optional to `[]` is not the caller this throw is
-      // for, and PodBuilder.build maps serialize over every record it holds, so
-      // one such record would fail a whole pod build over an absent field.
-      if (value.length === 0) return;
-      throw new Error(`No serialization rule for array-valued '${key}' (predicate ${pred})`);
-    }
+    // A member no branch above claims — a nested array, a symbol, a function.
+    // #15's throw stood here and named the whole FIELD, on the reasoning that a
+    // value written nowhere is worse than an error. That reasoning is kept and
+    // narrowed: an array is no longer unwritable, so what remains is a single
+    // value with no form, and the error says which one rather than condemning
+    // the field it sits in.
+    throw new Error(
+      `No serialization rule for ${Array.isArray(value) ? 'a nested array' : `a ${typeof value}`} ` +
+        `in '${key}' (predicate ${pred})`,
+    );
   };
 
   // Emit all fields in the order they appear in the object

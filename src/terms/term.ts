@@ -64,6 +64,25 @@ export type FieldRule = {
    * Turtle that every query for the declared predicate misses.
    */
   nestedPrefix?: string;
+  /**
+   * `blankNode` only: the node's children, each with its own rule.
+   *
+   * The point of declaring them is that a blank node's children are otherwise
+   * DERIVED — `childrenOf` writes every key of whatever object it is handed,
+   * under `nestedPrefix`. That makes the writer authoritative and undeclarable,
+   * so every other consumer has to be told separately what it produces: the
+   * deserializer's reverse map and the JSON-LD context each carried their own
+   * copy of these twelve.
+   *
+   * Declaring them also gives a child a FORM, which is what `nestedOutputs`
+   * lacks — it dispatches on the runtime type, so a nested `5` writes a bare
+   * token where `serializeBlankNode` writes `"5"^^xsd:integer` for the same
+   * field. Same triple, different bytes, and `pod-002` is asserted byte-for-byte.
+   *
+   * Optional: a rule without it keeps the old derive-everything behavior, so
+   * the two can be migrated one term at a time.
+   */
+  children?: Record<string, FieldRule>;
 };
 
 /** The declaration a term module exports. */
@@ -80,6 +99,20 @@ export type TermSpec = {
   rule: FieldRule;
   /** recordType -> rule. */
   ruleByType?: Record<string, FieldRule>;
+  /**
+   * How many values the vocabulary permits — `sh:maxCount` from the shapes.
+   *
+   * Read by the validator, never by the writer. `serialize()` stays faithful to
+   * whatever it is handed: a writer that refused a record over cardinality could
+   * not write `lab-013`, and that fixture exists to be written and then rejected.
+   *
+   * ABSENT MEANS UNCONSTRAINED, and that is a real answer rather than a gap.
+   * `cascade:emergencyContact` has no `sh:maxCount` on
+   * `cascade:PatientProfileShape` — a profile may name several people to call —
+   * where `cascade:address` and `cascade:preferredPharmacy` beside it are both
+   * capped at one. Three fields that look identical here and are not.
+   */
+  maxCount?: number;
 };
 
 /** One triple-shaped thing a term asks the builder to write. */
@@ -268,12 +301,47 @@ function nestedOutputs(predicate: string, value: unknown): Output[] {
   return [{ kind: 'literal', predicate, value: String(value) }];
 }
 
-/** The children of a blank node: the outputs of every present field of the nested object. */
-function childrenOf(value: unknown, nestedPrefix: string): Output[] {
+/**
+ * The children of a blank node.
+ *
+ * With `rule.children` declared, an undeclared key is NOT written — which is
+ * the guard that stops the next `cascade:contactEmail`: a spelling no ontology
+ * declares, read in through the reverse map and emitted straight back out by
+ * the writer under no domain, no range and no shape.
+ *
+ * Without it, every present key is written by runtime type, as before.
+ */
+function childrenOf(value: unknown, rule: FieldRule): Output[] {
   if (!isNestedObject(value)) return [];
+  const prefix = rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX;
+  const declared = rule.children;
+
   return Object.entries(value)
     .filter(([nestedKey, nested]) => !NESTED_SKIP.has(nestedKey) && present(nested))
-    .flatMap(([nestedKey, nested]) => nestedOutputs(`${nestedPrefix}:${nestedKey}`, nested));
+    .flatMap(([nestedKey, nested]) => {
+      const childRule = ownEntry(declared, nestedKey);
+      if (declared && !childRule) return [];
+      const predicate = `${prefix}:${nestedKey}`;
+      return childRule
+        ? members(nested).flatMap((m) => outputsForMember(m, nestedKey, predicate, childRule))
+        : nestedOutputs(predicate, nested);
+    });
+}
+
+/**
+ * A blank-node term's child predicates, `childKey -> prefix:localName`.
+ *
+ * The one place these are written down, and what the deserializer's reverse map
+ * and the JSON-LD context are both built from. Empty for a term that has not
+ * declared its children, so the two schemes coexist during migration.
+ */
+export function childPredicatesOf(spec: TermSpec): Record<string, string> {
+  const { rule } = spec;
+  if (rule.form !== 'blankNode' || !rule.children) return {};
+  const prefix = rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX;
+  return Object.fromEntries(
+    Object.keys(rule.children).map((childKey) => [childKey, `${prefix}:${childKey}`]),
+  );
 }
 
 /**
@@ -343,7 +411,7 @@ function outputsForMember(
             `for the single-string form of this structure.`,
         );
       }
-      const children = childrenOf(member, rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX);
+      const children = childrenOf(member, rule);
       // An absent `rdfType` leaves the field off entirely. Carrying `''` would
       // reach `b.type('')` and emit a bare `a`, which does not parse.
       return [

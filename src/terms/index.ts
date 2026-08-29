@@ -15,11 +15,14 @@
 export * from './term.js';
 
 import type { Term } from './term.js';
+import { childPredicatesOf } from './term.js';
 import { address } from './address.js';
+import { clinicalSummary } from './clinical-summary.js';
 import { dataAbsentReason } from './data-absent-reason.js';
 import { emergencyContact } from './emergency-contact.js';
 import { interpretationSourceCode } from './interpretation-source-code.js';
 import { preferredPharmacy } from './preferred-pharmacy.js';
+import { resultValue } from './result-value.js';
 
 /**
  * Every term module, one line each. Add the import above and the name here in
@@ -37,10 +40,12 @@ import { preferredPharmacy } from './preferred-pharmacy.js';
  */
 const TERMS: readonly Term[] = Object.freeze([
   address,
+  clinicalSummary,
   dataAbsentReason,
   emergencyContact,
   interpretationSourceCode,
   preferredPharmacy,
+  resultValue,
 ]);
 
 /**
@@ -75,4 +80,73 @@ const BY_KEY: ReadonlyMap<string, Term> = (() => {
  */
 export function termFor(key: string): Term | undefined {
   return BY_KEY.get(key);
+}
+
+/**
+ * Every declared blank-node child predicate, `childKey -> prefix:localName`.
+ *
+ * The deserializer's reverse map and the JSON-LD context are both built from
+ * this, so the twelve exist as data in exactly one place — the term that writes
+ * them. A term that has not declared its children contributes nothing, which is
+ * what lets the old hand-written entries be retired one term at a time.
+ *
+ * Two terms declaring the same child key under the same prefix is not a
+ * conflict — `contactPhone` means one predicate wherever it appears. Two terms
+ * declaring it under DIFFERENT prefixes is, and throws here rather than letting
+ * barrel order decide which spelling the reader accepts.
+ */
+/**
+ * Every predicate spelling a term can WRITE, mapped back to the JSON key that
+ * produced it: `prefix:localName -> jsonKey`.
+ *
+ * A reader must accept everything the writer can emit, and a term is where the
+ * writer's choices are declared — so this is that obligation computed rather
+ * than transcribed. Three sources, and only the first comes free from inverting
+ * `PROPERTY_PREDICATES`:
+ *
+ * - `predicate`, the registered one;
+ * - every `predicateByType` value, which nothing else inverts — a vital sign's
+ *   `clinical:interpretationSourceCode` was hand-written into the deserializer
+ *   for exactly this reason;
+ * - every declared blank-node child.
+ *
+ * What it deliberately does NOT produce is a spelling this SDK only ever READS:
+ * the classes clinical v1.13 deprecated, and the `cascade:` aliases core v3.4
+ * requires readers to accept. Nothing on the write side knows those exist, so
+ * no derivation can find them and they stay hand-written.
+ */
+export function termSpellings(): Record<string, string> {
+  const spellings: Record<string, string> = {};
+  for (const term of TERMS) {
+    spellings[term.predicate] = term.key;
+    for (const override of Object.values(term.predicateByType ?? {})) {
+      spellings[override] = term.key;
+    }
+    for (const [childKey, predicate] of Object.entries(childPredicatesOf(term))) {
+      spellings[predicate] = childKey;
+    }
+  }
+  return spellings;
+}
+
+/** The JSON keys of every term whose rule writes an inline blank node. */
+export function blankNodeTermKeys(): string[] {
+  return TERMS.filter((t) => t.rule.form === 'blankNode').map((t) => t.key);
+}
+
+export function childPredicates(): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const term of TERMS) {
+    for (const [childKey, predicate] of Object.entries(childPredicatesOf(term))) {
+      const claimed = merged[childKey];
+      if (claimed && claimed !== predicate) {
+        throw new Error(
+          `Child '${childKey}' is declared as both ${claimed} and ${predicate}. ` +
+            `One child key is one predicate; give them different names or one prefix.`,
+        );
+      }
+      merged[childKey] = predicate;
+    }
+  }
+  return merged;
 }

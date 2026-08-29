@@ -9,6 +9,7 @@
  */
 
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING } from '../vocabularies/namespaces.js';
+import { childPredicates } from '../terms/index.js';
 
 /**
  * The canonical URI for the published Cascade Protocol JSON-LD context.
@@ -57,23 +58,7 @@ const DRAFT_CONTEXT_EXCLUDED_PREFIXES = new Set(['evidence', 'workbench', 'oa', 
  * @see spec/contexts/v1/cascade.jsonld
  * @see spec/ontologies/core/v1/core.ttl  cascade:EmergencyContact, cascade:Address, cascade:PharmacyInfo
  */
-const NESTED_CHILD_PREDICATES: Record<string, string> = {
-  // cascade:EmergencyContact
-  contactName: 'cascade:contactName',
-  contactRelationship: 'cascade:contactRelationship',
-  contactPhone: 'cascade:contactPhone',
-  // cascade:Address
-  addressLine: 'cascade:addressLine',
-  addressCity: 'cascade:addressCity',
-  addressState: 'cascade:addressState',
-  addressPostalCode: 'cascade:addressPostalCode',
-  addressCountry: 'cascade:addressCountry',
-  addressUse: 'cascade:addressUse',
-  // cascade:PharmacyInfo
-  pharmacyName: 'cascade:pharmacyName',
-  pharmacyAddress: 'cascade:pharmacyAddress',
-  pharmacyPhone: 'cascade:pharmacyPhone',
-};
+const NESTED_CHILD_PREDICATES: Record<string, string> = childPredicates();
 
 /** Prefix of a `prefix:localName` CURIE, or '' if it has no colon. */
 function curiePrefix(curie: string): string {

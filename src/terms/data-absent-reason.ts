@@ -27,5 +27,7 @@ import { defineTerm, requirePredicate } from './term.js';
 export const dataAbsentReason = defineTerm({
   key: 'dataAbsentReason',
   predicate: requirePredicate('dataAbsentReason'),
+  // cascade:DataAbsentReasonShape
+  maxCount: 1,
   rule: { form: 'literal' },
 });

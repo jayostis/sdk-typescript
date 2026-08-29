@@ -26,5 +26,15 @@ import { defineTerm, requirePredicate } from './term.js';
 export const preferredPharmacy = defineTerm({
   key: 'preferredPharmacy',
   predicate: requirePredicate('preferredPharmacy'),
-  rule: { form: 'blankNode', rdfType: 'cascade:PharmacyInfo' },
+  // cascade:PatientProfileShape
+  maxCount: 1,
+  rule: {
+    form: 'blankNode',
+    rdfType: 'cascade:PharmacyInfo',
+    children: {
+      pharmacyName: { form: 'literal' },
+      pharmacyAddress: { form: 'literal' },
+      pharmacyPhone: { form: 'literal' },
+    },
+  },
 });

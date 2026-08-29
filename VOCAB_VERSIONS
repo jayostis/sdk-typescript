@@ -349,3 +349,14 @@ pots=1.4
 #     serialize with their rdf:type and every child, and deserializeOne reads
 #     them back off that document as nested objects rather than as blank-node
 #     identifiers or as {}.
+#
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/jsonld/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     The twelve cascade:EmergencyContact / cascade:Address / cascade:PharmacyInfo
+#     child predicates that #27 hand-listed in context.ts's NESTED_CHILD_PREDICATES
+#     and in the deserializer's ADDITIONAL_REVERSE_MAPPINGS are now GENERATED from
+#     the terms that write them. Same twelve predicates, same core v2.2, one copy
+#     instead of three — a term declares its children and both readers are built
+#     from that declaration.
+#     Nothing new is registered and nothing previously claimed is withdrawn, so
+#     bumping a row would claim support this package did not just gain.

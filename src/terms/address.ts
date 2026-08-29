@@ -28,5 +28,18 @@ import { defineTerm, requirePredicate } from './term.js';
 export const address = defineTerm({
   key: 'address',
   predicate: requirePredicate('address'),
-  rule: { form: 'blankNode', rdfType: 'cascade:Address' },
+  // cascade:PatientProfileShape
+  maxCount: 1,
+  rule: {
+    form: 'blankNode',
+    rdfType: 'cascade:Address',
+    children: {
+      addressLine: { form: 'literal' },
+      addressCity: { form: 'literal' },
+      addressState: { form: 'literal' },
+      addressPostalCode: { form: 'literal' },
+      addressCountry: { form: 'literal' },
+      addressUse: { form: 'literal' },
+    },
+  },
 });
