@@ -617,11 +617,23 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   rxPcn: 'coverage:rxPcn',
   rxGroup: 'coverage:rxGroup',
 
-  // ── Patient profile predicates (cascade:, foaf:, and vcard: vocabularies) ──
+  // ── Patient profile predicates (cascade:, foaf:, and health: vocabularies) ──
   dateOfBirth: 'cascade:dateOfBirth',
   biologicalSex: 'cascade:biologicalSex',
-  contactPhone: 'vcard:hasTelephone',
-  contactEmail: 'vcard:hasEmail',
+  // The three inline sub-structures. Each is written as a typed blank node by
+  // its term module; registering the predicate here is what makes the term
+  // declarable at all, since `requirePredicate` is the only way a term gets one.
+  //
+  // Their CHILDREN are deliberately absent. A blank node's children are built
+  // from the node's prefix and the JSON key rather than looked up here, so a
+  // child entry would be a write mapping nothing consults — and it would make a
+  // nested key and a top-level key of the same name look like one property when
+  // they are two. The read side needs those spellings and gets them from
+  // ADDITIONAL_REVERSE_MAPPINGS in the deserializer, which resolves a predicate
+  // without claiming it is what the writer emits.
+  emergencyContact: 'cascade:emergencyContact',
+  address: 'cascade:address',
+  preferredPharmacy: 'cascade:preferredPharmacy',
   computedAge: 'cascade:computedAge',
   ageGroup: 'cascade:ageGroup',
   genderIdentity: 'cascade:genderIdentity',

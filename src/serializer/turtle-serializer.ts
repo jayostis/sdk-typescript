@@ -298,9 +298,11 @@ const INTEGER_FIELDS = new Set([
  * `rdf:type` the blank node carries.
  */
 const BLANK_NODE_TYPES: Record<string, string> = {
-  emergencyContact: 'cascade:EmergencyContact',
-  address: 'cascade:Address',
-  preferredPharmacy: 'cascade:PharmacyInfo',
+  // The three patient-profile sub-structures are NOT here. `emergencyContact`,
+  // `address` and `preferredPharmacy` are term modules, and `emitField` returns
+  // before this table for a termed key, so a row would be a second copy of a
+  // fact `src/terms/` owns — and the copy that a reader looking for the
+  // `rdf:type` of a contact would find first (#27).
   // Core v3.4: an export manifest carries its per-domain summaries inline.
   clinicalSummary: 'cascade:RecordSummary',
   wellnessSummary: 'cascade:RecordSummary',

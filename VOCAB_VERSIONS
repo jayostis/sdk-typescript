@@ -284,3 +284,56 @@ pots=1.4
 #     round trip rather than against a ratified oracle. Fixtures are the
 #     follow-up; until they exist, cross-implementation agreement with
 #     sdk-python and cascade-cli on these terms is UNVERIFIED.
+
+# ── 2026-08-29: core 2.2's patient-profile sub-structures, ten releases late.
+#    NO ROW MOVES. ──
+#
+# core=2.2 (UNCHANGED at 3.8): cascade:emergencyContact, cascade:address and
+#     cascade:preferredPharmacy now actually serialize. Not a version this SDK
+#     was behind on — the predicates have been in core since v2.2, the three
+#     classes since v2.0, the interfaces have been on the PatientProfile model
+#     for as long, and the row has read 3.x throughout. The rows are not touched
+#     because nothing here implements a newer vocabulary; a long-claimed one
+#     stopped being a claim (#27).
+#     WHAT WAS BROKEN: the three keys had a blank-node RULE (BLANK_NODE_TYPES
+#     named them) and no PREDICATE. getPredicateForField returned undefined and
+#     emitField exited at `if (!pred) return;` four lines in, before any rule
+#     was consulted, so eighteen predicates and three nested nodes were absent
+#     from every profile this SDK has ever written — no error, no warning, no
+#     partial output. profile-002 declares all three and everything else in it
+#     serialized correctly, which is what kept the loss quiet.
+#     Registered in PROPERTY_PREDICATES and declared as three term modules
+#     (src/terms/address.ts, emergency-contact.ts, preferred-pharmacy.ts), each
+#     { form: 'blankNode' } with its rdfType and NO nestedPrefix: childrenOf
+#     defaults to cascade: and the fixture's child keys are already
+#     disambiguated in the JSON, so all twelve go straight through. The
+#     BLANK_NODE_TYPES rows are deleted rather than left beside the terms —
+#     emitField never reaches that table for a termed key, so keeping them would
+#     be a second copy of a fact src/terms/ now owns.
+#     THE CHILDREN ARE READ-ONLY MAPPINGS. The twelve child predicates are in
+#     the deserializer's ADDITIONAL_REVERSE_MAPPINGS, not PROPERTY_PREDICATES: a
+#     blank node's children are derived from the node's prefix and the JSON key
+#     and never looked up, so there is no write mapping to register, and adding
+#     one would conflate a nested key with a top-level key of the same name.
+#     cascade:contactEmail is mapped alongside them though nothing here writes
+#     it, so a pod carrying one is not emptied of it on read.
+#     TWO DEAD ROWS DELETED: contactPhone: 'vcard:hasTelephone' and
+#     contactEmail: 'vcard:hasEmail'. Both were unreachable by construction —
+#     nested-only keys, and the nested writer never consults PROPERTY_PREDICATES
+#     — and contactPhone was contradicted by its own model comment and by
+#     profile-002, which writes cascade:contactPhone. Left in place they would
+#     have become worse than dead once the reverse mappings landed: one JSON key
+#     with two read spellings, only one of which is ever written. The vcard
+#     namespace declaration itself stays; whether it earns its place is a
+#     separate question.
+#     THE READ SIDE MOVES WITH THE WRITE SIDE, in one change and deliberately:
+#     emergencyContact / address / preferredPharmacy are added to
+#     NESTED_BLANK_NODE_FIELDS, whose comment named them as the deliberate
+#     exclusion. Three entries without the twelve child spellings would rebuild
+#     each structure as {} — every child dropped by triplesToNestedObject's
+#     `if (!key) continue`, silently.
+#     VERIFIED against conformance fixture profile-002, whose expectedOutput has
+#     carried all three blank nodes since it was written: the three structures
+#     serialize with their rdf:type and every child, and deserializeOne reads
+#     them back off that document as nested objects rather than as blank-node
+#     identifiers or as {}.

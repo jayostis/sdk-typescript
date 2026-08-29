@@ -1,5 +1,46 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **A patient profile's emergency contact, address and preferred pharmacy are
+  written.** They never were. The three keys had a blank-node rule
+  (`BLANK_NODE_TYPES` named them) and no entry in `PROPERTY_PREDICATES`, so
+  `getPredicateForField` returned `undefined` and `emitField` exited at
+  `if (!pred) return;` before any rule was consulted. Eighteen predicates and
+  three nested nodes were absent from every profile this SDK has ever
+  serialized — no error, no warning, no partial output. Everything else in
+  `profile-002` serialized correctly, which is what kept it quiet. (#27)
+- **They are read back as nested objects.** `emergencyContact`, `address` and
+  `preferredPharmacy` join `NESTED_BLANK_NODE_FIELDS`, and their twelve child
+  predicates join the deserializer's reverse mappings. Both halves in one
+  change: three fields without the child spellings would have rebuilt each
+  structure as `{}`, every child dropped in silence.
+
+### Removed
+
+- `contactPhone: 'vcard:hasTelephone'` and `contactEmail: 'vcard:hasEmail'` from
+  `PROPERTY_PREDICATES`. **Not a behaviour change: neither row has ever been
+  reachable.** Both are nested-only keys, and a blank node's children are built
+  from the node's prefix and the JSON key rather than looked up in that table —
+  no fixture, no serializer path and no record type has ever written either. A
+  contact's phone is `cascade:contactPhone`, which is what `profile-002` expects
+  and what `src/models/patient-profile.ts` documents. `cascade:contactEmail` is
+  accepted on READ so a pod carrying one still deserializes. The `vcard`
+  namespace declaration stays.
+- The three now-dead `BLANK_NODE_TYPES` entries. `emitField` returns before that
+  table for a field a term module owns, so the `rdf:type` of each node is stated
+  once, in `src/terms/`.
+
+### Internal
+
+- `emergencyContact`, `address` and `preferredPharmacy` are declared as term
+  modules — the first use of `{ form: 'blankNode' }`, and the first terms whose
+  outputs nest. None declares a `nestedPrefix`: `childrenOf` defaults to
+  `cascade` and this fixture family's child keys are already disambiguated in
+  the JSON.
+
 ## [3.1.0] - 2026-08-28
 
 Vocabulary sync: core 3.6 to 3.7, health 2.7 to 2.8, clinical 1.15 to 1.16,
