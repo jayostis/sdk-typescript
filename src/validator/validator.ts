@@ -25,6 +25,11 @@ const VALID_PROVENANCE_TYPES: ReadonlySet<string> = new Set<ProvenanceType>([
   'AIGenerated',
   'AIAsserted',
   'EHRVerified',
+  // core v3.8. Without this row the validator REJECTS a conformant value, which
+  // is the one failure mode a hardcoded enum has: the type union alone would
+  // have let it through at compile time and this set would have failed it at
+  // runtime.
+  'PatientReported',
 ]);
 
 const RECOGNIZED_DATA_TYPES: ReadonlySet<string> = new Set([

@@ -102,6 +102,12 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   [`${NAMESPACES.clinical}vaccineCode`]: 'vaccineCode',
   [`${NAMESPACES.clinical}lotNumber`]: 'lotNumber',
   [`${NAMESPACES.clinical}site`]: 'site',
+
+  // Coverage v1.5. `status` resolves to health:status through
+  // PROPERTY_PREDICATES, so the coverage: spelling needs its own entry or a
+  // plan's status would be written and then dropped on read. Unambiguous: no
+  // other field in this SDK maps to coverage:status.
+  [`${NAMESPACES.coverage}status`]: 'status',
 };
 
 const REVERSE_PREDICATE_MAP = buildReversePredicateMap(ADDITIONAL_REVERSE_MAPPINGS);
@@ -157,6 +163,8 @@ const INTEGER_TYPE_FIELDS = new Set([
   'computedAge', 'refillsAllowed', 'supplyDurationDays', 'onsetAge',
   'steps', 'activeMinutes', 'calories', 'awakenings',
   'totalSleepMinutes', 'deepSleepMinutes', 'remSleepMinutes', 'lightSleepMinutes',
+  // Core v3.7: cascade:byteSize, sh:datatype xsd:integer.
+  'byteSize',
 ]);
 
 /** Fields that are numbers (possibly float) */
@@ -172,12 +180,14 @@ const ARRAY_TYPE_FIELDS = new Set([
   'indicationReference', 'parsedIndicationReference', 'linkedCondition',
   // Core v3.4 manifest rdf:List members.
   'provenanceLayers', 'deviceSources', 'interactionScenarios', 'involvedResources',
+  // Core v3.7 attachment edge (repeated predicate triples, IRI objects).
+  'hasAttachment',
 ]);
 
 /**
- * Code properties whose vocabulary cardinality is `0..*` (health v2.6,
- * clinical v1.14). The serializer writes one repeated-predicate triple per
- * value; this is the reading side of that.
+ * String-valued properties whose vocabulary cardinality is `0..*`. The
+ * serializer writes one repeated-predicate triple per value; this is the
+ * reading side of that.
  *
  * ARITY-PRESERVING, and deliberately not a member of {@link ARRAY_TYPE_FIELDS}:
  * one triple reads back as a bare string, N triples read back as an N-element
@@ -186,11 +196,18 @@ const ARRAY_TYPE_FIELDS = new Set([
  * to. Keeping only the first triple, which is what happened before v2.0.0,
  * silently discarded every coding after the first.
  */
-const MULTI_VALUE_CODE_FIELDS = new Set([
+const MULTI_VALUE_FIELDS = new Set([
+  // health v2.6 / clinical v1.14
   'testCode',
   'labCategory',
   'icd10Code',
   'snomedCode',
+  // clinical v1.16. The last is nested inside a participation blank node and is
+  // resolved by triplesToNestedObject, which consults this same set.
+  'encounterReason',
+  'businessIdentifier',
+  'documentAuthorName',
+  'participantRoleCode',
 ]);
 
 /**
@@ -211,6 +228,42 @@ function stripCascadeQualifier(value: string): string {
   if (value.startsWith(NAMESPACES.cascade)) return value.slice(NAMESPACES.cascade.length);
   if (value.startsWith('cascade:')) return value.slice('cascade:'.length);
   return value;
+}
+
+// ─── Blank Node Identifiers ─────────────────────────────────────────────────
+
+/**
+ * Monotonic counter behind {@link nextBlankNodeId}.
+ *
+ * Blank-node labels only have to be unique within one parse, but they must be
+ * unambiguously so. The previous scheme was
+ * `_:b${Date.now()}${Math.random().toString(36).slice(2, 6)}`, which is not:
+ * two blank nodes created in the same millisecond collide whenever their four
+ * random characters agree. That was survivable while the only inline blank
+ * nodes were `clinicalSummary` and `wellnessSummary`, at most one of each per
+ * subject. Clinical v1.16 makes it load-bearing — an encounter carries several
+ * `clinical:hasParticipant` blank nodes at once, and a collision would merge
+ * two participations into one, silently attributing one clinician's role to
+ * another's name.
+ *
+ * A counter also makes a parse reproducible, so a test can assert on the
+ * reconstructed structure instead of on whatever labels a clock produced.
+ */
+let blankNodeCounter = 0;
+
+/**
+ * Allocate a fresh, collision-free blank-node label.
+ *
+ * @internal Exported for test only. Not re-exported from `src/deserializer/
+ * index.ts` or the package root, so this is not public API. It is exported at
+ * all because the labels never reach a caller — they are consumed while
+ * rebuilding nested objects — so uniqueness cannot be asserted through
+ * `deserialize()`, and a probabilistic scheme's failure mode is a rare flake
+ * rather than a reproducible red.
+ */
+export function nextBlankNodeId(): string {
+  blankNodeCounter += 1;
+  return `_:b${blankNodeCounter}`;
 }
 
 // ─── Turtle Tokenizer / Parser ──────────────────────────────────────────────
@@ -748,7 +801,7 @@ function parseObjectValue(
   if (trimmed.startsWith('[')) {
     // For blank nodes, we store the inner content as the object
     // and parse it recursively
-    const bnodeId = `_:b${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+    const bnodeId = nextBlankNodeId();
     triples.push({
       subject,
       predicate,
@@ -959,16 +1012,41 @@ function acceptedTypeUris(typeUri: string): string[] {
  */
 const NESTED_BLANK_NODE_FIELDS = new Set(['clinicalSummary', 'wellnessSummary']);
 
+/**
+ * Fields whose Turtle object is a REPEATED inline blank node, rebuilt into an
+ * array of nested objects (clinical v1.16 `hasParticipant`).
+ *
+ * Always an array, even for a single participation, because unlike a 0..* code
+ * property this field's TypeScript type is already `EncounterParticipant[]`:
+ * there is no bare form for one value to preserve.
+ */
+const NESTED_BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
+
 /** Rebuild an inline blank node's predicates into a plain nested object. */
 function triplesToNestedObject(
   bnodeId: string,
   triples: ParsedTriple[],
 ): Record<string, unknown> {
   const nested: Record<string, unknown> = {};
+  // 0..* nested properties are collected across every triple before being
+  // assigned, so arity is preserved the same way it is at the top level.
+  const multiValued = new Map<string, string[]>();
+
   for (const t of triples) {
     if (t.subject !== bnodeId || t.predicate === RDF_TYPE) continue;
     const key = REVERSE_PREDICATE_MAP.get(t.predicate);
     if (!key) continue;
+
+    if (MULTI_VALUE_FIELDS.has(key)) {
+      const existing = multiValued.get(key);
+      if (existing) {
+        existing.push(t.object);
+      } else {
+        multiValued.set(key, [t.object]);
+      }
+      continue;
+    }
+
     if (t.objectType === 'boolean') {
       nested[key] = t.object === 'true';
     } else if (
@@ -985,6 +1063,10 @@ function triplesToNestedObject(
     } else {
       nested[key] = t.object;
     }
+  }
+
+  for (const [key, values] of multiValued) {
+    nested[key] = values.length === 1 ? values[0] : values;
   }
   return nested;
 }
@@ -1034,6 +1116,21 @@ function triplesToRecord<T extends CascadeEntity>(
       continue;
     }
 
+    // Repeated inline blank nodes (clinical v1.16: an encounter's
+    // participations). Each triple carries its own blank-node identifier, so
+    // every participation is rebuilt, not just the first — keeping only the
+    // first is exactly the maxCount-1 loss this class exists to fix.
+    if (
+      NESTED_BLANK_NODE_ARRAY_FIELDS.has(jsonKey) &&
+      firstTriple &&
+      firstTriple.objectType === 'blankNode'
+    ) {
+      record[jsonKey] = predTriples
+        .filter((t) => t.objectType === 'blankNode')
+        .map((t) => triplesToNestedObject(t.object, triples));
+      continue;
+    }
+
     // Handle array fields
     if (ARRAY_TYPE_FIELDS.has(jsonKey)) {
       const values: string[] = [];
@@ -1055,8 +1152,8 @@ function triplesToRecord<T extends CascadeEntity>(
       continue;
     }
 
-    // 0..* code properties: every triple, arity preserved.
-    if (MULTI_VALUE_CODE_FIELDS.has(jsonKey)) {
+    // 0..* string properties: every triple, arity preserved.
+    if (MULTI_VALUE_FIELDS.has(jsonKey)) {
       const values = predTriples.map((t) => t.object);
       record[jsonKey] = values.length === 1 ? values[0] : values;
       continue;

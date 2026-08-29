@@ -1,5 +1,112 @@
 # Changelog
 
+## [3.1.0] - 2026-08-28
+
+Vocabulary sync: core 3.6 to 3.7, health 2.7 to 2.8, clinical 1.15 to 1.16,
+coverage 1.4 to 1.5. 24 new terms.
+
+**Minor, not major: purely additive.** No published type narrows, no record type
+changes what it serializes to, and every graph this SDK wrote before still reads
+back identically.
+
+Every term here comes from a field-coverage measurement against real FHIR R4
+exports: each one is an element a conformant server sends that the vocabulary
+had nowhere to put, so an importer dropped it.
+
+### Added
+
+Clinical v1.16 — encounters:
+- `encounterClassDisplay` and `encounterClassSystem`, the other two parts of the
+  `Encounter.class` Coding. The code stays in `encounterClass` for round-trip;
+  because the binding is only extensible, a local code such as `"5"` is
+  unreadable without its display and unmappable without its system.
+  `encounterClassSystem` is written as a plain string literal — the ontology
+  ranges it `xsd:anyURI`, and the shape accepts `anyURI` OR `string` via `sh:or`
+  precisely because serializers differ on which they write.
+- `encounterReason` (0..*), `admitSource` and `dischargeDisposition`. None
+  carries a value set: FHIR binds `reasonCode` and `admitSource` only PREFERRED
+  and `dischargeDisposition` only EXAMPLE. The presence of `admitSource` is the
+  structured signal separating an admission from an office visit, which was
+  unrecoverable from a pod through v1.15.
+- `EncounterParticipant` and `hasParticipant` (0..*), with `participantName`,
+  `participantRole`, `participantRoleCode` (0..*) and `participantSpecialty`.
+  Each participation serializes as an INLINE BLANK NODE, following the core
+  v3.4 `clinicalSummary` / `wellnessSummary` precedent;
+  `clinical:EncounterParticipantShape` omits `sh:nodeKind sh:IRI` so a
+  serializer may write one for a structural sub-node. A visit routinely carries
+  several participants in the same role, which the rejected flat
+  role-qualified-predicate design could not represent at all.
+
+Clinical v1.16 — identity and documents:
+- `businessIdentifier` (0..*), typed on `CascadeEntity` because the ontology
+  deliberately declares no `rdfs:domain`. Values are the FHIR token form
+  `"{system}|{value}"` where the source states a system; this SDK round-trips
+  the string verbatim and never splits, parses or invents one. Distinct from
+  `sourceRecordId`, which holds the server-assigned logical id: the two id
+  spaces do not join.
+- `documentReferenceStatus`, `documentAuthorName` (0..*) and
+  `authenticatorName`, registered as PREDICATES ONLY — their domain is
+  `clinical:ClinicalDocument`, a class this SDK does not model, the same
+  position the core v3.4 device-source terms are in. `DocumentReferenceStatus`
+  is exported as a type.
+
+Core v3.7 — pod attachments:
+- `Attachment` model and the seven properties `hasAttachment` (0..*),
+  `attachmentPath`, `attachmentMediaType`, `contentHash`, `hashAlgorithm`,
+  `byteSize` and `attachmentTitle`.
+- **An attachment is a subject with its own IRI, not a sub-node.**
+  `cascade:HasAttachmentEdgeShape` declares `sh:nodeKind sh:IRI` so a record and
+  its attachment can live in different files, so `hasAttachment` is an IRI edge.
+  This is the one point on which core v3.7 and clinical v1.16 rule oppositely.
+- This SDK models the metadata node only: it neither reads, writes, hashes nor
+  verifies attachment bytes.
+
+Coverage v1.5:
+- `coverage:status` and the `CoverageStatus` type, closed to the four
+  `fm-status` codes because the FHIR binding is REQUIRED and the shape
+  constrains the value at `sh:Violation`. Written via a record-type override
+  because the `status` key already resolves to `health:status`, and declared for
+  `InsurancePlan` only — `coverage:status` has `rdfs:domain
+  coverage:InsurancePlan`.
+
+Health v2.8:
+- SHACL only; no term for this SDK to model. The row moves because the version
+  moved.
+
+Core v3.8:
+- `PatientReported` added to `ProvenanceType` and to the validator's
+  `VALID_PROVENANCE_TYPES`. The second is the one that mattered: a value absent
+  from that set is rejected at runtime, so bumping the row alone would have left
+  this SDK failing a conformant record. No term modelled in this release
+  changes.
+- `PatientReported` is distinct from the existing `SelfReported` on the axis of
+  who keyed the data in, not who it came from: `SelfReported` is the patient
+  entering data directly, `PatientReported` is their own account recorded by
+  another party or system (history related to a clinician, imported
+  questionnaire responses). It is a direct subclass of `cascade:DataProvenance`
+  under neither `ClinicalGenerated` nor `ConsumerGenerated`, since a patient's
+  report reaches records through either setting.
+
+### Fixed
+
+- Blank-node labels are minted from a monotonic counter instead of
+  `Date.now()` plus four random base-36 characters. The old scheme collides for
+  two nodes created in the same millisecond, which was survivable when the only
+  inline blank nodes were one summary per manifest, and is not now that an
+  encounter carries several participations at once: a collision merged two
+  participations, attributing one clinician's role to another's name.
+
+### Known gaps
+
+- `TYPE_MAPPING` resolves both `InsurancePlan` and `CoverageRecord` to
+  `clinical:CoverageRecord`, so this SDK still cannot emit a
+  `coverage:InsurancePlan` subject and coverage's own shapes never see these
+  records. `coverage:status` is therefore a one-way trip: the class is lost on
+  read, so re-serializing what came back writes `health:status`. Pinned by test
+  rather than fixed, because retargeting the class is a migration.
+- No conformance fixture exercises any of these 24 terms, so cross-implementation
+  agreement with `sdk-python` and `cascade-cli` is unverified.
+
 ## [3.0.0] - 2026-08-15
 
 Vocabulary sync: core 3.5 to 3.6, health 2.6 to 2.7, clinical 1.14 to 1.15.

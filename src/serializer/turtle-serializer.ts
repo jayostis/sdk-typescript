@@ -75,6 +75,22 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   DailySleepSnapshot: {
     date: 'cascade:date',
   },
+  // Coverage v1.5: `status` already resolves to health:status (a condition's
+  // clinical status), so the coverage spelling has to be selected by record
+  // type. Declared for InsurancePlan ONLY, not for CoverageRecord: coverage:
+  // status has rdfs:domain coverage:InsurancePlan, and asserting it on a
+  // subject typed clinical:CoverageRecord would entail, to a reasoner, that the
+  // subject is an InsurancePlan.
+  //
+  // KNOWN GAP, recorded rather than papered over: TYPE_MAPPING resolves BOTH
+  // 'CoverageRecord' and 'InsurancePlan' to rdfType clinical:CoverageRecord, so
+  // this SDK cannot currently emit a coverage:InsurancePlan subject at all. The
+  // predicate is therefore correct while the subject's class is not. Retargeting
+  // 'InsurancePlan' would change what every existing record serializes as, which
+  // is a migration and not part of a vocabulary sync.
+  InsurancePlan: {
+    status: 'coverage:status',
+  },
 };
 
 /**
@@ -103,29 +119,48 @@ const URI_FIELDS = new Set([
   'wellnessSummary',
   // Clinical v1.10: the encounter grouping edge. Always an IRI.
   'hasEncounter',
+  // Core v3.7: the attachment edge. Always an IRI —
+  // cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI so the record and
+  // the attachment can live in different files. Listed here as well as in
+  // IRI_ARRAY_FIELDS so that a caller passing a single bare IRI (rather than a
+  // one-element array) still gets a resource, not a quoted literal.
+  'hasAttachment',
 ]);
 
 /**
- * Code properties whose vocabulary cardinality is `0..*` (health v2.6,
- * clinical v1.14): `sh:maxCount 1` was removed because FHIR R4
- * `Observation.category` is 0..* and `CodeableConcept.coding` is 0..*.
+ * String-valued properties whose vocabulary cardinality is `0..*`.
  *
  * Each accepts a bare value or an array, and each value becomes its own
- * repeated-predicate triple in the order given. Never an `rdf:List`: the
- * vocabulary declares no order, and the SHACL shapes count triples.
+ * repeated-predicate triple in the order given. Never an `rdf:List`: none of
+ * these vocabularies declares an order, and the SHACL shapes count triples.
  *
  * Membership is by FIELD NAME rather than by record type, because that is the
  * only thing this serializer knows: `getPredicateForField` resolves the
  * namespace per type (a VitalSign writes `clinical:snomedCode`, a Condition
  * writes `health:snomedCode`), but the cardinality decision is made before any
  * type context is available. Applying it uniformly is also correct: no shape
- * still caps any of these four at one.
+ * caps any member at one.
+ *
+ * Distinct from {@link IRI_ARRAY_FIELDS}, whose values are resources rather
+ * than literals.
  */
-const MULTI_VALUE_CODE_FIELDS = new Set([
+const MULTI_VALUE_FIELDS = new Set([
+  // health v2.6 / clinical v1.14: `sh:maxCount 1` was removed because FHIR R4
+  // `Observation.category` is 0..* and `CodeableConcept.coding` is 0..*.
   'testCode',
   'labCategory',
   'icd10Code',
   'snomedCode',
+  // clinical v1.16. Encounter.reasonCode is 0..*; Encounter.identifier and the
+  // `.identifier` element of every other FHIR resource are 0..*;
+  // DocumentReference.author is 0..*, and the sh:maxCount 1 on
+  // clinical:providerName is what had been discarding every author past the
+  // first. participantRoleCode is 0..* inside a participation blank node and is
+  // listed here so the nested writer resolves its arity the same way.
+  'encounterReason',
+  'businessIdentifier',
+  'documentAuthorName',
+  'participantRoleCode',
 ]);
 
 /**
@@ -151,6 +186,9 @@ const IRI_ARRAY_FIELDS = new Set([
   'indicationReference',
   'parsedIndicationReference',
   'linkedCondition',
+  // Core v3.7: one report legitimately has a PDF and an HTML rendering of the
+  // same content, so the edge repeats. Each value is a cascade:Attachment IRI.
+  'hasAttachment',
 ]);
 
 /**
@@ -248,6 +286,8 @@ const INTEGER_FIELDS = new Set([
   'bloodPressureDays',
   'activityDays',
   'sleepDays',
+  // Core v3.7: cascade:AttachmentShape declares sh:datatype xsd:integer.
+  'byteSize',
 ]);
 
 /**
@@ -261,7 +301,38 @@ const BLANK_NODE_TYPES: Record<string, string> = {
   // Core v3.4: an export manifest carries its per-domain summaries inline.
   clinicalSummary: 'cascade:RecordSummary',
   wellnessSummary: 'cascade:RecordSummary',
+  // Clinical v1.16: one participation in an encounter.
+  // clinical:EncounterParticipantShape deliberately omits sh:nodeKind sh:IRI
+  // ("requiring an IRI would forbid the blank node a serializer may reasonably
+  // write for a structural sub-node"), so the inline form is conformant.
+  hasParticipant: 'clinical:EncounterParticipant',
 };
+
+/**
+ * Namespace prefix to qualify a blank node's NESTED predicates with, keyed by
+ * the parent field name. Defaults to `cascade` when a field is absent.
+ *
+ * The nested predicates are built from the prefix and the JSON key rather than
+ * looked up in `PROPERTY_PREDICATES`, because the pre-existing patient-profile
+ * sub-structures carry keys that resolve differently at the top level: a
+ * `name` inside an `emergencyContact` is `cascade:name`, while the top-level
+ * `name` is `foaf:name`. A blanket lookup would silently rewrite output that
+ * has been stable since those sub-structures were introduced.
+ */
+const BLANK_NODE_PREDICATE_PREFIXES: Record<string, string> = {
+  hasParticipant: 'clinical',
+};
+
+/**
+ * Fields whose value is an ARRAY of nested objects, each serialized as its own
+ * blank node under a repeated predicate.
+ *
+ * Distinct from the single-object blank nodes above: `clinical:hasParticipant`
+ * is 0..* because a visit routinely carries an attender, a referrer and an
+ * authorizing physician at once, and which of them actually saw the patient is
+ * only answerable if all of them are kept with their roles attached.
+ */
+const BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
 
 /**
  * Fields that are boolean and should be serialized unquoted.
@@ -456,11 +527,22 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
+    // Repeated blank nodes, one per nested object (clinical v1.16
+    // hasParticipant). Checked BEFORE the generic array handling below, which
+    // would otherwise stringify each object into a literal.
+    if (BLANK_NODE_ARRAY_FIELDS.has(key) && Array.isArray(value)) {
+      for (const item of value) {
+        if (item === undefined || item === null || typeof item !== 'object') continue;
+        serializeBlankNode(sub, pred, key, item as Record<string, unknown>);
+      }
+      return;
+    }
+
     // 0..* code properties (health v2.6, clinical v1.14). One triple per value,
     // in the order given, whether the caller passed a bare value or an array.
     // Object form (URI reference vs literal) is unchanged from the single-value
     // case, so a record carrying one code serializes byte-identically to before.
-    if (MULTI_VALUE_CODE_FIELDS.has(key) && (typeof value === 'string' || Array.isArray(value))) {
+    if (MULTI_VALUE_FIELDS.has(key) && (typeof value === 'string' || Array.isArray(value))) {
       const values = (Array.isArray(value) ? value : [value]).filter(
         (item): item is string => typeof item === 'string',
       );
@@ -565,6 +647,7 @@ function serializeBlankNode(
   obj: Record<string, unknown>,
 ): void {
   const bnodeType = BLANK_NODE_TYPES[key];
+  const nsPrefix = BLANK_NODE_PREDICATE_PREFIXES[key] ?? 'cascade';
 
   sub.blankNode(predicate, (b) => {
     if (bnodeType) {
@@ -572,9 +655,23 @@ function serializeBlankNode(
     }
     for (const [k, v] of Object.entries(obj)) {
       if (v === undefined || v === null) continue;
-      // Nested fields are `type`-free sub-structures under the cascade: vocabulary.
+      // Nested fields are `type`-free sub-structures under one vocabulary.
       if (k === 'type' || k === 'id') continue;
-      const nestedPred = `cascade:${k}`;
+      const nestedPred = `${nsPrefix}:${k}`;
+
+      // 0..* nested properties (clinical v1.16 participantRoleCode). One
+      // repeated-predicate triple per value, arity preserved, matching how the
+      // top-level writer treats a MULTI_VALUE_FIELDS member.
+      if (MULTI_VALUE_FIELDS.has(k) && (typeof v === 'string' || Array.isArray(v))) {
+        const values = (Array.isArray(v) ? v : [v]).filter(
+          (item): item is string => typeof item === 'string',
+        );
+        for (const item of values) {
+          b.literal(nestedPred, item);
+        }
+        continue;
+      }
+
       if (INTEGER_FIELDS.has(k) && typeof v === 'number') {
         b.integer(nestedPred, v);
         continue;
