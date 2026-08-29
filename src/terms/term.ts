@@ -113,6 +113,23 @@ export type TermSpec = {
    * capped at one. Three fields that look identical here and are not.
    */
   maxCount?: number;
+  /**
+   * The values the vocabulary admits — `sh:in` from the shapes.
+   *
+   * Flat, unlike {@link minCountByType}, because a value set does not vary by
+   * record type in practice: `health:interpretation`'s 74 codes are the same
+   * list on `LabResultRecordShape`, `LabResultShape` and `VitalSignShape`.
+   * Checked only when the field is PRESENT, so an absent optional raises
+   * nothing here.
+   */
+  values?: readonly string[];
+  /**
+   * recordType -> `sh:minCount`. Per type, and it has to be: a shape's
+   * `sh:minCount` sits inside one node shape, so `cascade:dateOfBirth` is
+   * required of a `cascade:PatientProfile` and means nothing on a lab result.
+   * A flat `minCount` would demand every field of every record.
+   */
+  minCountByType?: Record<string, number>;
 };
 
 /** One triple-shaped thing a term asks the builder to write. */

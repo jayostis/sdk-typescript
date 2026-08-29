@@ -1,6 +1,6 @@
 import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
-import { termFor } from '../terms/index.js';
+import { allTerms, termFor } from '../terms/index.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -409,26 +409,56 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
  * scalar is one value and an array is its length, because `emitField` writes one
  * triple per member either way. An absent field is nothing to count.
  */
-function validateCardinality(record: CascadeEntity): ValidationError[] {
+function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
   const errors: ValidationError[] = [];
   const rec: RecordFields = { ...record };
 
+  // Rules about a value that is PRESENT. Walking the record is enough.
   for (const [field, value] of Object.entries(rec)) {
     const term = termFor(field);
+    if (!term) continue;
+    if (value === undefined || value === null) continue;
+    const members = Array.isArray(value) ? value : [value];
+
     // An absent maxCount is UNCONSTRAINED, not unknown — `cascade:PatientProfileShape`
     // declares none for `cascade:emergencyContact`, so a profile may name several
     // people to call. Reading it as 1 would reject a conformant record.
-    if (!term || term.maxCount === undefined) continue;
-    if (value === undefined || value === null) continue;
+    if (term.maxCount !== undefined && members.length > term.maxCount) {
+      errors.push({
+        field,
+        message:
+          `${field} carries ${members.length} values; the vocabulary permits ` +
+          `at most ${term.maxCount}`,
+        severity: 'error',
+      });
+    }
 
-    const count = Array.isArray(value) ? value.length : 1;
-    if (count <= term.maxCount) continue;
+    // Every member, not just the first: a 0..* coded field can be wrong in its
+    // second value, and reporting only the first would be the same partial
+    // answer the reader used to give.
+    if (term.values) {
+      for (const member of members) {
+        if (typeof member !== 'string' || term.values.includes(member)) continue;
+        errors.push({
+          field,
+          message: `${field} "${member}" is not one of the ${term.values.length} values the vocabulary admits`,
+          severity: 'error',
+        });
+      }
+    }
+  }
+
+  // Rules about a value that is ABSENT, which no walk of the record can reach.
+  // Per record type: an sh:minCount sits inside one node shape, so a field
+  // required of a PatientProfile means nothing on a lab result.
+  for (const term of allTerms()) {
+    const required = ownEntry(term.minCountByType, record.type);
+    if (required === undefined || required < 1) continue;
+    if (hasField(rec, term.key)) continue;
 
     errors.push({
-      field,
-      message:
-        `${field} carries ${count} values; the vocabulary permits at most ` +
-        `${term.maxCount}`,
+      field: term.key,
+      message: `${term.key} is required for ${record.type}`,
       severity: 'error',
     });
   }
@@ -436,13 +466,26 @@ function validateCardinality(record: CascadeEntity): ValidationError[] {
   return errors;
 }
 
+/**
+ * Read a key's OWN value out of a lookup table, never an inherited one.
+ *
+ * `minCountByType` is a plain object literal indexed by DATA — `record.type` —
+ * so a record typed `'toString'` or `'constructor'` would otherwise resolve
+ * `Object.prototype`'s member and be reported as requiring a field. `defineTerm`
+ * guards its own lookups the same way.
+ */
+function ownEntry<T>(table: Record<string, T> | undefined, key: string | undefined): T | undefined {
+  if (table === undefined || key === undefined) return undefined;
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
 export function validate(record: CascadeEntity): ValidationResult {
   const baseErrors = validateBase(record);
   const typeErrors = validateTypeSpecific(record);
-  const cardinalityErrors = validateCardinality(record);
+  const termErrors = validateAgainstTerms(record);
   const warningErrors = validateWarnings(record);
 
-  const allErrors = [...baseErrors, ...typeErrors, ...cardinalityErrors];
+  const allErrors = [...baseErrors, ...typeErrors, ...termErrors];
   const allWarnings = warningErrors;
 
   return {

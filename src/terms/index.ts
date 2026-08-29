@@ -17,7 +17,10 @@ export * from './term.js';
 import type { Term } from './term.js';
 import { childPredicatesOf } from './term.js';
 import { address } from './address.js';
+import { biologicalSex } from './biological-sex.js';
 import { clinicalSummary } from './clinical-summary.js';
+import { dateOfBirth } from './date-of-birth.js';
+import { interpretation } from './interpretation.js';
 import { dataAbsentReason } from './data-absent-reason.js';
 import { emergencyContact } from './emergency-contact.js';
 import { interpretationSourceCode } from './interpretation-source-code.js';
@@ -40,7 +43,10 @@ import { resultValue } from './result-value.js';
  */
 const TERMS: readonly Term[] = Object.freeze([
   address,
+  biologicalSex,
   clinicalSummary,
+  dateOfBirth,
+  interpretation,
   dataAbsentReason,
   emergencyContact,
   interpretationSourceCode,
@@ -127,6 +133,22 @@ export function termSpellings(): Record<string, string> {
     }
   }
   return spellings;
+}
+
+/**
+ * Every term, for a check that has to run over fields the record does NOT
+ * carry.
+ *
+ * `termFor` answers "what is declared about this key", which is enough for
+ * every rule about a value that is present. `minCountByType` is about a value
+ * that is absent, and an absent field cannot be reached by walking the record —
+ * so this walks the declarations instead.
+ *
+ * Returns the array itself, which is frozen: a caller can read it and cannot
+ * make the registry disagree with `termFor`.
+ */
+export function allTerms(): readonly Term[] {
+  return TERMS;
 }
 
 /** The JSON keys of every term whose rule writes an inline blank node. */

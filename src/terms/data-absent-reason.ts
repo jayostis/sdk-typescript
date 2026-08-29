@@ -29,5 +29,13 @@ export const dataAbsentReason = defineTerm({
   predicate: requirePredicate('dataAbsentReason'),
   // cascade:DataAbsentReasonShape
   maxCount: 1,
+  // cascade:DataAbsentReasonShape sh:in — the HL7 data-absent-reason code
+  // system, transcribed from the shape rather than from the code system, since
+  // the shape is what judges it.
+  values: [
+  'unknown', 'asked-unknown', 'temp-unknown', 'not-asked', 'asked-declined', 'masked',
+  'not-applicable', 'unsupported', 'as-text', 'error', 'not-a-number', 'negative-infinity',
+  'positive-infinity', 'not-performed', 'not-permitted'
+  ],
   rule: { form: 'literal' },
 });
