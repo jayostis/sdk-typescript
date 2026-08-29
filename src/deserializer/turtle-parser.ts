@@ -217,6 +217,16 @@ const MULTI_VALUE_FIELDS = new Set([
   // verdict on incomplete data. Faithful first, judged second: read what is
   // there, and let cascade:DataAbsentReasonShape object to it.
   'dataAbsentReason',
+  // health v2.7 / clinical v1.15. The second member here whose vocabulary
+  // cardinality is not 0..*, and it is here for the same reason
+  // `dataAbsentReason` is: `health:LabResultRecordShape` caps
+  // `health:interpretationSourceCode` at sh:maxCount 1, and the writer emits a
+  // triple per value regardless. A reader that kept only the first would
+  // relocate the defect rather than remove it — re-serializing what came back
+  // writes a single code, and sh:maxCount 1 finds nothing to violate again.
+  // Both Turtle spellings resolve to this one JSON key (see the clinical:
+  // alias above), so the entry covers a vital sign as well as a lab result.
+  'interpretationSourceCode',
 ]);
 
 /**
