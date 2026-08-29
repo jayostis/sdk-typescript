@@ -14,6 +14,27 @@ Package: `@the-cascade-protocol/sdk`
 - `src/deserializer/` — JSON → TTL deserialization
 - `src/validator/` — SHACL validation support
 
+## Faithful first, judged second
+
+**The writer and the reader move data. Only the validator judges it.**
+
+`serialize()` writes every value it is handed and `deserialize()` reads every triple it finds,
+whether or not the shapes permit that many. Neither drops, truncates or refuses on validity
+grounds. A shape can only judge what reached the graph, so a writer that kept the first of two
+values — or a reader that did — hands the validator a record with nothing left to violate, and
+returns a clean verdict on incomplete data. That vacuous pass is the failure mode this SDK is
+least able to detect, and `conformance/fixtures/lab-013.json` exists to be written in full and
+then rejected.
+
+Both still refuse to INVENT. A value with no expressible form throws, naming the field. That is
+inexpressibility, not invalidity, and the two are not the same question.
+
+**`validate()` is the only judge, and it ships alone.** `rdf-validate-shacl` is a devDependency and
+`tests/shapes/` is not in `package.json`'s `files`, so SHACL is a test-time tool and nothing a
+consumer installs can reach it. Anything the shapes should catch in production has to be reachable
+from `validate()` — today that means a rule a term declares, since `validateCardinality` reads
+`maxCount` off `termFor(field)` and knows nothing about the rest.
+
 ## MANDATORY: Deployment Discipline
 
 ### Before implementing support for a new vocabulary class:

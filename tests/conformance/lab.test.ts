@@ -14,13 +14,19 @@
  * prefixes — and this file is where each of them belongs when someone writes
  * the claim it makes.
  *
- * lab-013 is asked two things: what this SDK WRITES, and what it READS BACK.
- * Both are one claim and it is about ARITY. `health:LabResultRecordShape` caps
- * `health:interpretationSourceCode` at `sh:maxCount 1`, and two is exactly why
- * both values have to be written: a shape can only judge what reached the
- * graph, so a writer that keeps the first hands the validator nothing left to
- * violate and gets back a clean verdict on incomplete data. The reader is asked
- * separately because it resolves arity from a table of its own — see below.
+ * lab-013 is asked three things: what this SDK WRITES, what it READS BACK, and
+ * what verdict the shapes give it. All three are one claim and it is about
+ * ARITY. `health:LabResultRecordShape` caps `health:interpretationSourceCode`
+ * at `sh:maxCount 1`, and two values is exactly why both have to be written: a
+ * shape can only judge what reached the graph, so a writer that keeps the first
+ * hands the validator nothing left to violate and gets back a clean verdict on
+ * incomplete data.
+ *
+ * The verdict is askable at all because `clinical.shapes.ttl` is vendored.
+ * Before it was, `serialize()` writing lab-013's value and unit as
+ * `clinical:value` / `clinical:unit` put two predicates in the graph that no
+ * loaded shape declared an `sh:path` for, and `assertCovered` refused the whole
+ * record rather than return the vacuous `conforms: true` that silence produces.
  *
  * NOT asserted here: that `serialize()` reproduces `expectedOutput.turtle`.
  * lab-013 still differs from it for a reason that is not this issue's (#7), and
@@ -38,8 +44,10 @@ import { describe, it, expect } from 'vitest';
 
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
+import { validate } from '../../src/validator/index.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
 import { health, parseTurtle } from '../support/graph.js';
+import { sh, shaclCheck } from '../support/shacl.js';
 import type { LabResult } from '../../src/models/lab-result.js';
 
 const lab013 = loadCascadeRecordFixture('lab-013');
@@ -64,12 +72,12 @@ describe('lab-013 — Negative: two health:interpretationSourceCode values on on
   });
 
   it('reads both source codes back off the graph it just wrote', () => {
-    // The writer and the reader resolve arity from separate tables, both named
-    // MULTI_VALUE_FIELDS — one in turtle-serializer.ts, one in
-    // turtle-parser.ts. A field in the first and not the second survives being
-    // written and is collapsed on the way back, so re-serializing what came
-    // back writes a single code that sh:maxCount 1 has nothing to object to:
-    // the same clean verdict on incomplete data, arriving from the other end.
+    // Asked separately from the write, because reading is where the loss used
+    // to happen: the reader kept the first triple of any field it had no arity
+    // entry for and dropped the rest in silence. Re-serializing what came back
+    // then wrote a single code, and `sh:maxCount 1` had nothing left to object
+    // to — the same clean verdict on incomplete data as above, arriving from
+    // the other end.
     const parsed = deserializeOne<LabResult>(
       serialize(lab013.input),
       lab013.input.type,
@@ -78,29 +86,44 @@ describe('lab-013 — Negative: two health:interpretationSourceCode values on on
     expect(parsed?.interpretationSourceCode).toEqual(['ZQ7', 'HIGH-LOCAL']);
   });
 
-  // NO EARNS QUESTION, and #15 is not what blocks it. `health.shapes.ttl` does
-  // declare the rule this fixture exists to break — `sh:path
-  // health:interpretationSourceCode ; sh:maxCount 1`, at
-  // tests/shapes/health.shapes.ttl:979 — so once both codes are written the
-  // verdict is there to be had. What stops `shaclCheck` reaching it is the
-  // record's OTHER two triples: `serialize()` writes lab-013's value and unit
-  // as `clinical:value` / `clinical:unit` where the fixture and the vendored
-  // shapes both say `health:value` / `health:unit`
-  // (tests/shapes/health.shapes.ttl:1640, :1648), and no vendored shape
-  // declares an sh:path for the clinical: spelling. Measured:
-  //
-  //   Error: shaclCheck cannot judge the triples on clinical:value,
-  //   clinical:unit: no shape in core.shapes.ttl or health.shapes.ttl declares
-  //   sh:path for them [...]
-  //
-  // That is the same predicate disagreement as the rest of lab-013's residual
-  // diff, and it is #7's, not this issue's. Asserting the refusal instead would
-  // be a claim that holds only WHILE that defect does, which belongs on #7's
-  // branch rather than merged from here.
-  //
-  // Restoring the question needs one of: `serialize()` writing health:value /
-  // health:unit for a LabResultRecord (#7), or clinical.shapes.ttl added to
-  // tests/shapes/vendored.json. Either one, and this becomes the same three-way
-  // agreement absent-003 gets — SDK, shapes, and the fixture's own
-  // `shouldAccept: false` — with `sh:maxCount` the one violation reported.
+  it('earns the verdict the fixture declares, from the maxCount rule', async () => {
+    // The three-way agreement: this SDK writes both codes, the shape objects to
+    // there being two, and the fixture's own `shouldAccept: false` says that is
+    // the right answer. Any two of the three agreeing proves nothing — a writer
+    // that dropped the second code would earn `conforms: true` here and look
+    // exactly as correct.
+    //
+    // `sourceConstraintComponent` rather than `message`: the message is prose
+    // spec is free to reword, the component is the rule.
+    const report = await shaclCheck(lab013.input);
+
+    expect(report.conforms).toBe(lab013.shouldAccept);
+    expect(report.results).toHaveLength(1);
+
+    const [violation] = report.results;
+    expect(violation?.sourceConstraintComponent.value).toBe(sh.MaxCountConstraintComponent?.value);
+    expect(violation?.path.value).toBe(health.interpretationSourceCode?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // The SHACL verdict above is a TEST-TIME answer and cannot stand in for
+    // this one. `rdf-validate-shacl` is a devDependency and the shapes are not
+    // in package.json's `files`, so nothing a consumer installs can reach any
+    // of it. `validate()` is the whole of what ships, and a record this SDK
+    // writes and reads back faithfully is not helped by a rule only its own
+    // test suite can apply.
+    //
+    // DELIBERATELY NOT asserted on `result.valid`. That is already `false`, for
+    // reasons with nothing to do with this fixture: `validate()` requires
+    // `resultValue` and `resultUnit`, which lab-013 spells `value` / `unit` and
+    // which `health:LabResultRecordShape` gives no `sh:minCount` at all — and
+    // absent-003 earns the IDENTICAL two errors while breaking an entirely
+    // different rule. A vacuous REJECTION is as misleading as a vacuous
+    // `conforms: true` and harder to spot, because the verdict agrees with
+    // `shouldAccept` and looks like the shapes and the SDK saying the same
+    // thing. Only the field named in the error tells them apart.
+    const result = validate(lab013.input);
+
+    expect(result.errors.map((e) => e.field)).toContain('interpretationSourceCode');
+  });
 });

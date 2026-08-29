@@ -22,11 +22,31 @@
  * `"_:b1"`, or as `{}`, with nothing in between to notice.
  *
  * NO EARNS QUESTION, and it is the shapes rather than the SDK that cannot
- * answer it: `tests/shapes/vendored.json` vendors core and health, and neither
- * declares an `sh:path` for `cascade:emergencyContact`, `cascade:address` or
- * `cascade:preferredPharmacy`. `assertCovered` would refuse the graph rather
- * than return the vacuous `conforms: true` that silence produces. Restoring the
- * question needs the profile shapes vendored, not a change here.
+ * answer it — but NOT over the three sub-structures. `cascade:PatientProfileShape`
+ * in core.shapes.ttl declares an `sh:path` for `cascade:emergencyContact`,
+ * `cascade:address` and `cascade:preferredPharmacy`, along with ten more.
+ *
+ * It is the patient's NAME. Every profile this SDK writes carries `foaf:name`,
+ * `foaf:givenName` and `foaf:familyName`, and no shapes file declares a path for
+ * any `foaf:` predicate — `PatientProfileShape` constrains thirteen properties
+ * and none of them is the one identifying the person. `assertCovered` refuses
+ * the graph rather than return the vacuous `conforms: true` that silence
+ * produces, which is right: a verdict reached without looking at the name would
+ * be indistinguishable from a name that satisfied every constraint.
+ *
+ * Vendoring cannot restore this question, and adding a `foaf:` path to
+ * `PatientProfileShape` is probably not the fix either. `core.ttl:262`
+ * describes a two-document Solid WebID model in which the name lives on a
+ * SHAREABLE `foaf:Agent` card and `cascade:PatientProfile` holds only
+ * health-specific data — the two are separate documents so that they can carry
+ * different access-control policies. On that reading the shape is right and
+ * this SDK is wrong to write the name here at all.
+ *
+ * Left refused rather than resolved, because resolving it is a cross-repo
+ * change with an open question at the front of it (#35): `validate()` REQUIRES
+ * `givenName` and `familyName`, `profile-001` and `profile-002` carry them in
+ * their expected output, and `profile-003` — which follows the two-document
+ * model — is the fixture `validate()` rejects.
  *
  * `triples()` is deliberately not used, and its own doc comment says why: a
  * blank node compares by its parser-assigned label, which is stable within one
