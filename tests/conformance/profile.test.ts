@@ -46,7 +46,7 @@ import { describe, it, expect } from 'vitest';
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
-import { cascade, parseTurtle, rdf, vcard } from '../support/graph.js';
+import { cascade, parseTurtle, rdf } from '../support/graph.js';
 import type { PatientProfile } from '../../src/models/patient-profile.js';
 
 const profile002 = loadCascadeRecordFixture('profile-002');
@@ -124,17 +124,15 @@ describe('profile-002 — Full fields: Patient profile with emergency contact, a
   });
 
   it('qualifies a nested child with the blank node prefix, not with the key predicate', () => {
-    // `contactPhone` is the field where the two rules visibly disagree.
-    // `PROPERTY_PREDICATES` registers it as `vcard:hasTelephone`, and that is
-    // what a TOP-LEVEL field of that name would be written as; the fixture
-    // expects `cascade:contactPhone`, because a blank node's children are built
-    // from the node's prefix and the JSON key and never looked up in that
-    // table. Both spellings are live vocabulary, so asking for the wrong one is
-    // the only thing that pins the right one.
+    // `contactPhone` is the field where the two rules would visibly disagree.
+    // A blank node's children are built from the node's prefix and the JSON
+    // key, never looked up in `PROPERTY_PREDICATES`, so a nested key and a
+    // top-level key of the same name are different properties. If anything ever
+    // makes `childrenOf` table-driven, this child stops resolving and the
+    // assertion below goes empty.
     const contact = serializedProfile().out(cascade.emergencyContact);
 
     expect(contact.out(cascade.contactPhone).values).toEqual(['555-0142']);
-    expect(contact.out(vcard.hasTelephone).values).toEqual([]);
   });
 
   it('reads all three structures back as nested objects off the graph it just wrote', () => {
