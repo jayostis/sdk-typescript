@@ -101,10 +101,17 @@ export interface VitalSign extends CascadeRecord {
    * (health v2.7 / clinical v1.15).
    *
    * Deliberately unconstrained in its VALUE: a value set or a pattern here
-   * would recreate exactly the loss the property exists to prevent. Single
-   * valued, because the interpretation it explains is single valued.
+   * would recreate exactly the loss the property exists to prevent.
    *
-   * Maps to `clinical:interpretationSourceCode` in Turtle serialization.
+   * Repeatable, for the same reason the writer emits a triple per value:
+   * `clinical:VitalSignShape` caps this at `sh:maxCount 1`, and a shape can
+   * only judge what reached the graph, so a merged record carrying two source
+   * codes has to arrive with both for the cap to have anything to report. The
+   * reader returns every triple it finds, so a record that went in with two
+   * comes back with two — narrow with {@link asArray} before reaching for a
+   * string method.
+   *
+   * Maps to one `clinical:interpretationSourceCode` triple per value.
    */
-  interpretationSourceCode?: string;
+  interpretationSourceCode?: MultiValue<string>;
 }

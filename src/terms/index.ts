@@ -16,6 +16,7 @@ export * from './term.js';
 
 import type { Term } from './term.js';
 import { dataAbsentReason } from './data-absent-reason.js';
+import { interpretationSourceCode } from './interpretation-source-code.js';
 
 /**
  * Every term module, one line each. Add the import above and the name here in
@@ -31,7 +32,7 @@ import { dataAbsentReason } from './data-absent-reason.js';
  * so a term left out of it is dead code whose field goes on taking the
  * serializer's type-driven default.
  */
-const TERMS: readonly Term[] = Object.freeze([dataAbsentReason]);
+const TERMS: readonly Term[] = Object.freeze([dataAbsentReason, interpretationSourceCode]);
 
 /**
  * Built with an explicit loop rather than `new Map(TERMS.map(...))`, which

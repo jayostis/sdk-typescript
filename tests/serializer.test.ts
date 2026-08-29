@@ -337,9 +337,20 @@ describe('Turtle Serializer', () => {
     // branch it reaches today — so the fork's job is to RETURN CONTROL, not to
     // become a new default.
     //
-    // Characterisation, not red: both of these pass at HEAD, where no fork
-    // exists at all. They are the guard on the change rather than the reason
-    // for it, and they say nothing until the fork lands.
+    // The first two are characterisation: they hold whether or not the fork
+    // exists, so they are the guard on that change rather than the reason for
+    // it, and only a mutation proves they can speak at all.
+    //
+    // The third is a different kind of claim. An ARRAY on a registered field no term claims
+    // falls off the end of the type-driven chain and is written nowhere: every
+    // branch below the fork tests for a string, a number, a boolean or an
+    // object, so the value vanishes and the record serializes as though the
+    // field had been absent. That is how `lab-013`'s two source codes were lost,
+    // and adding one field to one arity table fixes that fixture without
+    // closing the hole. The two silent cases above stay silent — a scalar with
+    // no term keeps its default, and a stray key is still not an error — so
+    // what is asserted here is narrow: an array is the one value the chain
+    // cannot write, and it has to say so instead of dropping it.
     //
     // Asserted on the graph via `triples()` rather than with `toContain` on the
     // Turtle text, because the discriminator IS the datatype: a fork that
@@ -380,6 +391,38 @@ describe('Turtle Serializer', () => {
       const withStray = serialize({ ...base, notAThing: 'ignore me' } as unknown as CascadeRecord);
 
       expect(triples(withStray)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
+    });
+
+    it('throws on an array it has no rule for rather than writing nothing', () => {
+      // `resultValue` again: registered (health:resultValue), claimed by no
+      // term, and in none of the arity tables. Two values are not a valid
+      // resultValue and nobody should send them — but a caller who does is
+      // owed an error naming the field, not a graph that quietly says the
+      // record had no result at all.
+      //
+      // A constructed record and not a fixture, deliberately: once the terms
+      // land no fixture in the corpus reaches this branch, and one that did
+      // would be a bug to fix rather than a case to test.
+      expect(() =>
+        serialize({ ...base, resultValue: ['4.2', '4.3'] } as unknown as CascadeRecord),
+      ).toThrow(/resultValue/);
+    });
+
+    it('writes nothing for an empty array it has no rule for, rather than throwing', () => {
+      // The throw above is for a value that would be LOST. An empty array is
+      // not one: it carries nothing to write, and no triple is the faithful
+      // graph for it. Every arity table that handles an array returns early on
+      // an empty one — IRI_LIST_FIELDS, MULTI_VALUE_FIELDS and ARRAY_FIELDS all
+      // do — so a field with no rule at all must not be STRICTER than a field
+      // with one.
+      //
+      // The case is a caller that normalises an absent optional to `[]`, which
+      // is exactly what `asArray` hands back. `PodBuilder.build` maps
+      // `serialize` over every record it holds, so one such record would take a
+      // whole pod build down over a field carrying no data.
+      const withEmpty = serialize({ ...base, resultValue: [] } as unknown as CascadeRecord);
+
+      expect(triples(withEmpty)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
     });
   });
 
