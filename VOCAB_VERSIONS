@@ -315,8 +315,12 @@ pots=1.4
 #     blank node's children are derived from the node's prefix and the JSON key
 #     and never looked up, so there is no write mapping to register, and adding
 #     one would conflate a nested key with a top-level key of the same name.
-#     cascade:contactEmail is mapped alongside them though nothing here writes
-#     it, so a pod carrying one is not emptied of it on read.
+#     THE TWELVE ARE THE DECLARED ONES, and the list stops there. cascade:
+#     contactEmail is NOT mapped: nothing in spec/ declares it — core.ttl gives
+#     cascade:EmergencyContact contactName, contactRelationship and contactPhone
+#     and its rdfs:comment names those three — and childrenOf writes every key
+#     of a rebuilt object straight back out, so resolving an undeclared spelling
+#     on read turns this SDK into a writer of it.
 #     TWO DEAD ROWS DELETED: contactPhone: 'vcard:hasTelephone' and
 #     contactEmail: 'vcard:hasEmail'. Both were unreachable by construction —
 #     nested-only keys, and the nested writer never consults PROPERTY_PREDICATES
@@ -326,6 +330,14 @@ pots=1.4
 #     with two read spellings, only one of which is ever written. The vcard
 #     namespace declaration itself stays; whether it earns its place is a
 #     separate question.
+#     THE JSON-LD SIDE NEEDS THE TWELVE TOO, and gets them from its own table.
+#     getContext() is built from PROPERTY_PREDICATES, so registering the three
+#     parents there and not their children gave a context that defined the three
+#     edges and none of what hangs off them: toJsonLd emitted the nested object
+#     and it expanded to a node with zero triples. NESTED_CHILD_PREDICATES in
+#     src/jsonld/context.ts defines all twelve as top-level terms, which is what
+#     spec/contexts/v1/cascade.jsonld does — the generated context now agrees
+#     with the published one on all fifteen names, parents included.
 #     THE READ SIDE MOVES WITH THE WRITE SIDE, in one change and deliberately:
 #     emergencyContact / address / preferredPharmacy are added to
 #     NESTED_BLANK_NODE_FIELDS, whose comment named them as the deliberate

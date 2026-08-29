@@ -30,6 +30,51 @@ export const CONTEXT_URI = 'https://cascadeprotocol.org/ns/context/v1/cascade.js
  */
 const DRAFT_CONTEXT_EXCLUDED_PREFIXES = new Set(['evidence', 'workbench', 'oa', 'ical', 'skos']);
 
+/**
+ * The children of the three patient-profile sub-structures, which the context
+ * must define and `PROPERTY_PREDICATES` deliberately must not.
+ *
+ * Two different questions, and this is the seam between them.
+ * `PROPERTY_PREDICATES` is a WRITE table: it answers "what predicate does the
+ * serializer emit for this field", and a blank node's children never reach it,
+ * because they are derived from the node's prefix and the JSON key
+ * (`childrenOf` in src/terms/term.ts). A JSON-LD context answers a different
+ * question — "what does this key MEAN" — and it has to answer it for every key
+ * a document contains, including the ones inside a nested object.
+ *
+ * Without these, `toJsonLd` writes
+ * `"emergencyContact": { "contactName": "Maria Rivera", ... }` and the document
+ * expands, in any conformant processor, to `cascade:emergencyContact` pointing
+ * at a node with ZERO triples. Nothing reports it: the writer passed the value
+ * through faithfully and the context simply has no term to apply. The TTL path
+ * carries the data and the JSON-LD path loses it silently.
+ *
+ * Top-level terms rather than scoped ones, matching
+ * `spec/contexts/v1/cascade.jsonld`, which defines all twelve exactly this way.
+ * That also keeps the context JSON-LD 1.0-readable: a scoped `@context` would
+ * need `"@version": 1.1` and a 1.0 processor errors on it.
+ *
+ * @see spec/contexts/v1/cascade.jsonld
+ * @see spec/ontologies/core/v1/core.ttl  cascade:EmergencyContact, cascade:Address, cascade:PharmacyInfo
+ */
+const NESTED_CHILD_PREDICATES: Record<string, string> = {
+  // cascade:EmergencyContact
+  contactName: 'cascade:contactName',
+  contactRelationship: 'cascade:contactRelationship',
+  contactPhone: 'cascade:contactPhone',
+  // cascade:Address
+  addressLine: 'cascade:addressLine',
+  addressCity: 'cascade:addressCity',
+  addressState: 'cascade:addressState',
+  addressPostalCode: 'cascade:addressPostalCode',
+  addressCountry: 'cascade:addressCountry',
+  addressUse: 'cascade:addressUse',
+  // cascade:PharmacyInfo
+  pharmacyName: 'cascade:pharmacyName',
+  pharmacyAddress: 'cascade:pharmacyAddress',
+  pharmacyPhone: 'cascade:pharmacyPhone',
+};
+
 /** Prefix of a `prefix:localName` CURIE, or '' if it has no colon. */
 function curiePrefix(curie: string): string {
   const colonIdx = curie.indexOf(':');
@@ -154,6 +199,16 @@ export function getContext(): object {
   const uriRefFields = new Set([
     'rxNormCode', 'icd10Code', 'snomedCode', 'loincCode', 'testCode', 'drugCode',
   ]);
+
+  // The nested children go in FIRST, so the loop below overwrites one on a
+  // collision rather than the other way round. A context term has exactly one
+  // meaning, and where a spelling is both a registered top-level field and a
+  // sub-structure child, the registered field is the one a document's top level
+  // actually carries. No such collision exists today; this decides which way it
+  // falls if one is ever added, instead of leaving it to declaration order.
+  for (const [key, pred] of Object.entries(NESTED_CHILD_PREDICATES)) {
+    context[key] = pred;
+  }
 
   for (const [key, pred] of Object.entries(PROPERTY_PREDICATES)) {
     // Draft-vocabulary predicates are excluded from the context until v1.0.

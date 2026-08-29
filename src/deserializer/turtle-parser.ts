@@ -123,15 +123,18 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   // Every one is needed. `triplesToNestedObject` drops an unresolved predicate
   // at `if (!key) continue`, so eleven entries would rebuild a contact, an
   // address or a pharmacy that looks complete and is not.
+  //
+  // And every one is DECLARED: these twelve are the properties core.ttl gives
+  // cascade:EmergencyContact, cascade:Address and cascade:PharmacyInfo, and the
+  // list stops there. Resolving a spelling spec does not declare is not the
+  // harmless kindness it looks like — `childrenOf` writes every key of the
+  // rebuilt object straight back out, so an undeclared predicate read in here
+  // comes back out of the WRITER, under no domain, no range and no shape.
+  // `cascade:contactEmail` was mapped here for exactly that reason and is
+  // gone; it appears nowhere in spec but one prose aside in checkup.ttl.
   [`${NAMESPACES.cascade}contactName`]: 'contactName',
   [`${NAMESPACES.cascade}contactRelationship`]: 'contactRelationship',
   [`${NAMESPACES.cascade}contactPhone`]: 'contactPhone',
-  // Not written by this SDK — no fixture carries one, and the EmergencyContact
-  // model does not declare it — but core v2.2 defines cascade:contactEmail on
-  // the class, and the PROPERTY_PREDICATES row that used to resolve it (as
-  // `vcard:hasEmail`, which nothing has ever written) is gone with #27. Read,
-  // so a pod carrying one is not silently emptied of it.
-  [`${NAMESPACES.cascade}contactEmail`]: 'contactEmail',
   [`${NAMESPACES.cascade}addressLine`]: 'addressLine',
   [`${NAMESPACES.cascade}addressCity`]: 'addressCity',
   [`${NAMESPACES.cascade}addressState`]: 'addressState',

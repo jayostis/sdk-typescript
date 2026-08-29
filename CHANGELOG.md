@@ -17,6 +17,27 @@
   predicates join the deserializer's reverse mappings. Both halves in one
   change: three fields without the child spellings would have rebuilt each
   structure as `{}`, every child dropped in silence.
+- **The JSON-LD path no longer empties the three structures.** `getContext()`
+  is built from `PROPERTY_PREDICATES`, which deliberately holds no entry for a
+  blank node's children, so the generated context defined `emergencyContact` /
+  `address` / `preferredPharmacy` and none of their twelve children. Before
+  this change `toJsonLd` hit `if (!pred) continue` and omitted the three
+  fields; with them registered it emitted
+  `"emergencyContact": { "contactName": "Maria Rivera", ... }` — a document
+  that expands to `cascade:emergencyContact` pointing at a node with zero
+  triples. The TTL path carried the data and the JSON-LD path lost it in
+  silence. The twelve children are now defined in the context as top-level
+  terms, matching `spec/contexts/v1/cascade.jsonld` exactly. (#27)
+- **A scalar where a blank node is declared is an error rather than a silent
+  drop.** `outputsForMember`'s `blankNode` case returned `[]` for anything
+  that was not a nested object, so
+  `serialize({ type: 'PatientProfile', address: '742 Evergreen Terrace' })`
+  returned a document with no address triple — no error, no partial output. The
+  flat form is a shape spec describes (`cascade:addressText`,
+  `cascade:pharmacyAddress`) and TypeScript does not stop a JS caller reaching
+  for it. It now throws, naming the field and the predicate. Thrown per member,
+  so a mixed array fails rather than serializing its object members and
+  discarding its scalar ones.
 
 ### Removed
 
@@ -27,8 +48,11 @@
   no fixture, no serializer path and no record type has ever written either. A
   contact's phone is `cascade:contactPhone`, which is what `profile-002` expects
   and what `src/models/patient-profile.ts` documents. `cascade:contactEmail` is
-  accepted on READ so a pod carrying one still deserializes. The `vcard`
-  namespace declaration stays.
+  not resolved on read either: no ontology in `spec/` declares it — core.ttl
+  gives `cascade:EmergencyContact` three properties and an email is not among
+  them — and because `childrenOf` writes every key of a rebuilt object back
+  out, reading one would make this SDK a WRITER of a predicate with no domain,
+  no range and no shape. The `vcard` namespace declaration stays.
 - The three now-dead `BLANK_NODE_TYPES` entries. `emitField` returns before that
   table for a field a term module owns, so the `rdf:type` of each node is stated
   once, in `src/terms/`.

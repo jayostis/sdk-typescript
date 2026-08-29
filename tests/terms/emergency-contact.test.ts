@@ -14,10 +14,12 @@
  * node is valid Turtle that no shape targets, and a child under the wrong
  * prefix is a valid triple that no query for the declared predicate finds.
  *
- * The children are NOT resolved through `PROPERTY_PREDICATES`, and this field
- * is where that shows: the table registers `contactPhone` as
- * `vcard:hasTelephone`, while a contact's phone is `cascade:contactPhone`.
- * A nested key and a top-level key of the same name are different properties.
+ * The children are NOT resolved through `PROPERTY_PREDICATES`; they are built
+ * from the node's prefix and the JSON key. So a nested key and a top-level key
+ * of the same name are different properties, and `cascade:contactPhone` is
+ * written out by hand below rather than looked up — if `childrenOf` ever
+ * became table-driven, that child would stop resolving and the expected
+ * children would go short by one.
  *
  * Reached through `termFor` rather than by importing the module, so the
  * assertions also say the term is REGISTERED. A term left out of

@@ -21,6 +21,7 @@ import type { VitalSign } from '../src/models/vital-sign.js';
 import type { Immunization } from '../src/models/immunization.js';
 import type { Coverage } from '../src/models/coverage.js';
 import type { PatientProfile } from '../src/models/patient-profile.js';
+import { cascade, parseTurtle } from './support/graph.js';
 
 // ─── Fixture Loading ────────────────────────────────────────────────────────
 
@@ -258,6 +259,58 @@ describe('Turtle Deserializer', () => {
         }
       });
     }
+  });
+
+  describe('a nested predicate no ontology declares', () => {
+    // `cascade:contactEmail` is not vocabulary. `grep -rn contactEmail spec/`
+    // returns one prose aside in `ontologies/checkup/v1/checkup.ttl`;
+    // `core/v1/core.ttl` declares `contactName`, `contactRelationship` and
+    // `contactPhone` on `cascade:EmergencyContact` and nothing else, its
+    // rdfs:comment names exactly those three, `cascade:EmergencyContactShape`
+    // has no `sh:path` for an email, and no context in `spec/contexts/`
+    // defines the term.
+    //
+    // Resolving one on read is not a harmless kindness, which is why this is
+    // asserted rather than left to the reverse map: `childrenOf` writes every
+    // key of the rebuilt object straight back out, so a pod carrying the
+    // non-standard triple would round-trip into a document where THIS SDK
+    // emits a predicate with no domain, no range and no shape.
+    const profileWithContactEmail = `
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+
+<urn:uuid:profile-contact-email> a cascade:PatientProfile ;
+    cascade:schemaVersion "2.0" ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Maria Rivera" ;
+        cascade:contactRelationship "spouse" ;
+        cascade:contactPhone "555-0142" ;
+        cascade:contactEmail "maria.rivera@example.org"
+    ] .
+`;
+
+    it('is dropped rather than rebuilt as a key of the nested object', () => {
+      const parsed = deserializeOne<PatientProfile>(profileWithContactEmail, 'PatientProfile');
+
+      // The whole object, not just the absent key: the three declared children
+      // have to survive the drop, or this would pass just as well on a reader
+      // that lost the contact altogether.
+      expect(parsed?.emergencyContact).toEqual({
+        contactName: 'Maria Rivera',
+        contactRelationship: 'spouse',
+        contactPhone: '555-0142',
+      });
+    });
+
+    it('is not written back out when the record it was read into is serialized', () => {
+      const parsed = deserializeOne<PatientProfile>(profileWithContactEmail, 'PatientProfile');
+      const contact = parseTurtle(serialize(parsed as unknown as CascadeRecord))
+        .namedNode('urn:uuid:profile-contact-email')
+        .out(cascade.emergencyContact);
+
+      expect(contact.out(cascade.contactEmail).values).toEqual([]);
+      expect(contact.out(cascade.contactPhone).values).toEqual(['555-0142']);
+    });
   });
 
   // ─── Edge Cases ─────────────────────────────────────────────────────────

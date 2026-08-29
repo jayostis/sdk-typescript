@@ -279,10 +279,19 @@ function childrenOf(value: unknown, nestedPrefix: string): Output[] {
 /**
  * One member of a value, under an already-resolved predicate and rule.
  *
- * Returns a LIST because a member can legitimately produce no triple at all:
- * see the `blankNode` case.
+ * Returns a LIST because a rule form can produce several outputs from one
+ * member, not because any of them may produce none.
+ *
+ * Takes `key` only to name the field in the `blankNode` error. The predicate
+ * alone is not enough: a caller debugging their record is holding JSON keyed on
+ * `address`, and `cascade:address` is a spelling they may never have seen.
  */
-function outputsForMember(member: unknown, predicate: string, rule: FieldRule): Output[] {
+function outputsForMember(
+  member: unknown,
+  key: string,
+  predicate: string,
+  rule: FieldRule,
+): Output[] {
   switch (rule.form) {
     case 'iri':
       return [{ kind: 'uri', predicate, value: String(member) }];
@@ -307,11 +316,33 @@ function outputsForMember(member: unknown, predicate: string, rule: FieldRule): 
         ? [{ kind: 'boolean', predicate, value: member }]
         : [{ kind: 'literal', predicate, value: String(member) }];
     case 'blankNode': {
-      // A scalar under a blankNode rule writes NOTHING — the same guard
-      // `emitField`'s BLANK_NODE_ARRAY_FIELDS branch applies before calling
-      // `serializeBlankNode`. The alternative is an anonymous node asserting
-      // nothing, `[ ]`, with the IRI it was built from dropped entirely.
-      if (!isNestedObject(member)) return [];
+      // A scalar under a blankNode rule has no faithful output, so it is an
+      // ERROR rather than a choice between two wrong graphs. Writing the node
+      // anyway gives an anonymous `[ ]` asserting nothing, with the value it
+      // was built from dropped; writing nothing gives a document missing the
+      // field, with no error and no partial output to notice. `emitField`
+      // already takes this position for an array-valued field with no rule, and
+      // for the same reason: a caller is owed an error naming the field instead
+      // of a graph that quietly disagrees with what they passed.
+      //
+      // Not a far-fetched input. core.ttl offers `cascade:addressText` and
+      // `cascade:pharmacyAddress` as the flat single-string counterparts of
+      // the nested nodes, so a caller reaching for the flat pattern is reaching
+      // for something spec describes — and TypeScript does not stop them, since
+      // a JS caller has no compile-time protection at all.
+      //
+      // Thrown per MEMBER, so a mixed array fails rather than serializing the
+      // object members and discarding the scalar ones. A partial list is the
+      // hardest form of this to see: what comes back is well-formed.
+      if (!isNestedObject(member)) {
+        throw new Error(
+          `Field '${key}' (predicate ${predicate}) is declared as a blank node, ` +
+            `but was given ${Array.isArray(member) ? 'an array' : `a ${typeof member}`}. ` +
+            `A blankNode rule writes the fields of a nested object as the node's ` +
+            `children; pass an object, or use the flat predicate spec declares ` +
+            `for the single-string form of this structure.`,
+        );
+      }
       const children = childrenOf(member, rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX);
       // An absent `rdfType` leaves the field off entirely. Carrying `''` would
       // reach `b.type('')` and emit a bare `a`, which does not parse.
@@ -386,7 +417,7 @@ export function defineTerm(spec: TermSpec): Term {
       }
 
       return members(value).flatMap((member) =>
-        outputsForMember(member, activePredicate, activeRule),
+        outputsForMember(member, key, activePredicate, activeRule),
       );
     },
   };
