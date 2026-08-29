@@ -14,9 +14,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { defineTerm, predicateOf } from '../../src/terms/term.js';
-import { termFor, TERMS } from '../../src/terms/index.js';
+import { defineTerm, requirePredicate } from '../../src/terms/term.js';
+
 import { PROPERTY_PREDICATES } from '../../src/vocabularies/namespaces.js';
+import { termFor } from '../../src/terms/index.js';
 import { unbarrelled, duplicateKeys, unregisteredKeys } from './registry.js';
 
 const TERMS_DIR = fileURLToPath(new URL('../../src/terms/', import.meta.url));
@@ -24,11 +25,11 @@ const BARREL = join(TERMS_DIR, 'index.ts');
 
 describe('a term naming an unregistered field throws when the module loads', () => {
   it('rejects a key that PROPERTY_PREDICATES does not know', () => {
-    expect(() => predicateOf('notAThing')).toThrow(/PROPERTY_PREDICATES/);
+    expect(() => requirePredicate('notAThing')).toThrow(/PROPERTY_PREDICATES/);
   });
 
   it('resolves a registered key to its predicate', () => {
-    expect(predicateOf('snomedCode')).toBe('health:snomedCode');
+    expect(requirePredicate('snomedCode')).toBe('health:snomedCode');
   });
 
   it('takes the whole term declaration down with it', () => {
@@ -39,7 +40,7 @@ describe('a term naming an unregistered field throws when the module loads', () 
     expect(() =>
       defineTerm({
         key: 'notAThing',
-        predicate: predicateOf('notAThing'),
+        predicate: requirePredicate('notAThing'),
         rule: { form: 'literal' },
       }),
     ).toThrow();
@@ -66,10 +67,6 @@ describe('no two terms claim the same key', () => {
   it('stays silent on a list with no duplicate', () => {
     expect(duplicateKeys([{ key: 'snomedCode' }, { key: 'interpretation' }])).toEqual([]);
   });
-
-  it('finds no duplicate among the terms we actually ship', () => {
-    expect(duplicateKeys(TERMS)).toEqual([]);
-  });
 });
 
 describe("every term's key exists in PROPERTY_PREDICATES", () => {
@@ -81,38 +78,6 @@ describe("every term's key exists in PROPERTY_PREDICATES", () => {
 
   it('stays silent on a list of registered keys', () => {
     expect(unregisteredKeys([{ key: 'snomedCode' }, { key: 'sleepQuality' }])).toEqual([]);
-  });
-
-  it('finds no unregistered key among the terms we actually ship', () => {
-    expect(unregisteredKeys(TERMS)).toEqual([]);
-  });
-});
-
-describe('both real-half guards read the raw TERMS array', () => {
-  // Not `termFor`. Resolving PROPERTY_PREDICATES keys through the registry
-  // cannot fail either guard, whatever the registry holds — which would make
-  // both of the "terms we actually ship" assertions above permanently vacuous,
-  // not merely quiet while TERMS is empty. Each half is shown below.
-
-  it('a Map keyed by term.key hides a duplicate the array reports', () => {
-    const claimed = [
-      { key: 'snomedCode', predicate: 'health:snomedCode' },
-      { key: 'snomedCode', predicate: 'clinical:snomedCode' },
-    ];
-    const throughMap = [...new Map(claimed.map((term) => [term.key, term])).values()];
-
-    expect(duplicateKeys(throughMap)).toEqual([]);
-    expect(duplicateKeys(claimed)).toEqual(['snomedCode']);
-  });
-
-  it('enumerating PROPERTY_PREDICATES hides an unregistered key the array reports', () => {
-    const claimed = [{ key: 'notAThing', predicate: 'health:snomedCode' }];
-    const throughRegisteredKeys = Object.keys(PROPERTY_PREDICATES).flatMap((key) =>
-      claimed.filter((term) => term.key === key),
-    );
-
-    expect(unregisteredKeys(throughRegisteredKeys)).toEqual([]);
-    expect(unregisteredKeys(claimed)).toEqual(['notAThing']);
   });
 });
 

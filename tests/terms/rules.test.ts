@@ -9,11 +9,11 @@
  * serialized end to end.
  *
  * Every `key` below is a real entry in PROPERTY_PREDICATES, because a term may
- * not invent vocabulary: `predicateOf` is the only way a spec gets a predicate.
+ * not invent vocabulary: `requirePredicate` is the only way a spec gets a predicate.
  */
 
 import { describe, it, expect } from 'vitest';
-import { defineTerm, predicateOf } from '../../src/terms/term.js';
+import { defineTerm, requirePredicate } from '../../src/terms/term.js';
 import type { Output } from '../../src/terms/term.js';
 import { TurtleBuilder, SubjectBuilder } from '../../src/serializer/turtle-builder.js';
 
@@ -23,7 +23,7 @@ describe('rule form: literal', () => {
   it('writes a plain literal with no datatype', () => {
     const term = defineTerm({
       key: 'conditionName',
-      predicate: predicateOf('conditionName'),
+      predicate: requirePredicate('conditionName'),
       rule: { form: 'literal' },
     });
 
@@ -35,7 +35,7 @@ describe('rule form: literal', () => {
   it('carries the declared datatype onto the output', () => {
     const term = defineTerm({
       key: 'byteSize',
-      predicate: predicateOf('byteSize'),
+      predicate: requirePredicate('byteSize'),
       rule: { form: 'literal', datatype: 'xsd:integer' },
     });
 
@@ -50,11 +50,11 @@ describe('rule form: literal', () => {
   });
 });
 
-describe('rule form: many', () => {
+describe('an array value writes one output per member', () => {
   const term = defineTerm({
     key: 'snomedCode',
-    predicate: predicateOf('snomedCode'),
-    rule: { form: 'literal', many: true },
+    predicate: requirePredicate('snomedCode'),
+    rule: { form: 'literal' },
   });
 
   it('writes one output per member of an array', () => {
@@ -75,7 +75,7 @@ describe('rule form: iri', () => {
   it('writes a uri output, not a quoted literal', () => {
     const term = defineTerm({
       key: 'hasEncounter',
-      predicate: predicateOf('hasEncounter'),
+      predicate: requirePredicate('hasEncounter'),
       rule: { form: 'iri' },
     });
 
@@ -89,7 +89,7 @@ describe('rule form: iriList', () => {
   it('writes one uriList output holding every member, in order', () => {
     const term = defineTerm({
       key: 'provenanceLayers',
-      predicate: predicateOf('provenanceLayers'),
+      predicate: requirePredicate('provenanceLayers'),
       rule: { form: 'iriList' },
     });
 
@@ -115,7 +115,7 @@ describe('rule form: prefixedEnum', () => {
     // output kinds, and the mismatch is not an omission.
     const term = defineTerm({
       key: 'sleepQuality',
-      predicate: predicateOf('sleepQuality'),
+      predicate: requirePredicate('sleepQuality'),
       rule: { form: 'prefixedEnum', prefix: 'health' },
     });
 
@@ -129,7 +129,7 @@ describe('rule form: blankNode', () => {
   it('writes a typed blank node whose children are the nested fields', () => {
     const term = defineTerm({
       key: 'clinicalSummary',
-      predicate: predicateOf('clinicalSummary'),
+      predicate: requirePredicate('clinicalSummary'),
       rule: { form: 'blankNode', rdfType: 'cascade:RecordSummary' },
     });
 
@@ -160,9 +160,9 @@ describe('a code is written where its own record type says to look for it', () =
   // back empty. A code no query can find is worth what an absent code is worth.
   const snomed = defineTerm({
     key: 'snomedCode',
-    predicate: predicateOf('snomedCode'),
+    predicate: requirePredicate('snomedCode'),
     predicateByType: { VitalSign: 'clinical:snomedCode' },
-    rule: { form: 'literal', many: true },
+    rule: { form: 'literal' },
   });
 
   it('writes clinical:snomedCode for a VitalSign', () => {
@@ -180,7 +180,7 @@ describe('a code is written where its own record type says to look for it', () =
   it('selects the rule by record type too, not only the predicate', () => {
     const byRule = defineTerm({
       key: 'snomedCode',
-      predicate: predicateOf('snomedCode'),
+      predicate: requirePredicate('snomedCode'),
       rule: { form: 'literal' },
       ruleByType: { VitalSign: { form: 'iri' } },
     });
@@ -200,7 +200,7 @@ describe('an absent value produces no outputs', () => {
     // nothing at all, which is exactly the failure this is meant to catch.
     const term = defineTerm({
       key: 'interpretation',
-      predicate: predicateOf('interpretation'),
+      predicate: requirePredicate('interpretation'),
       rule: { form: 'literal' },
     });
 
@@ -314,7 +314,7 @@ describe('rule form: number', () => {
   it('writes an integer as a bare token, not a quoted literal', () => {
     const term = defineTerm({
       key: 'steps',
-      predicate: predicateOf('steps'),
+      predicate: requirePredicate('steps'),
       rule: { form: 'number' },
     });
 
@@ -326,7 +326,7 @@ describe('rule form: number', () => {
   it('writes a decimal as a bare token too', () => {
     const term = defineTerm({
       key: 'durationHours',
-      predicate: predicateOf('durationHours'),
+      predicate: requirePredicate('durationHours'),
       rule: { form: 'number' },
     });
 
@@ -338,7 +338,7 @@ describe('rule form: number', () => {
   it('falls back to a quoted literal for a non-numeric value, as emitField does', () => {
     const term = defineTerm({
       key: 'steps',
-      predicate: predicateOf('steps'),
+      predicate: requirePredicate('steps'),
       rule: { form: 'number' },
     });
 
@@ -352,7 +352,7 @@ describe('rule form: boolean', () => {
   it('writes a bare true/false, not a quoted literal', () => {
     const term = defineTerm({
       key: 'isActive',
-      predicate: predicateOf('isActive'),
+      predicate: requirePredicate('isActive'),
       rule: { form: 'boolean' },
     });
 
@@ -364,7 +364,7 @@ describe('rule form: boolean', () => {
   it('falls back to a quoted literal for a non-boolean value, as emitField does', () => {
     const term = defineTerm({
       key: 'isActive',
-      predicate: predicateOf('isActive'),
+      predicate: requirePredicate('isActive'),
       rule: { form: 'boolean' },
     });
 
@@ -377,7 +377,7 @@ describe('rule form: boolean', () => {
 describe('a blankNode rule with no rdfType', () => {
   const term = defineTerm({
     key: 'clinicalSummary',
-    predicate: predicateOf('clinicalSummary'),
+    predicate: requirePredicate('clinicalSummary'),
     rule: { form: 'blankNode' },
   });
 
@@ -415,7 +415,7 @@ describe('a blankNode rule with no rdfType', () => {
 describe('the children of a blank node match what serializeBlankNode writes', () => {
   const term = defineTerm({
     key: 'clinicalSummary',
-    predicate: predicateOf('clinicalSummary'),
+    predicate: requirePredicate('clinicalSummary'),
     rule: { form: 'blankNode', rdfType: 'cascade:RecordSummary' },
   });
 
@@ -488,7 +488,7 @@ describe('an iriList rule carries its prefix onto every member', () => {
   // prefix writes `<DeviceGenerated>` — a relative IRI.
   const term = defineTerm({
     key: 'provenanceLayers',
-    predicate: predicateOf('provenanceLayers'),
+    predicate: requirePredicate('provenanceLayers'),
     rule: { form: 'iriList', prefix: 'cascade' },
   });
 
@@ -510,7 +510,7 @@ describe('an iriList rule carries its prefix onto every member', () => {
   it('leaves members alone when the rule declares no prefix', () => {
     const bare = defineTerm({
       key: 'deviceSources',
-      predicate: predicateOf('deviceSources'),
+      predicate: requirePredicate('deviceSources'),
       rule: { form: 'iriList' },
     });
 

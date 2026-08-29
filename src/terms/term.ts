@@ -22,8 +22,6 @@ export type FieldRule = {
    * back to a quoted literal, the same fall-through `emitField` takes.
    */
   form: 'literal' | 'number' | 'boolean' | 'iri' | 'iriList' | 'prefixedEnum' | 'blankNode';
-  /** Accept an array OR a bare scalar, and write one triple per value. */
-  many?: boolean;
   /** `literal` only, e.g. `xsd:integer`. */
   datatype?: string;
   /**
@@ -45,7 +43,7 @@ export type FieldRule = {
 export type TermSpec = {
   /** The JSON field name. */
   key: string;
-  /** From {@link predicateOf}, never a literal. */
+  /** From {@link requirePredicate}, never a literal. */
   predicate: string;
   /** recordType -> predicate. */
   predicateByType?: Record<string, string>;
@@ -86,12 +84,12 @@ const NESTED_PREFIX = 'cascade';
  * field nobody registered takes its own module down at load time.
  *
  * A RUNTIME check, and it cannot be anything else: `PROPERTY_PREDICATES` is
- * annotated `Record<string, string>`, so `predicateOf('notAThing')` compiles
+ * annotated `Record<string, string>`, so `requirePredicate('notAThing')` compiles
  * clean.
  *
  * @throws when `key` is not registered in `PROPERTY_PREDICATES`.
  */
-export function predicateOf(key: string): string {
+export function requirePredicate(key: string): string {
   if (!Object.prototype.hasOwnProperty.call(PROPERTY_PREDICATES, key)) {
     throw new Error(
       `Unknown field '${key}': register it in PROPERTY_PREDICATES ` +
