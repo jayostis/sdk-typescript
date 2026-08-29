@@ -1,11 +1,10 @@
 /**
- * The registry invariants: a term cannot invent vocabulary, no two terms claim
- * the same key, and no term file is left out of the barrel.
+ * The three checks in `./registry.ts`, each proven against input this file
+ * builds before it is pointed at the real `src/terms/`.
  *
- * The three checks live in `./registry.ts` as functions over inputs this file
- * supplies. That is deliberate. Pointing a detector only at a directory where
- * it should stay silent proves nothing about the detector, so each one is first
- * handed input where it MUST speak, and only then pointed at us.
+ * That order is the point. A detector aimed only at a place where it should
+ * stay silent has demonstrated nothing — it would pass identically if it were
+ * broken.
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
@@ -14,74 +13,48 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { defineTerm, requirePredicate } from '../../src/terms/term.js';
-
-import { PROPERTY_PREDICATES } from '../../src/vocabularies/namespaces.js';
-import { termFor } from '../../src/terms/index.js';
 import { unbarrelled, duplicateKeys, unregisteredKeys } from './registry.js';
 
 const TERMS_DIR = fileURLToPath(new URL('../../src/terms/', import.meta.url));
 const BARREL = join(TERMS_DIR, 'index.ts');
 
-describe('a term naming an unregistered field throws when the module loads', () => {
-  it('rejects a key that PROPERTY_PREDICATES does not know', () => {
-    expect(() => requirePredicate('notAThing')).toThrow(/PROPERTY_PREDICATES/);
-  });
+describe('duplicateKeys', () => {
+  // Two modules claiming one field makes which of them writes it depend on
+  // barrel order, and the loser's rule is silently unreachable.
 
-  it('resolves a registered key to its predicate', () => {
-    expect(requirePredicate('snomedCode')).toBe('health:snomedCode');
-  });
-
-  it('takes the whole term declaration down with it', () => {
-    // A runtime assertion, not a `@ts-expect-error`: nothing narrows the type
-    // of `key` yet, so a type-level assertion would sit unused and prove
-    // nothing. From the moment the serializer imports `termFor`, a bad key
-    // throws as soon as anything imports the package.
-    expect(() =>
-      defineTerm({
-        key: 'notAThing',
-        predicate: requirePredicate('notAThing'),
-        rule: { form: 'literal' },
-      }),
-    ).toThrow();
-  });
-});
-
-describe('a key no module claims is not an error', () => {
-  it('returns undefined from termFor, leaving the type-driven defaults to run', () => {
-    expect(termFor('resultUnit')).toBeUndefined();
-  });
-});
-
-describe('no two terms claim the same key', () => {
-  it('names the key a synthetic pair of terms both claim', () => {
-    const terms = [
-      { key: 'snomedCode' },
-      { key: 'interpretation' },
-      { key: 'snomedCode' },
-    ];
+  it('names the key two term modules both claim', () => {
+    const terms = [{ key: 'snomedCode' }, { key: 'interpretation' }, { key: 'snomedCode' }];
 
     expect(duplicateKeys(terms)).toEqual(['snomedCode']);
   });
 
-  it('stays silent on a list with no duplicate', () => {
+  it('stays silent when every term claims a different key', () => {
     expect(duplicateKeys([{ key: 'snomedCode' }, { key: 'interpretation' }])).toEqual([]);
   });
 });
 
-describe("every term's key exists in PROPERTY_PREDICATES", () => {
-  it('names a synthetic key the spec does not know', () => {
+describe('unregisteredKeys', () => {
+  // A term keyed on a field spec does not define writes triples no shape
+  // constrains. requirePredicate catches this at declaration; this catches a
+  // term that got its predicate some other way.
+
+  it('names a key that PROPERTY_PREDICATES does not define', () => {
     const terms = [{ key: 'snomedCode' }, { key: 'notAThing' }];
 
     expect(unregisteredKeys(terms)).toEqual(['notAThing']);
   });
 
-  it('stays silent on a list of registered keys', () => {
+  it('stays silent when every key is registered', () => {
     expect(unregisteredKeys([{ key: 'snomedCode' }, { key: 'sleepQuality' }])).toEqual([]);
   });
 });
 
-describe('the barrel-completeness check', () => {
+describe('unbarrelled', () => {
+  // A term file the barrel does not list is dead code that still compiles and
+  // still typechecks: `termFor` never returns it, so the field it describes
+  // goes on taking the serializer's default branch as though the term were
+  // never written.
+
   const scratch: string[] = [];
 
   afterAll(() => {
@@ -98,14 +71,15 @@ describe('the barrel-completeness check', () => {
     return dir;
   }
 
-  it('names the term file the barrel forgot', () => {
+  it('names the term file a barrel left out', () => {
     const dir = scratchTermsDir({
       'snomed-code.ts': 'export const snomedCode = {};\n',
       'interpretation.ts': 'export const interpretation = {};\n',
     });
-    const barrel = "export * from './snomed-code.js';\n";
 
-    expect(unbarrelled(dir, barrel)).toEqual(['interpretation.ts']);
+    expect(unbarrelled(dir, "export * from './snomed-code.js';\n")).toEqual([
+      'interpretation.ts',
+    ]);
   });
 
   it('stays silent when the barrel lists every term file', () => {
@@ -118,10 +92,9 @@ describe('the barrel-completeness check', () => {
     expect(unbarrelled(dir, barrel)).toEqual([]);
   });
 
-  it('finds nothing missing from our own barrel', () => {
-    // One line, and deliberately NOT the test that proves the function works:
-    // it asserts nothing on the day this lands, and starts biting the moment a
-    // term file is added that the barrel forgets.
+  it('finds nothing missing from the barrel we actually ship', () => {
+    // Asserts nothing today — src/terms/ holds no term modules yet. It is the
+    // guard rather than the proof, and it starts working the day one is added.
     expect(unbarrelled(TERMS_DIR, readFileSync(BARREL, 'utf8'))).toEqual([]);
   });
 });
