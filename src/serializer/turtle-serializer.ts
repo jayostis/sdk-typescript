@@ -19,7 +19,7 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
-import { termFor } from '../terms/index.js';
+import { predicateFor, termFor } from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
@@ -369,7 +369,24 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
   for (const [key, value] of Object.entries(record)) {
     if (key === 'id' || key === 'type' || value === undefined || value === null) continue;
 
-    const pred = getPredicateForField(key, record.type);
+    // The same fork `emitField` takes at the write step, and it has to be
+    // taken here too. A term resolves its own predicate out of `predicate` /
+    // `predicateByType`, so asking `getPredicateForField` for a TERMED field is
+    // a second, independent answer to "which namespace does this field write
+    // under" — and the two answers decide different halves of one document.
+    // This one picks the `@prefix` lines the header declares; the other picks
+    // what the subject block writes.
+    //
+    // Harmless while they agree, which they do for every term shipped today.
+    // It stops being harmless at the first term that re-prefixes a field per
+    // type — the shape every `TYPE_PREDICATE_OVERRIDES` entry already has, e.g.
+    // `snomedCode` under `clinical:` on a VitalSign. Resolved the old way, the
+    // header would declare `health:` and the subject block would write
+    // `clinical:snomedCode` under a prefix that was never declared. That is not
+    // a wrong triple: it is a document that does not parse, and it fails on the
+    // whole record rather than on the field.
+    const term = termFor(key);
+    const pred = term ? predicateFor(term, record.type) : getPredicateForField(key, record.type);
     if (pred) {
       const nsPrefix = pred.split(':')[0];
       if (nsPrefix && nsPrefix in NAMESPACES) {

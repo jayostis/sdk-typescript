@@ -12,6 +12,13 @@
  * second is a three-way agreement — SDK, shapes, and the fixture's declared
  * `shouldAccept` — so a failure says they disagree, not which one is wrong.
  *
+ * absent-003 is asked a third: what this SDK READS BACK. Arity is that
+ * fixture's entire claim, and a claim about arity that only ever asks the
+ * serializer is half a claim. The writer and the reader keep their 0..*
+ * fields in two separate tables — `MULTI_VALUE_FIELDS` in
+ * turtle-serializer.ts and another of the same name in turtle-parser.ts —
+ * and nothing but a round trip asks them the same question.
+ *
  * An EARNS question is only asked where the vendored shapes can actually answer
  * it. `shaclCheck` refuses a graph they are silent on rather than returning the
  * vacuous conforms:true silence produces, and absent-001 is such a graph: it
@@ -32,13 +39,24 @@
 
 import { describe, it, expect } from 'vitest';
 import { serialize } from '../../src/serializer/turtle-serializer.js';
+import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
 import { cascade, parseTurtle, triples } from '../support/graph.js';
 import { sh, shaclCheck } from '../support/shacl.js';
+import type { CascadeRecord } from '../../src/models/common.js';
 
 const absent001 = loadCascadeRecordFixture('absent-001');
 const absent002 = loadCascadeRecordFixture('absent-002');
 const absent003 = loadCascadeRecordFixture('absent-003');
+
+/**
+ * `CascadeRecord` does not declare `dataAbsentReason`. The property is
+ * registered in `PROPERTY_PREDICATES` and owned by a term module, but no model
+ * interface carries it yet, so the read below is widened HERE rather than cast
+ * away — this file typechecks under tsconfig.typecheck.json, and an `any`
+ * would switch that off for the one assertion that needs it most.
+ */
+type RecordWithAbsentReason = CascadeRecord & { dataAbsentReason?: string | string[] };
 
 describe('absent-001 — Happy path: lab result with no value, carrying a ratified reason for the absence', () => {
   // `task.suite` is the enclosing describe. Asserting the title against the
@@ -138,6 +156,24 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
     const node = parseTurtle(serialize(record)).namedNode(record.id);
 
     expect(node.out(cascade.dataAbsentReason).values).toEqual(['not-asked', 'asked-unknown']);
+  });
+
+  it('reads both reasons back off the graph it just wrote', () => {
+    // The write side and the read side resolve arity from separate tables, so
+    // emitting both values does not by itself mean both survive a round trip:
+    // `dataAbsentReason` reaching turtle-serializer.ts's MULTI_VALUE_FIELDS and
+    // not turtle-parser.ts's makes this the first field where the two disagree.
+    //
+    // That is #2's defect relocated, not removed. The reader keeps the first
+    // triple, re-serializing what came back writes ONE reason, and
+    // cascade:DataAbsentReasonShape — sh:maxCount 1 — again finds nothing to
+    // violate, so an incomplete record earns a clean verdict from the other end.
+    const parsed = deserializeOne<RecordWithAbsentReason>(
+      serialize(absent003.input),
+      absent003.input.type,
+    );
+
+    expect(parsed?.dataAbsentReason).toEqual(['not-asked', 'asked-unknown']);
   });
 
   it('earns the verdict the fixture declares, from the cardinality rule', async () => {
