@@ -25,10 +25,8 @@
  * carries a `clinical:loincCode` triple no vendored shape constrains. Only
  * absent-002 is asked both questions here — see each describe below.
  *
- * Claims that hold only WHILE a defect exists are not on the shared branch;
- * they belong on that issue's work branch, committed red: #3, #4. This IS #2's
- * work branch, so absent-003's claims are here and they are red — see its
- * describe below.
+ * Claims that hold only WHILE a defect exists are not here; they belong on that
+ * issue's work branch, committed red. #3 and #4 still have theirs.
  *
  * `parseTurtle` takes text, so the `serialize()` under test stays visible.
  * `shaclCheck` takes a record and serializes it itself.
@@ -129,29 +127,16 @@ describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight i
 });
 
 describe('absent-003 — Negative: two cascade:dataAbsentReason values on one record', () => {
-  // Identity only. BOTH claims this fixture would otherwise carry are red at
-  // HEAD, and for ONE cause — #2: `dataAbsentReason` here is an array, which
-  // `emitField` matches under no branch, so serialize() writes no triple at all.
-  //
-  //   WRITES — that output IS the defect.
-  //   EARNS  — red for the same cause, not independently. The shape is
-  //            sh:targetSubjectsOf cascade:dataAbsentReason, so with no triple
-  //            it targets nothing, shaclCheck returns conforms:true, and the
-  //            sh:maxCount violation is unobservable until #2 emits the values.
-  //
-  // So the verdict test goes where the writes test already went: #2's work
-  // branch, committed red. That is this file's own rule at the top, applied to
-  // the second half as well as the first — a suite that is red on a defect it
-  // has declared out of scope cannot tell you anything new when it goes red.
+  // The only fixture here asked all three questions. WRITES and EARNS are one
+  // claim for this one: the shape is sh:targetSubjectsOf, so a writer that
+  // dropped both values would leave it targeting nothing and reporting
+  // conforms:true — the verdict cannot be observed until the values are.
   it('is the fixture this file thinks it is', ({ task }) => {
     expect(task.suite?.name).toContain(absent003.description);
     expect(absent003.shouldAccept).toBe(false);
   });
 
   it('writes both reasons to the graph', () => {
-    // RED at HEAD: `.values` is `[]`. Both reasons are dropped, and dropping
-    // them is not a lenient reading of the cardinality rule — it is the writer
-    // deciding what the validator gets to see.
     const record = absent003.input;
     const node = parseTurtle(serialize(record)).namedNode(record.id);
 
@@ -159,15 +144,11 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
   });
 
   it('reads both reasons back off the graph it just wrote', () => {
-    // The write side and the read side resolve arity from separate tables, so
-    // emitting both values does not by itself mean both survive a round trip:
-    // `dataAbsentReason` reaching turtle-serializer.ts's MULTI_VALUE_FIELDS and
-    // not turtle-parser.ts's makes this the first field where the two disagree.
-    //
-    // That is #2's defect relocated, not removed. The reader keeps the first
-    // triple, re-serializing what came back writes ONE reason, and
-    // cascade:DataAbsentReasonShape — sh:maxCount 1 — again finds nothing to
-    // violate, so an incomplete record earns a clean verdict from the other end.
+    // The writer and the reader resolve arity from separate tables, both named
+    // MULTI_VALUE_FIELDS — one in turtle-serializer.ts, one in
+    // turtle-parser.ts. A field in the first and not the second survives being
+    // written and is collapsed on the way back, which puts the vacuous verdict
+    // back where it started with the writer now innocent.
     const parsed = deserializeOne<RecordWithAbsentReason>(
       serialize(absent003.input),
       absent003.input.type,
@@ -177,12 +158,6 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
   });
 
   it('earns the verdict the fixture declares, from the cardinality rule', async () => {
-    // RED at HEAD as `expected true to be false`, and that reads as the whole
-    // defect: cascade:DataAbsentReasonShape is sh:targetSubjectsOf
-    // cascade:dataAbsentReason, so with no triple written it targets nothing,
-    // has nothing to violate, and reports conforms:true — a record missing half
-    // its data, carrying a clean bill of health.
-    //
     // `toHaveLength(1)` and not more: the shape's sh:in
     // (tests/shapes/core.shapes.ttl:693) admits both 'not-asked' and
     // 'asked-unknown', so sh:maxCount is the only rule left for this fixture to
@@ -198,10 +173,6 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
   });
 
   it('serializes to the graph the fixture expects', () => {
-    // The two dropped triples are the ONLY disagreement with the fixture's own
-    // expectedOutput — measured -2 +0 — so once they are emitted the graphs are
-    // identical, and this is what says the fix added nothing else.
-    //
     // `triples()` and not the Turtle text: the fixture writes an object list
     // (`cascade:dataAbsentReason "not-asked", "asked-unknown"`) and a repeated
     // predicate is the same graph in different bytes. absent-003 carries no
