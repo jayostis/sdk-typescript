@@ -92,6 +92,13 @@ function makeValidPatientProfile(overrides: Record<string, unknown> = {}) {
   return makeRecord('PatientProfile', {
     givenName: 'Jane',
     familyName: 'Doe',
+    // `cascade:PatientProfileShape` declares sh:minCount 1 for both, and the
+    // term modules now carry that, so a profile without them is invalid and
+    // this helper's previous "valid" record was not one. It passed only because
+    // nothing checked — the same gap that let profile-004 and profile-005 be
+    // rejected over `givenName` instead of over the field each is missing.
+    dateOfBirth: '1985-03-12',
+    biologicalSex: 'female',
     ...overrides,
   });
 }

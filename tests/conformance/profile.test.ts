@@ -65,9 +65,12 @@ import { describe, it, expect } from 'vitest';
 
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
-import { loadCascadeRecordFixture } from '../support/fixtures.js';
+import { loadCascadeRecordFixture, loadFixture } from '../support/fixtures.js';
+import { validate } from '../../src/validator/index.js';
+import { sh, shaclCheck } from '../support/shacl.js';
 import { cascade, parseTurtle, rdf } from '../support/graph.js';
 import type { PatientProfile } from '../../src/models/patient-profile.js';
+import type { CascadeRecord } from '../../src/models/common.js';
 
 const profile002 = loadCascadeRecordFixture('profile-002');
 
@@ -191,5 +194,64 @@ describe('profile-002 — Full fields: Patient profile with emergency contact, a
         pharmacyPhone: '555-0199',
       },
     });
+  });
+});
+
+/**
+ * The family's two NEGATIVE fixtures, each asked what the shapes say and what
+ * the shipped `validate()` says.
+ *
+ * Both earn a verdict where `profile-002` cannot, and the difference is the
+ * point: neither carries a `foaf:` name, so neither puts a predicate in the
+ * graph that no loaded shape declares a path for. The refusal above is about
+ * the identity triples, not about patient profiles.
+ */
+const profile004 = loadFixture('profile-004');
+const profile005 = loadFixture('profile-005');
+
+describe('profile-004 — Negative: Patient profile missing required dateOfBirth field', () => {
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(profile004.description);
+    expect(profile004.shouldAccept).toBe(false);
+  });
+
+  it('earns the verdict the fixture declares, from the minCount rule', async () => {
+    const report = await shaclCheck(profile004.input as CascadeRecord);
+
+    expect(report.conforms).toBe(profile004.shouldAccept);
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]?.sourceConstraintComponent.value)
+      .toBe(sh.MinCountConstraintComponent?.value);
+    expect(report.results[0]?.path.value).toBe(cascade.dateOfBirth?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // `validate()` already returns valid:false here, and for the wrong field:
+    // it requires `givenName` and `familyName`, which no shape mentions and
+    // which core.ttl puts on a different document entirely (#35). Asserting on
+    // the boolean would pass while the validator looked at neither the missing
+    // dateOfBirth nor anything else this fixture is about.
+    expect(validate(profile004.input).errors.map((e) => e.field)).toContain('dateOfBirth');
+  });
+});
+
+describe('profile-005 — Negative: Patient profile missing required biologicalSex field', () => {
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(profile005.description);
+    expect(profile005.shouldAccept).toBe(false);
+  });
+
+  it('earns the verdict the fixture declares, from the minCount rule', async () => {
+    const report = await shaclCheck(profile005.input as CascadeRecord);
+
+    expect(report.conforms).toBe(profile005.shouldAccept);
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]?.sourceConstraintComponent.value)
+      .toBe(sh.MinCountConstraintComponent?.value);
+    expect(report.results[0]?.path.value).toBe(cascade.biologicalSex?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    expect(validate(profile005.input).errors.map((e) => e.field)).toContain('biologicalSex');
   });
 });

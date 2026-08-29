@@ -37,6 +37,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { serialize } from '../../src/serializer/turtle-serializer.js';
+import { validate } from '../../src/validator/index.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
 import { cascade, parseTurtle, triples } from '../support/graph.js';
@@ -117,6 +118,15 @@ describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight i
     expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
     expect(violation?.value.value).toBe('UNK');
   });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // The verdict above is TEST-TIME only: `rdf-validate-shacl` is a
+    // devDependency and tests/shapes/ is not in package.json's `files`, so a
+    // consumer installing this package can reach none of it. `validate()` is
+    // the whole of what ships, and "UNK" is exactly the input a real caller
+    // sends — a raw HL7 v3 NullFlavor pasted through from a source system.
+    expect(validate(absent002.input).errors.map((e) => e.field)).toContain('dataAbsentReason');
+  });
 });
 
 describe('absent-003 — Negative: two cascade:dataAbsentReason values on one record', () => {
@@ -163,6 +173,13 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
     const [violation] = report.results;
     expect(violation?.sourceConstraintComponent.value).toBe(sh.MaxCountConstraintComponent?.value);
     expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // Green because `dataAbsentReason` is a term and `validateCardinality`
+    // reads `maxCount` off it — the same rule the shape applies, reached from
+    // the declaration rather than transcribed a second time.
+    expect(validate(absent003.input).errors.map((e) => e.field)).toContain('dataAbsentReason');
   });
 
   it('serializes to the graph the fixture expects', () => {

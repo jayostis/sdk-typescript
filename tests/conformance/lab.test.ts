@@ -45,10 +45,11 @@ import { describe, it, expect } from 'vitest';
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { validate } from '../../src/validator/index.js';
-import { loadCascadeRecordFixture } from '../support/fixtures.js';
+import { loadCascadeRecordFixture, loadFixture } from '../support/fixtures.js';
 import { health, parseTurtle } from '../support/graph.js';
 import { sh, shaclCheck } from '../support/shacl.js';
 import type { LabResult } from '../../src/models/lab-result.js';
+import type { CascadeRecord } from '../../src/models/common.js';
 
 const lab013 = loadCascadeRecordFixture('lab-013');
 
@@ -125,5 +126,92 @@ describe('lab-013 — Negative: two health:interpretationSourceCode values on on
     const result = validate(lab013.input);
 
     expect(result.errors.map((e) => e.field)).toContain('interpretationSourceCode');
+  });
+});
+
+/**
+ * The rest of the family's NEGATIVE fixtures. Each is asked the same two
+ * questions — what the shapes say, and what the shipped `validate()` says —
+ * because the two are different validators with different reach, and a fixture
+ * caught by one and missed by the other is the case worth knowing about.
+ *
+ * `loadFixture` rather than `loadCascadeRecordFixture` for these: two of them
+ * are negative BECAUSE a required field is absent, and the record-fixture
+ * loader checks for `dataProvenance` and `schemaVersion` itself, so it throws
+ * on exactly the fixture whose missing `dataProvenance` is the point.
+ */
+const lab006 = loadFixture('lab-006');
+const lab007 = loadFixture('lab-007');
+const lab010 = loadFixture('lab-010');
+
+describe('lab-006 — Negative: Lab result missing required testName field', () => {
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(lab006.description);
+    expect(lab006.shouldAccept).toBe(false);
+  });
+
+  it('earns the verdict the fixture declares, from the minCount rule', async () => {
+    const report = await shaclCheck(lab006.input as CascadeRecord);
+
+    expect(report.conforms).toBe(lab006.shouldAccept);
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]?.sourceConstraintComponent.value)
+      .toBe(sh.MinCountConstraintComponent?.value);
+    expect(report.results[0]?.path.value).toBe(health.testName?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // Green by coincidence rather than by construction: `validateTypeSpecific`
+    // happens to hardcode a testName check for a LabResultRecord. It agrees
+    // with `health:LabResultRecordShape`'s sh:minCount 1 here and diverges from
+    // the same shape two fields along, where it requires `resultValue` and
+    // `resultUnit` that carry no sh:minCount at all (#3).
+    expect(validate(lab006.input).errors.map((e) => e.field)).toContain('testName');
+  });
+});
+
+describe('lab-007 — Negative: Lab result missing required dataProvenance field', () => {
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(lab007.description);
+    expect(lab007.shouldAccept).toBe(false);
+  });
+
+  it('earns the verdict the fixture declares, from the minCount rule', async () => {
+    const report = await shaclCheck(lab007.input as CascadeRecord);
+
+    expect(report.conforms).toBe(lab007.shouldAccept);
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]?.sourceConstraintComponent.value)
+      .toBe(sh.MinCountConstraintComponent?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    expect(validate(lab007.input).errors.map((e) => e.field)).toContain('dataProvenance');
+  });
+});
+
+describe("lab-010 — Negative: interpretation 'quite high', which is in neither the HL7 v3 ObservationInterpretation code system nor the retained legacy words, is rejected", () => {
+  it('is the fixture this file thinks it is', ({ task }) => {
+    expect(task.suite?.name).toContain(lab010.description);
+    expect(lab010.shouldAccept).toBe(false);
+  });
+
+  it('earns the verdict the fixture declares, from the value-set rule', async () => {
+    const report = await shaclCheck(lab010.input as CascadeRecord);
+
+    expect(report.conforms).toBe(lab010.shouldAccept);
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]?.sourceConstraintComponent.value)
+      .toBe(sh.InConstraintComponent?.value);
+    expect(report.results[0]?.path.value).toBe(health.interpretation?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // A FALSE ACCEPT before this: `validate()` returned valid:true for a record
+    // the corpus declares invalid and the shapes reject — the vacuous verdict
+    // this epic is named for, arriving from the shipped side rather than the
+    // test-time one. It has no value-set check for `health:interpretation`,
+    // where `absent-002` proves it needs one for `cascade:dataAbsentReason` too.
+    expect(validate(lab010.input).errors.map((e) => e.field)).toContain('interpretation');
   });
 });
