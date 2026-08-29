@@ -127,6 +127,24 @@ function ownEntry<T>(table: Record<string, T> | undefined, key: string | undefin
 }
 
 /**
+ * The predicate a term writes a record of `recordType` under: its per-type
+ * override where one is declared, else its registered predicate.
+ *
+ * Exported because TWO callers need this answer, and a second implementation of
+ * it is how they drift. `outputsFor` decides which predicate reaches the subject
+ * block; the serializer's `collectPrefixes` decides which `@prefix` lines the
+ * document declares. A subject block written under a prefix the header never
+ * declared is not a wrong triple — it is a document that does not parse, and it
+ * fails on the whole record rather than on the one field.
+ *
+ * Takes a {@link TermSpec} rather than a {@link Term}, so it can be asked before
+ * {@link defineTerm} has built one.
+ */
+export function predicateFor(spec: TermSpec, recordType: string | undefined): string {
+  return ownEntry(spec.predicateByType, recordType) ?? spec.predicate;
+}
+
+/**
  * Resolve a JSON field name to its registered predicate.
  *
  * `PROPERTY_PREDICATES` mirrors `spec`'s TTL, and vocabulary is never authored
@@ -326,7 +344,7 @@ function outputsForMember(member: unknown, predicate: string, rule: FieldRule): 
  * its own module down at load time rather than writing bad Turtle at runtime.
  */
 export function defineTerm(spec: TermSpec): Term {
-  const { key, predicate, predicateByType, rule, ruleByType } = spec;
+  const { key, predicateByType, rule, ruleByType } = spec;
 
   // Not a duplicate of the caller's `requirePredicate(key)` in the common case:
   // `predicate` is a plain string, so a term can be declared with one written
@@ -345,7 +363,7 @@ export function defineTerm(spec: TermSpec): Term {
       if (!present(value)) return [];
 
       const recordType = typeof record.type === 'string' ? record.type : undefined;
-      const activePredicate = ownEntry(predicateByType, recordType) ?? predicate;
+      const activePredicate = predicateFor(spec, recordType);
       const activeRule = ownEntry(ruleByType, recordType) ?? rule;
 
       if (activeRule.form === 'iriList') {

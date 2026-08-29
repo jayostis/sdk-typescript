@@ -62,8 +62,6 @@ describe('unbarrelled', () => {
   });
 
   it('finds nothing missing from the barrel we actually ship', () => {
-    // Asserts nothing today — src/terms/ holds no term modules yet. It is the
-    // guard rather than the proof, and it starts working the day one is added.
     expect(unbarrelled(TERMS_DIR, readFileSync(BARREL, 'utf8'))).toEqual([]);
   });
 });

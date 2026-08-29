@@ -15,15 +15,23 @@
 export * from './term.js';
 
 import type { Term } from './term.js';
+import { dataAbsentReason } from './data-absent-reason.js';
 
 /**
  * Every term module, one line each. Add the import above and the name here in
  * the same edit; the barrel-completeness check names any file left out.
  *
- * Empty for now: this issue establishes the mechanism, and the first real term
- * arrives with its first consumer.
+ * Imported, never re-exported. A term is data this module reads, not a symbol
+ * anything outside it has a reason to hold: `termFor` is the whole surface, and
+ * re-exporting `dataAbsentReason` would let a caller reach a rule while
+ * bypassing the map that decides which rule applies. The import alone satisfies
+ * the completeness check, which reads the specifier and not the export.
+ *
+ * A term is only reachable once it is listed HERE. `termFor` reads this array,
+ * so a term left out of it is dead code whose field goes on taking the
+ * serializer's type-driven default.
  */
-const TERMS: readonly Term[] = Object.freeze([]);
+const TERMS: readonly Term[] = Object.freeze([dataAbsentReason]);
 
 /**
  * Built with an explicit loop rather than `new Map(TERMS.map(...))`, which

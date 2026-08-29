@@ -12,6 +12,13 @@
  * second is a three-way agreement — SDK, shapes, and the fixture's declared
  * `shouldAccept` — so a failure says they disagree, not which one is wrong.
  *
+ * absent-003 is asked a third: what this SDK READS BACK. Arity is that
+ * fixture's entire claim, and a claim about arity that only ever asks the
+ * serializer is half a claim. The writer and the reader keep their 0..*
+ * fields in two separate tables — `MULTI_VALUE_FIELDS` in
+ * turtle-serializer.ts and another of the same name in turtle-parser.ts —
+ * and nothing but a round trip asks them the same question.
+ *
  * An EARNS question is only asked where the vendored shapes can actually answer
  * it. `shaclCheck` refuses a graph they are silent on rather than returning the
  * vacuous conforms:true silence produces, and absent-001 is such a graph: it
@@ -19,8 +26,7 @@
  * absent-002 is asked both questions here — see each describe below.
  *
  * Claims that hold only WHILE a defect exists are not here; they belong on that
- * issue's work branch, committed red: #2, #3, #4. absent-003 is the case where
- * that costs BOTH questions rather than one — see its describe below.
+ * issue's work branch, committed red. #3 and #4 still have theirs.
  *
  * `parseTurtle` takes text, so the `serialize()` under test stays visible.
  * `shaclCheck` takes a record and serializes it itself.
@@ -30,14 +36,25 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { serialize } from '../src/serializer/turtle-serializer.js';
-import { loadCascadeRecordFixture } from './support/fixtures.js';
-import { cascade, parseTurtle } from './support/graph.js';
-import { sh, shaclCheck } from './support/shacl.js';
+import { serialize } from '../../src/serializer/turtle-serializer.js';
+import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
+import { loadCascadeRecordFixture } from '../support/fixtures.js';
+import { cascade, parseTurtle, triples } from '../support/graph.js';
+import { sh, shaclCheck } from '../support/shacl.js';
+import type { CascadeRecord } from '../../src/models/common.js';
 
 const absent001 = loadCascadeRecordFixture('absent-001');
 const absent002 = loadCascadeRecordFixture('absent-002');
 const absent003 = loadCascadeRecordFixture('absent-003');
+
+/**
+ * `CascadeRecord` does not declare `dataAbsentReason`. The property is
+ * registered in `PROPERTY_PREDICATES` and owned by a term module, but no model
+ * interface carries it yet, so the read below is widened HERE rather than cast
+ * away — this file typechecks under tsconfig.typecheck.json, and an `any`
+ * would switch that off for the one assertion that needs it most.
+ */
+type RecordWithAbsentReason = CascadeRecord & { dataAbsentReason?: string | string[] };
 
 describe('absent-001 — Happy path: lab result with no value, carrying a ratified reason for the absence', () => {
   // `task.suite` is the enclosing describe. Asserting the title against the
@@ -110,22 +127,56 @@ describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight i
 });
 
 describe('absent-003 — Negative: two cascade:dataAbsentReason values on one record', () => {
-  // Identity only. BOTH claims this fixture would otherwise carry are red at
-  // HEAD, and for ONE cause — #2: `dataAbsentReason` here is an array, which
-  // `emitField` matches under no branch, so serialize() writes no triple at all.
-  //
-  //   WRITES — that output IS the defect.
-  //   EARNS  — red for the same cause, not independently. The shape is
-  //            sh:targetSubjectsOf cascade:dataAbsentReason, so with no triple
-  //            it targets nothing, shaclCheck returns conforms:true, and the
-  //            sh:maxCount violation is unobservable until #2 emits the values.
-  //
-  // So the verdict test goes where the writes test already went: #2's work
-  // branch, committed red. That is this file's own rule at the top, applied to
-  // the second half as well as the first — a suite that is red on a defect it
-  // has declared out of scope cannot tell you anything new when it goes red.
+  // The only fixture here asked all three questions. WRITES and EARNS are one
+  // claim for this one: the shape is sh:targetSubjectsOf, so a writer that
+  // dropped both values would leave it targeting nothing and reporting
+  // conforms:true — the verdict cannot be observed until the values are.
   it('is the fixture this file thinks it is', ({ task }) => {
     expect(task.suite?.name).toContain(absent003.description);
     expect(absent003.shouldAccept).toBe(false);
+  });
+
+  it('writes both reasons to the graph', () => {
+    const record = absent003.input;
+    const node = parseTurtle(serialize(record)).namedNode(record.id);
+
+    expect(node.out(cascade.dataAbsentReason).values).toEqual(['not-asked', 'asked-unknown']);
+  });
+
+  it('reads both reasons back off the graph it just wrote', () => {
+    // The writer and the reader resolve arity from separate tables, both named
+    // MULTI_VALUE_FIELDS — one in turtle-serializer.ts, one in
+    // turtle-parser.ts. A field in the first and not the second survives being
+    // written and is collapsed on the way back, which puts the vacuous verdict
+    // back where it started with the writer now innocent.
+    const parsed = deserializeOne<RecordWithAbsentReason>(
+      serialize(absent003.input),
+      absent003.input.type,
+    );
+
+    expect(parsed?.dataAbsentReason).toEqual(['not-asked', 'asked-unknown']);
+  });
+
+  it('earns the verdict the fixture declares, from the cardinality rule', async () => {
+    // `toHaveLength(1)` and not more: the shape's sh:in
+    // (tests/shapes/core.shapes.ttl:693) admits both 'not-asked' and
+    // 'asked-unknown', so sh:maxCount is the only rule left for this fixture to
+    // break. A second violation would mean the values changed, not the writer.
+    const report = await shaclCheck(absent003.input);
+
+    expect(report.conforms).toBe(absent003.shouldAccept);
+    expect(report.results).toHaveLength(1);
+
+    const [violation] = report.results;
+    expect(violation?.sourceConstraintComponent.value).toBe(sh.MaxCountConstraintComponent?.value);
+    expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
+  });
+
+  it('serializes to the graph the fixture expects', () => {
+    // `triples()` and not the Turtle text: the fixture writes an object list
+    // (`cascade:dataAbsentReason "not-asked", "asked-unknown"`) and a repeated
+    // predicate is the same graph in different bytes. absent-003 carries no
+    // blank nodes, which is what makes the comparison sound here.
+    expect(triples(serialize(absent003.input))).toEqual(triples(absent003.expectedOutput.turtle));
   });
 });
