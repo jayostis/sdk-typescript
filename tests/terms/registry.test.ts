@@ -13,54 +13,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { allTerms } from '../../src/terms/index.js';
-import { unbarrelled, duplicateKeys, unregisteredKeys } from './registry.js';
+import { unbarrelled } from './registry.js';
 
 const TERMS_DIR = fileURLToPath(new URL('../../src/terms/', import.meta.url));
 const BARREL = join(TERMS_DIR, 'index.ts');
-
-describe('duplicateKeys', () => {
-  // Two modules claiming one field makes which of them writes it depend on
-  // barrel order, and the loser's rule is silently unreachable.
-
-  it('names the key two term modules both claim', () => {
-    const terms = [{ key: 'snomedCode' }, { key: 'interpretation' }, { key: 'snomedCode' }];
-
-    expect(duplicateKeys(terms)).toEqual(['snomedCode']);
-  });
-
-  it('stays silent when every term claims a different key', () => {
-    expect(duplicateKeys([{ key: 'snomedCode' }, { key: 'interpretation' }])).toEqual([]);
-  });
-
-  it('finds no key claimed twice in the registry we actually ship', () => {
-    // Asserts nothing today — TERMS is empty — and is the guard rather than the
-    // proof, exactly as the `unbarrelled` case below is. The two proofs above
-    // are what make it trustworthy the day a term lands: a detector aimed only
-    // at silence has demonstrated nothing.
-    expect(duplicateKeys(allTerms())).toEqual([]);
-  });
-});
-
-describe('unregisteredKeys', () => {
-  // A term keyed on a field spec does not define writes triples no shape
-  // constrains. requirePredicate catches this at declaration; this catches a
-  // term that got its predicate some other way.
-
-  it('names a key that PROPERTY_PREDICATES does not define', () => {
-    const terms = [{ key: 'snomedCode' }, { key: 'notAThing' }];
-
-    expect(unregisteredKeys(terms)).toEqual(['notAThing']);
-  });
-
-  it('stays silent when every key is registered', () => {
-    expect(unregisteredKeys([{ key: 'snomedCode' }, { key: 'sleepQuality' }])).toEqual([]);
-  });
-
-  it('finds no unregistered key in the registry we actually ship', () => {
-    expect(unregisteredKeys(allTerms())).toEqual([]);
-  });
-});
 
 describe('unbarrelled', () => {
   // A term file the barrel does not list is dead code that still compiles and

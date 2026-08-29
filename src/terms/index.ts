@@ -25,23 +25,30 @@ import type { Term } from './term.js';
  */
 const TERMS: readonly Term[] = Object.freeze([]);
 
-const BY_KEY: ReadonlyMap<string, Term> = new Map(TERMS.map((term) => [term.key, term]));
-
 /**
- * Every registered term, in barrel order.
+ * Built with an explicit loop rather than `new Map(TERMS.map(...))`, which
+ * keeps the last of two terms claiming one key and reports nothing. Which of
+ * them won would then depend on barrel order, and the loser's rule would be
+ * unreachable with no way to notice.
  *
- * Exists so the registry invariants can be run against the registry we SHIP,
- * not only against synthetic input. `duplicateKeys` and `unregisteredKeys`
- * proven on hand-built arrays say the detectors work; pointed here they say
- * this SDK is clean, which is the claim that matters. `unbarrelled` already
- * gets to make it by reading the directory.
- *
- * Reading it, not mutating it: the array is frozen, so a caller cannot register
- * a term at runtime and route the writer through vocabulary no module declares.
+ * An invariant enforced here holds for every consumer and every test, and
+ * cannot be skipped by forgetting to assert it. `defineTerm` guards the other
+ * one — a term's key must be registered vocabulary — at declaration.
  */
-export function allTerms(): readonly Term[] {
-  return TERMS;
-}
+const BY_KEY: ReadonlyMap<string, Term> = (() => {
+  const byKey = new Map<string, Term>();
+  for (const term of TERMS) {
+    const claimed = byKey.get(term.key);
+    if (claimed) {
+      throw new Error(
+        `Two terms claim '${term.key}': ${claimed.predicate} and ${term.predicate}. ` +
+          `One field is declared by one module; delete or rename one of them.`,
+      );
+    }
+    byKey.set(term.key, term);
+  }
+  return byKey;
+})();
 
 /**
  * The term that claims `key`, or `undefined` when no module claims it — not an

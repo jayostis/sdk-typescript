@@ -36,6 +36,32 @@ describe('requirePredicate', () => {
   });
 });
 
+describe('defineTerm', () => {
+  it('refuses an unregistered key even when the predicate was written by hand', () => {
+    // The declaration above throws from its own requirePredicate call, so it
+    // says nothing about a term that skipped it. `predicate` is a plain string:
+    // nothing stops an author typing one, and then the only thing standing
+    // between a misspelled field and triples no shape constrains is this check.
+    expect(() =>
+      defineTerm({
+        key: 'notAThing',
+        predicate: 'health:notAThing',
+        rule: { form: 'literal' },
+      }),
+    ).toThrow(/PROPERTY_PREDICATES/);
+  });
+
+  it('accepts a registered key declared the same way', () => {
+    expect(() =>
+      defineTerm({
+        key: 'snomedCode',
+        predicate: 'health:snomedCode',
+        rule: { form: 'literal' },
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe('termFor', () => {
   it('returns undefined for a field no term claims, leaving the serializer defaults to run', () => {
     // Most registered fields have no rule and must keep reaching the

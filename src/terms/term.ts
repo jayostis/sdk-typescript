@@ -328,6 +328,12 @@ function outputsForMember(member: unknown, predicate: string, rule: FieldRule): 
 export function defineTerm(spec: TermSpec): Term {
   const { key, predicate, predicateByType, rule, ruleByType } = spec;
 
+  // Not a duplicate of the caller's `requirePredicate(key)` in the common case:
+  // `predicate` is a plain string, so a term can be declared with one written
+  // out by hand and never reach that check. Asserting the key here means a term
+  // keyed on a field spec does not define cannot be constructed at all.
+  requirePredicate(key);
+
   for (const [recordType, override] of Object.entries(predicateByType ?? {})) {
     requireOverridePredicate(key, recordType, override);
   }

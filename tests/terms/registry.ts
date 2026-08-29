@@ -1,19 +1,21 @@
 /**
- * Registry-wide checks over the term modules.
+ * Does the barrel list every term file on disk?
  *
- * Each is a function over inputs the CALLER supplies rather than something that
- * reads `src/terms/` directly, because a detector cannot be proven by pointing
- * it only at cases where it should stay silent. The tests hand each one input
- * where it MUST speak, and then point it at us.
+ * The one registry question `src/` cannot ask about itself. Tests are not
+ * bundled and `src/` is, so this is the only place that can read the directory
+ * and still be true of what consumers install.
  *
- * The directory read lives here rather than in `src/terms/index.ts` because
- * tests are not bundled and `src/` is: this is the one place that can look at
- * the filesystem and still be true of what consumers install.
+ * The other two invariants are not here. No duplicate key is enforced where
+ * `src/terms/index.ts` builds its map, and no key outside the vocabulary is
+ * enforced by `defineTerm` — both throw, so they hold for every consumer and
+ * cannot be skipped by forgetting to assert them. A check that must be
+ * remembered is a weaker thing than one that cannot be avoided.
+ *
+ * A function over inputs the CALLER supplies, so a test can hand it a directory
+ * where it MUST speak before pointing it at ours.
  */
 
 import { readdirSync } from 'node:fs';
-
-import { PROPERTY_PREDICATES } from '../../src/vocabularies/namespaces.js';
 
 /**
  * Basenames of the term files in `termsDir` that `barrelSource` does not
@@ -30,24 +32,3 @@ export function unbarrelled(termsDir: string, barrelSource: string): string[] {
     .sort();
 }
 
-/** Keys claimed by more than one term in `terms`. */
-export function duplicateKeys(terms: readonly { key: string }[]): string[] {
-  const seen = new Set<string>();
-  const duplicated = new Set<string>();
-
-  for (const { key } of terms) {
-    if (seen.has(key)) duplicated.add(key);
-    seen.add(key);
-  }
-
-  return [...duplicated];
-}
-
-/** Keys in `terms` that are not registered in PROPERTY_PREDICATES. */
-export function unregisteredKeys(terms: readonly { key: string }[]): string[] {
-  const unregistered = terms
-    .map(({ key }) => key)
-    .filter((key) => !Object.prototype.hasOwnProperty.call(PROPERTY_PREDICATES, key));
-
-  return [...new Set(unregistered)];
-}
