@@ -660,6 +660,25 @@ function serializeRecord(record: CascadeEntity): string {
       sub.literal(pred, value);
       return;
     }
+
+    // Reached only when every branch above declined, and an ARRAY is the only
+    // value that can get here: `isBooleanField` takes every boolean, the bare
+    // `typeof value === 'number'` branch takes every number, the blank-node
+    // branch takes every non-array object, and the default above takes every
+    // string. An array with no rule matched no branch and would be written
+    // NOWHERE — the record serializes as though the field had been absent,
+    // which is how lab-013's two source codes were lost. A caller is owed an
+    // error naming the field instead of a graph that quietly disagrees.
+    //
+    // Safe to throw here because nothing in the corpus reaches it: scanning
+    // the 90 wrapped fixtures for an array-valued field with a registered
+    // predicate, no entry in any of the five rule sets and no term module
+    // returned one result — `interpretationSourceCode` on lab-013 — and the
+    // term above removes it. This fires on no fixture that exists today, and
+    // on any field added tomorrow that nobody gave a rule.
+    if (Array.isArray(value)) {
+      throw new Error(`No serialization rule for array-valued '${key}' (predicate ${pred})`);
+    }
   };
 
   // Emit all fields in the order they appear in the object
