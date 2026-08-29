@@ -16,7 +16,7 @@
 #   non-ratified ones. The two SDKs disagree about vitals in opposite directions
 #   and should be fixed together.
 #
-core=3.7
+core=3.8
 health=2.8
 clinical=1.16
 coverage=1.5
@@ -246,6 +246,20 @@ pots=1.4
 #     and clinical:verificationStatus bound to the AllergyIntolerance sets.
 #     This SDK validates no value sets, so the row is bumped because 2.8 adds no
 #     term this SDK is missing, not because code moved.
+#
+# core=3.8: cascade:PatientReported, the provenance individual core had been
+#     missing. Added to BOTH hardcoded provenance sets in this package, which is
+#     the whole of the work: the ProvenanceType union in src/models/common.ts
+#     and VALID_PROVENANCE_TYPES in src/validator/validator.ts. The second is
+#     the one that mattered — a value absent from it is REJECTED at runtime, so
+#     bumping only the row would have left this SDK failing a conformant record.
+#     No term modelled in this release changes.
+#     NOT VERIFIED AGAINST A SPEC CHECKOUT: core.ttl in the local spec sibling
+#     still reads owl:versionInfo "3.7" (spec PR #32 unmerged there), so the
+#     individual's rdfs:comment was not read and its distinction from the
+#     existing cascade:SelfReported is UNCONFIRMED. Nothing here asserts one.
+#     Re-check when spec #32 lands; if the two are not in fact distinct, this
+#     row and both sets need revisiting together.
 #
 # NOT COVERED BY CONFORMANCE FIXTURES. The conformance repo carries no fixture
 #     exercising any of these 24 terms (no attachment- family, and the existing

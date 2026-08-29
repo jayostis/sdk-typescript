@@ -26,6 +26,15 @@
  *   be confused with `AIExtracted` (grounded extraction) or `EHRVerified`.
  *   Maps to `cascade:AIAsserted` (subClassOf `cascade:ConsumerGenerated`).
  * - `EHRVerified` -- Data verified against electronic health records
+ * - `PatientReported` -- The `cascade:PatientReported` individual, defined in
+ *   core v3.8. Registered so a value a producer is entitled to write is not
+ *   rejected by this SDK's validator.
+ *
+ *   ITS RELATION TO `SelfReported` IS NOT RESTATED HERE, deliberately. The two
+ *   read as near-synonyms and the ontology draws whatever distinction it draws;
+ *   inventing one in a doc comment would be a claim the vocabulary did not
+ *   make, and a consumer routing on it would then route on this SDK's guess.
+ *   Consult `cascade:PatientReported` in core.ttl before choosing between them.
  */
 export type ProvenanceType =
   | 'ClinicalGenerated'
@@ -34,7 +43,8 @@ export type ProvenanceType =
   | 'AIExtracted'
   | 'AIGenerated'
   | 'AIAsserted'
-  | 'EHRVerified';
+  | 'EHRVerified'
+  | 'PatientReported';
 
 /**
  * Provenance class indicating the specific import mechanism or tracking method.

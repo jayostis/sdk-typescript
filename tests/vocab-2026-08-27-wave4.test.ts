@@ -1,6 +1,7 @@
 /**
- * core v3.7 / health v2.8 / clinical v1.16 / coverage v1.5 — the 2026-08-27
- * wave-4 vocabulary release. 24 new terms.
+ * core v3.8 / health v2.8 / clinical v1.16 / coverage v1.5 — the 2026-08-27
+ * wave-4 vocabulary release. 24 new terms, plus cascade:PatientReported from
+ * the core v3.7 -> v3.8 bump, which adds no term this release models.
  *
  * Every term here comes from a field-coverage measurement against real FHIR R4
  * exports: each one is a source element a conformant server sends and the
@@ -35,6 +36,7 @@ import { fileURLToPath } from 'url';
 import { serialize } from '../src/serializer/turtle-serializer.js';
 import { deserialize, nextBlankNodeId } from '../src/deserializer/turtle-parser.js';
 import { getContext } from '../src/jsonld/context.js';
+import { validate } from '../src/validator/validator.js';
 import {
   PROPERTY_PREDICATES,
   TYPE_MAPPING,
@@ -119,6 +121,29 @@ describe('wave-4 term census', () => {
     expect(terms['EncounterParticipant']).toBe('clinical:EncounterParticipant');
   });
 
+  it('accepts cascade:PatientReported as a provenance value (core v3.8)', () => {
+    // Two hardcoded sets carry provenance in this package and they fail
+    // differently: the ProvenanceType union fails at COMPILE time, while
+    // VALID_PROVENANCE_TYPES in the validator fails at RUNTIME by rejecting the
+    // record. A row bumped without the second would leave this SDK refusing a
+    // value a producer is entitled to write, so the validator is what is
+    // asserted here rather than the type.
+    const rec = {
+      id: 'urn:uuid:99999999-9999-4999-8999-999999999999',
+      type: 'ConditionRecord',
+      conditionName: 'Migraine',
+      dataProvenance: 'PatientReported',
+      schemaVersion: '1.3',
+    } as unknown as CascadeRecord;
+
+    const result = validate(rec);
+    expect(result.errors.filter((e) => e.field === 'dataProvenance')).toEqual([]);
+    expect(serialize(rec)).toContain('cascade:dataProvenance cascade:PatientReported');
+    expect(
+      deserialize<CascadeRecord>(serialize(rec), 'ConditionRecord')[0]?.dataProvenance,
+    ).toBe('PatientReported');
+  });
+
   it('bumps VOCAB_VERSIONS to the four released rows', () => {
     // Read from this repo's own file, never from a spec sibling: this package's
     // CI checks out no spec checkout, and a test that skipped itself when its
@@ -126,7 +151,7 @@ describe('wave-4 term census', () => {
     const rows = readFileSync(resolve(__dirname, '../VOCAB_VERSIONS'), 'utf-8')
       .split('\n')
       .filter((line) => /^[a-z]+=/.test(line));
-    expect(rows).toContain('core=3.7');
+    expect(rows).toContain('core=3.8');
     expect(rows).toContain('health=2.8');
     expect(rows).toContain('clinical=1.16');
     expect(rows).toContain('coverage=1.5');

@@ -73,6 +73,14 @@ Health v2.8:
 - SHACL only; no term for this SDK to model. The row moves because the version
   moved.
 
+Core v3.8:
+- `PatientReported` added to `ProvenanceType` and to the validator's
+  `VALID_PROVENANCE_TYPES`. The second is the one that mattered: a value absent
+  from that set is rejected at runtime, so bumping the row alone would have left
+  this SDK failing a conformant record. No term modelled in this release
+  changes. The individual's distinction from the existing `SelfReported` is
+  unconfirmed and nothing here asserts one — see VOCAB_VERSIONS.
+
 ### Fixed
 
 - Blank-node labels are minted from a monotonic counter instead of
