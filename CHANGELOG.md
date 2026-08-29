@@ -78,8 +78,14 @@ Core v3.8:
   `VALID_PROVENANCE_TYPES`. The second is the one that mattered: a value absent
   from that set is rejected at runtime, so bumping the row alone would have left
   this SDK failing a conformant record. No term modelled in this release
-  changes. The individual's distinction from the existing `SelfReported` is
-  unconfirmed and nothing here asserts one — see VOCAB_VERSIONS.
+  changes.
+- `PatientReported` is distinct from the existing `SelfReported` on the axis of
+  who keyed the data in, not who it came from: `SelfReported` is the patient
+  entering data directly, `PatientReported` is their own account recorded by
+  another party or system (history related to a clinician, imported
+  questionnaire responses). It is a direct subclass of `cascade:DataProvenance`
+  under neither `ClinicalGenerated` nor `ConsumerGenerated`, since a patient's
+  report reaches records through either setting.
 
 ### Fixed
 

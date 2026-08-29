@@ -26,15 +26,21 @@
  *   be confused with `AIExtracted` (grounded extraction) or `EHRVerified`.
  *   Maps to `cascade:AIAsserted` (subClassOf `cascade:ConsumerGenerated`).
  * - `EHRVerified` -- Data verified against electronic health records
- * - `PatientReported` -- The `cascade:PatientReported` individual, defined in
- *   core v3.8. Registered so a value a producer is entitled to write is not
- *   rejected by this SDK's validator.
+ * - `PatientReported` -- Information originating from the patient's own account
+ *   and recorded by ANOTHER party or system: history related to a clinician,
+ *   imported questionnaire responses. Added in core v3.8.
  *
- *   ITS RELATION TO `SelfReported` IS NOT RESTATED HERE, deliberately. The two
- *   read as near-synonyms and the ontology draws whatever distinction it draws;
- *   inventing one in a doc comment would be a claim the vocabulary did not
- *   make, and a consumer routing on it would then route on this SDK's guess.
- *   Consult `cascade:PatientReported` in core.ttl before choosing between them.
+ *   THE DISTINCTION FROM `SelfReported` IS WHO KEYED IT IN, not who it came
+ *   from. Both originate with the patient; `SelfReported` is the patient
+ *   entering data directly, `PatientReported` is their account reaching the
+ *   record through an intermediary who may have summarized, paraphrased or
+ *   mis-transcribed it. A consumer weighing how directly a claim is attested
+ *   needs the two kept apart.
+ *
+ *   `cascade:PatientReported` is a direct subclass of `cascade:DataProvenance`
+ *   and deliberately sits under NEITHER `ClinicalGenerated` nor
+ *   `ConsumerGenerated`: a patient's report reaches records through either
+ *   setting, so filing it under one would make the other case unrepresentable.
  */
 export type ProvenanceType =
   | 'ClinicalGenerated'

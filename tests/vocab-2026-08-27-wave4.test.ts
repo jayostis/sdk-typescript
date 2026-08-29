@@ -121,6 +121,16 @@ describe('wave-4 term census', () => {
     expect(terms['EncounterParticipant']).toBe('clinical:EncounterParticipant');
   });
 
+  /** A minimal valid record, used to vary only dataProvenance. */
+  function baseCondition(): CascadeRecord {
+    return {
+      id: 'urn:uuid:99999999-9999-4999-8999-999999999999',
+      type: 'ConditionRecord',
+      conditionName: 'Migraine',
+      schemaVersion: '1.3',
+    } as unknown as CascadeRecord;
+  }
+
   it('accepts cascade:PatientReported as a provenance value (core v3.8)', () => {
     // Two hardcoded sets carry provenance in this package and they fail
     // differently: the ProvenanceType union fails at COMPILE time, while
@@ -128,13 +138,7 @@ describe('wave-4 term census', () => {
     // record. A row bumped without the second would leave this SDK refusing a
     // value a producer is entitled to write, so the validator is what is
     // asserted here rather than the type.
-    const rec = {
-      id: 'urn:uuid:99999999-9999-4999-8999-999999999999',
-      type: 'ConditionRecord',
-      conditionName: 'Migraine',
-      dataProvenance: 'PatientReported',
-      schemaVersion: '1.3',
-    } as unknown as CascadeRecord;
+    const rec = { ...baseCondition(), dataProvenance: 'PatientReported' } as CascadeRecord;
 
     const result = validate(rec);
     expect(result.errors.filter((e) => e.field === 'dataProvenance')).toEqual([]);
@@ -142,6 +146,31 @@ describe('wave-4 term census', () => {
     expect(
       deserialize<CascadeRecord>(serialize(rec), 'ConditionRecord')[0]?.dataProvenance,
     ).toBe('PatientReported');
+  });
+
+  it('keeps PatientReported and SelfReported as two distinct values', () => {
+    // They differ on WHO KEYED IT IN, not on who it came from: SelfReported is
+    // the patient entering data directly, PatientReported is their own account
+    // recorded by another party or system, which may have summarized or
+    // mis-transcribed it. Collapsing either onto the other would destroy the
+    // distinction a consumer needs to weigh how directly a claim is attested,
+    // so neither is aliased to the other on read.
+    const asPatient = { ...baseCondition(), dataProvenance: 'PatientReported' };
+    const asSelf = { ...baseCondition(), dataProvenance: 'SelfReported' };
+
+    expect(serialize(asPatient)).toContain('cascade:dataProvenance cascade:PatientReported');
+    expect(serialize(asSelf)).toContain('cascade:dataProvenance cascade:SelfReported');
+
+    expect(
+      deserialize<CascadeRecord>(serialize(asPatient), 'ConditionRecord')[0]?.dataProvenance,
+    ).toBe('PatientReported');
+    expect(
+      deserialize<CascadeRecord>(serialize(asSelf), 'ConditionRecord')[0]?.dataProvenance,
+    ).toBe('SelfReported');
+
+    // Both valid; neither is a fallback for the other.
+    expect(validate(asPatient).errors.filter((e) => e.field === 'dataProvenance')).toEqual([]);
+    expect(validate(asSelf).errors.filter((e) => e.field === 'dataProvenance')).toEqual([]);
   });
 
   it('bumps VOCAB_VERSIONS to the four released rows', () => {

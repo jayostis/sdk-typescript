@@ -254,12 +254,23 @@ pots=1.4
 #     the one that mattered — a value absent from it is REJECTED at runtime, so
 #     bumping only the row would have left this SDK failing a conformant record.
 #     No term modelled in this release changes.
-#     NOT VERIFIED AGAINST A SPEC CHECKOUT: core.ttl in the local spec sibling
-#     still reads owl:versionInfo "3.7" (spec PR #32 unmerged there), so the
-#     individual's rdfs:comment was not read and its distinction from the
-#     existing cascade:SelfReported is UNCONFIRMED. Nothing here asserts one.
-#     Re-check when spec #32 lands; if the two are not in fact distinct, this
-#     row and both sets need revisiting together.
+#     DISTINCT FROM cascade:SelfReported, and the axis is WHO KEYED IT IN rather
+#     than who it came from. Both originate with the patient: SelfReported is
+#     the patient entering data directly, while PatientReported is "information
+#     originating from the patient's own account and recorded by another party
+#     or system (history related to a clinician, imported questionnaire
+#     responses)". The intermediary may have summarized, paraphrased or
+#     mis-transcribed, so a consumer weighing how directly a claim is attested
+#     needs the two kept apart. Neither is a substitute for the other and this
+#     SDK maps neither onto the other.
+#     The individual is a DIRECT subclass of cascade:DataProvenance, under
+#     neither ClinicalGenerated nor ConsumerGenerated, because a patient's
+#     report reaches records through either setting. This SDK models no
+#     provenance hierarchy — both sets here are flat — so the placement costs
+#     nothing to represent, but a consumer that DOES reason over the hierarchy
+#     must not assume PatientReported implies either parent.
+#     (Definition read from spec PR #32 commit c856eb8, pending merge; the local
+#     spec sibling still reads core 3.7.)
 #
 # NOT COVERED BY CONFORMANCE FIXTURES. The conformance repo carries no fixture
 #     exercising any of these 24 terms (no attachment- family, and the existing
