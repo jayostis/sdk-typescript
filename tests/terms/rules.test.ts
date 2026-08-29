@@ -304,3 +304,252 @@ describe('sub.addAll writes what the builder already writes', () => {
     );
   });
 });
+
+// ─── Findings from the review of #28 ────────────────────────────────────────
+
+describe('rule form: number', () => {
+  // `emitField` writes a numeric field as a BARE token — `health:steps 8432`,
+  // not `health:steps "8432"`. The quoted form is an xsd:string where every
+  // fixture has an xsd:integer, so the migration needs a form that says bare.
+  it('writes an integer as a bare token, not a quoted literal', () => {
+    const term = defineTerm({
+      key: 'steps',
+      predicate: predicateOf('steps'),
+      rule: { form: 'number' },
+    });
+
+    expect(term.outputsFor({ type: 'DailyActivitySnapshot', steps: 8432 })).toEqual([
+      { kind: 'number', predicate: 'health:steps', value: 8432 },
+    ]);
+  });
+
+  it('writes a decimal as a bare token too', () => {
+    const term = defineTerm({
+      key: 'durationHours',
+      predicate: predicateOf('durationHours'),
+      rule: { form: 'number' },
+    });
+
+    expect(term.outputsFor({ type: 'DailySleepSnapshot', durationHours: 7.4 })).toEqual([
+      { kind: 'number', predicate: 'health:durationHours', value: 7.4 },
+    ]);
+  });
+
+  it('falls back to a quoted literal for a non-numeric value, as emitField does', () => {
+    const term = defineTerm({
+      key: 'steps',
+      predicate: predicateOf('steps'),
+      rule: { form: 'number' },
+    });
+
+    expect(term.outputsFor({ type: 'DailyActivitySnapshot', steps: 'many' })).toEqual([
+      { kind: 'literal', predicate: 'health:steps', value: 'many' },
+    ]);
+  });
+});
+
+describe('rule form: boolean', () => {
+  it('writes a bare true/false, not a quoted literal', () => {
+    const term = defineTerm({
+      key: 'isActive',
+      predicate: predicateOf('isActive'),
+      rule: { form: 'boolean' },
+    });
+
+    expect(term.outputsFor({ type: 'Condition', isActive: true })).toEqual([
+      { kind: 'boolean', predicate: 'clinical:status', value: true },
+    ]);
+  });
+
+  it('falls back to a quoted literal for a non-boolean value, as emitField does', () => {
+    const term = defineTerm({
+      key: 'isActive',
+      predicate: predicateOf('isActive'),
+      rule: { form: 'boolean' },
+    });
+
+    expect(term.outputsFor({ type: 'Condition', isActive: 'yes' })).toEqual([
+      { kind: 'literal', predicate: 'clinical:status', value: 'yes' },
+    ]);
+  });
+});
+
+describe('a blankNode rule with no rdfType', () => {
+  const term = defineTerm({
+    key: 'clinicalSummary',
+    predicate: predicateOf('clinicalSummary'),
+    rule: { form: 'blankNode' },
+  });
+
+  const record = { type: 'ExportManifest', clinicalSummary: { domain: 'clinical' } };
+
+  it('leaves rdfType off the output rather than carrying an empty one', () => {
+    expect(term.outputsFor(record)).toEqual([
+      {
+        kind: 'blankNode',
+        predicate: 'cascade:clinicalSummary',
+        children: [{ kind: 'literal', predicate: 'cascade:domain', value: 'clinical' }],
+      },
+    ]);
+  });
+
+  it('writes no rdf:type line, matching the guard serializeBlankNode already has', () => {
+    const viaTerm = new TurtleBuilder()
+      .subject('<urn:uuid:rec-1>')
+      .addAll(term.outputsFor(record))
+      .done()
+      .build();
+
+    const untyped = new TurtleBuilder()
+      .subject('<urn:uuid:rec-1>')
+      .blankNode('cascade:clinicalSummary', (b) => {
+        b.literal('cascade:domain', 'clinical');
+      })
+      .done()
+      .build();
+
+    expect(viaTerm).toBe(untyped);
+  });
+});
+
+describe('the children of a blank node match what serializeBlankNode writes', () => {
+  const term = defineTerm({
+    key: 'clinicalSummary',
+    predicate: predicateOf('clinicalSummary'),
+    rule: { form: 'blankNode', rdfType: 'cascade:RecordSummary' },
+  });
+
+  const record = {
+    type: 'ExportManifest',
+    clinicalSummary: {
+      type: 'RecordSummary',
+      id: 'urn:uuid:summary-1',
+      domain: 'clinical',
+      recordCount: 42,
+      complete: true,
+      meanPerDay: 1.5,
+    },
+  };
+
+  it('skips type and id instead of inventing a triple for each', () => {
+    const [output] = term.outputsFor(record);
+    const children = (output as Extract<Output, { kind: 'blankNode' }>).children;
+
+    expect(children.map((child) => child.predicate)).toEqual([
+      'cascade:domain',
+      'cascade:recordCount',
+      'cascade:complete',
+      'cascade:meanPerDay',
+    ]);
+  });
+
+  it('keeps numbers and booleans bare rather than stringifying them', () => {
+    expect(term.outputsFor(record)).toEqual([
+      {
+        kind: 'blankNode',
+        predicate: 'cascade:clinicalSummary',
+        rdfType: 'cascade:RecordSummary',
+        children: [
+          { kind: 'literal', predicate: 'cascade:domain', value: 'clinical' },
+          { kind: 'number', predicate: 'cascade:recordCount', value: 42 },
+          { kind: 'boolean', predicate: 'cascade:complete', value: true },
+          { kind: 'number', predicate: 'cascade:meanPerDay', value: 1.5 },
+        ],
+      },
+    ]);
+  });
+
+  it('serializes byte-identically to the existing writer', () => {
+    const viaTerm = new TurtleBuilder()
+      .subject('<urn:uuid:rec-1>')
+      .addAll(term.outputsFor(record))
+      .done()
+      .build();
+
+    const viaBuilder = new TurtleBuilder()
+      .subject('<urn:uuid:rec-1>')
+      .blankNode('cascade:clinicalSummary', (b) => {
+        b.type('cascade:RecordSummary');
+        b.literal('cascade:domain', 'clinical');
+        b.number('cascade:recordCount', 42);
+        b.boolean('cascade:complete', true);
+        b.decimal('cascade:meanPerDay', 1.5);
+      })
+      .done()
+      .build();
+
+    expect(viaTerm).toBe(viaBuilder);
+  });
+});
+
+describe('an iriList rule carries its prefix onto every member', () => {
+  // The one IRI_LIST_FIELDS entry the SDK actually writes is `provenanceLayers`,
+  // which `emitField` maps item by item to `cascade:${item}`. Dropping the
+  // prefix writes `<DeviceGenerated>` — a relative IRI.
+  const term = defineTerm({
+    key: 'provenanceLayers',
+    predicate: predicateOf('provenanceLayers'),
+    rule: { form: 'iriList', prefix: 'cascade' },
+  });
+
+  it('qualifies each bare local name', () => {
+    expect(
+      term.outputsFor({
+        type: 'ExportManifest',
+        provenanceLayers: ['DeviceGenerated', 'UserEntered'],
+      }),
+    ).toEqual([
+      {
+        kind: 'uriList',
+        predicate: 'cascade:provenanceLayers',
+        items: ['cascade:DeviceGenerated', 'cascade:UserEntered'],
+      },
+    ]);
+  });
+
+  it('leaves members alone when the rule declares no prefix', () => {
+    const bare = defineTerm({
+      key: 'deviceSources',
+      predicate: predicateOf('deviceSources'),
+      rule: { form: 'iriList' },
+    });
+
+    expect(bare.outputsFor({ type: 'ExportManifest', deviceSources: ['urn:uuid:dev-1'] })).toEqual([
+      { kind: 'uriList', predicate: 'cascade:deviceSources', items: ['urn:uuid:dev-1'] },
+    ]);
+  });
+});
+
+describe('sub.addAll writes the bare-token output kinds', () => {
+  const SUBJECT = '<urn:uuid:rec-1>';
+
+  it('dispatches a number output to sub.number', () => {
+    expect(
+      new TurtleBuilder()
+        .subject(SUBJECT)
+        .addAll([{ kind: 'number', predicate: 'health:steps', value: 8432 }])
+        .done()
+        .build(),
+    ).toBe(new TurtleBuilder().subject(SUBJECT).number('health:steps', 8432).done().build());
+  });
+
+  it('dispatches a non-integer number output to sub.decimal', () => {
+    expect(
+      new TurtleBuilder()
+        .subject(SUBJECT)
+        .addAll([{ kind: 'number', predicate: 'health:durationHours', value: 7.4 }])
+        .done()
+        .build(),
+    ).toBe(new TurtleBuilder().subject(SUBJECT).decimal('health:durationHours', 7.4).done().build());
+  });
+
+  it('dispatches a boolean output to sub.boolean', () => {
+    expect(
+      new TurtleBuilder()
+        .subject(SUBJECT)
+        .addAll([{ kind: 'boolean', predicate: 'clinical:status', value: true }])
+        .done()
+        .build(),
+    ).toBe(new TurtleBuilder().subject(SUBJECT).boolean('clinical:status', true).done().build());
+  });
+});

@@ -203,6 +203,18 @@ export class SubjectBuilder {
         case 'literal':
           this.literal(output.predicate, output.value, output.datatype);
           break;
+        case 'number':
+          // Both write a bare token today; the split mirrors `emitField` so the
+          // two paths stay aligned if either method ever spells a datatype out.
+          if (Number.isInteger(output.value)) {
+            this.number(output.predicate, output.value);
+          } else {
+            this.decimal(output.predicate, output.value);
+          }
+          break;
+        case 'boolean':
+          this.boolean(output.predicate, output.value);
+          break;
         case 'uri':
           this.uri(output.predicate, output.value);
           break;
@@ -211,7 +223,9 @@ export class SubjectBuilder {
           break;
         case 'blankNode':
           this.blankNode(output.predicate, (b) => {
-            b.type(output.rdfType);
+            // Guarded like `serializeBlankNode`: an untyped blank node is
+            // written without an `a` line, never with an empty one.
+            if (output.rdfType) b.type(output.rdfType);
             b.addAll(output.children);
           });
           break;

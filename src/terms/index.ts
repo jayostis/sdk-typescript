@@ -22,8 +22,14 @@ import type { Term } from './term.js';
  *
  * Empty for now: this issue establishes the mechanism, and the first real term
  * arrives with its first consumer.
+ *
+ * Exported as the raw array on purpose. The registry guards — no duplicate key,
+ * no key outside PROPERTY_PREDICATES — cannot be written against {@link termFor}:
+ * `BY_KEY` collapses two terms claiming one key into a single entry, and every
+ * key it can return was drawn from the vocabulary to begin with, so both checks
+ * would read empty forever. They need what the barrel actually ships.
  */
-const TERMS: readonly Term[] = [];
+export const TERMS: readonly Term[] = [];
 
 const BY_KEY: ReadonlyMap<string, Term> = new Map(TERMS.map((term) => [term.key, term]));
 
