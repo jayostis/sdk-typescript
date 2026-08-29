@@ -19,6 +19,7 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
+import { termFor } from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
@@ -491,6 +492,20 @@ function serializeRecord(record: CascadeEntity): string {
     const value = rec[key];
     if (value === undefined || value === null) return;
     if (key === 'id' || key === 'type') return;
+
+    // A term module owns this field's predicate and rule, so it writes it and
+    // the type-driven chain below never sees it. Placed AFTER the three guards
+    // above rather than at the top of the function: jumping them would leave a
+    // termed field out of `emitted` and run `outputsFor` on an absent value.
+    //
+    // `termFor` is undefined for every field no module claims, which is all of
+    // them but one — so this fork's job is to RETURN CONTROL, and everything
+    // below is reached exactly as often as it is today.
+    const term = termFor(key);
+    if (term) {
+      sub.addAll(term.outputsFor(rec));
+      return;
+    }
 
     const pred = getPredicateForField(key, record.type);
     if (!pred) return;

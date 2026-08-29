@@ -2,32 +2,30 @@
  * core v3.6 — `cascade:dataAbsentReason`: why a record's primary VALUE is
  * absent, bound to the 15 codes of the HL7 data-absent-reason code system.
  *
- * STUB. `outputsFor` returns nothing, which is what `serialize()` writes for
- * this field today (#2): an array value matches no `emitField` branch, so both
- * of absent-003's reasons are dropped without an error. Returning `[]` keeps
- * that behaviour exactly while giving `tests/terms/data-absent-reason.test.ts`
- * a symbol to assert against, so its failure lands on the assertion rather than
- * on a missing module.
+ * `{ form: 'literal' }` with nothing else is the REPEATED-literal form:
+ * `outputsFor` ends at `members(value).flatMap(...)`, and `members` reads an
+ * array as its members and a scalar as a one-member list, so a two-element
+ * array is two `cascade:dataAbsentReason` triples and a bare string is one.
+ * Not `literalList` — that is the ordered `( "a" "b" )` rdf:List form, which
+ * would write a single node where the fixture expects two triples.
  *
- * The signature is the contract: a `Term`, keyed `dataAbsentReason`, with its
- * predicate from `requirePredicate` and never written by hand. The `rule` is
- * the smallest declaration the type demands and is not a finding — `literal` is
- * simply the form the `{ kind: 'literal' }` outputs the issue asks for come
- * from.
+ * Two is ILLEGAL, and writing both is the point. `cascade:DataAbsentReasonShape`
+ * is `sh:targetSubjectsOf cascade:dataAbsentReason` with `sh:maxCount 1`, so a
+ * writer that drops the second value hands the validator a record with nothing
+ * left to violate and gets back a clean verdict on incomplete data (#2).
+ * Faithful first, judged second.
  *
- * Barrelled but NOT in `index.ts`'s `TERMS`: registering it is what makes
- * `termFor('dataAbsentReason')` resolve, and that is the implementer's step.
+ * No `datatype`: the field is a plain string literal, and setting one would
+ * write a typed literal absent-001 and absent-002 do not carry.
  *
  * @see spec/ontologies/core/v1/core.ttl         cascade:dataAbsentReason
  * @see spec/ontologies/core/v1/core.shapes.ttl  cascade:DataAbsentReasonShape
  */
 
-import { requirePredicate } from './term.js';
-import type { Term } from './term.js';
+import { defineTerm, requirePredicate } from './term.js';
 
-export const dataAbsentReason: Term = {
+export const dataAbsentReason = defineTerm({
   key: 'dataAbsentReason',
   predicate: requirePredicate('dataAbsentReason'),
   rule: { form: 'literal' },
-  outputsFor: () => [],
-};
+});

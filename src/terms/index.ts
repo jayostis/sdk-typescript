@@ -16,15 +16,18 @@ export * from './term.js';
 export * from './data-absent-reason.js';
 
 import type { Term } from './term.js';
+import { dataAbsentReason } from './data-absent-reason.js';
 
 /**
  * Every term module, one line each. Add the import above and the name here in
  * the same edit; the barrel-completeness check names any file left out.
  *
- * Empty for now: this issue establishes the mechanism, and the first real term
- * arrives with its first consumer.
+ * A term is only reachable once it is listed HERE: the `export *` above makes
+ * the module importable by name, but `termFor` reads this array, so a term
+ * left out of it is dead code whose field goes on taking the serializer's
+ * type-driven default.
  */
-const TERMS: readonly Term[] = Object.freeze([]);
+const TERMS: readonly Term[] = Object.freeze([dataAbsentReason]);
 
 /**
  * Built with an explicit loop rather than `new Map(TERMS.map(...))`, which
