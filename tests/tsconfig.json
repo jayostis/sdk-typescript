@@ -9,8 +9,8 @@
 //
 // This exists so that stops. Extending the typecheck config gives the editor
 // exactly the project CI checks; `include` paths from an extended config are
-// rewritten relative to this file, so the allow-list there still means what it
-// says.
+// resolved against the config that declared them, not this one, so the
+// allow-list there still means what it says.
 //
 // `rootDir` is the one addition, and it is not cosmetic. Unset, it is inferred
 // from where the config sits, so the language service reported every `src/` file

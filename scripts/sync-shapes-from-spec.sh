@@ -10,9 +10,9 @@
 # disagree by construction. They used to hold four hand-maintained lists: adding
 # a vocabulary here but not to the drift check reported `ORPHAN ... spec
 # publishes no such file`, which was false and pointed at the wrong repo, and
-# adding a namespace to rdf.ts without its file let a record through to a shapes
-# graph holding nothing for it — the vacuous conforms:true the guard exists to
-# refuse.
+# adding a namespace to tests/support/shacl.ts without its file let a record
+# through to a shapes graph holding nothing for it — the vacuous
+# conforms:true the guard exists to refuse.
 #
 # After syncing:  node scripts/check-shapes-drift.mjs && npm test
 # A constraint that changed in spec may turn a passing assertion red. That is

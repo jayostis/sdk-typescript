@@ -52,9 +52,9 @@ These were four hand-maintained lists, and nothing enforced agreement between
 them. Both directions failed quietly: a file synced but not registered with the
 drift check was reported as `ORPHAN … spec publishes no such file` — false, and
 it pointed the reader at the wrong repository — and a namespace registered in
-`rdf.ts` without its file let a record through to a shapes graph holding
-nothing for it, producing the vacuous `conforms: true` the guard exists to
-refuse. One list removes the class rather than documenting it.
+`tests/support/shacl.ts` without its file let a record through to a shapes
+graph holding nothing for it, producing the vacuous `conforms: true` the guard
+exists to refuse. One list removes the class rather than documenting it.
 
 ## Why these are vendored rather than read from a sibling checkout
 
