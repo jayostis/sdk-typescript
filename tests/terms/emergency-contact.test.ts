@@ -80,4 +80,34 @@ describe('emergencyContact', () => {
       termFor('emergencyContact')?.outputsFor({ id: PROFILE_ID, type: 'PatientProfile' }),
     ).toEqual([]);
   });
+
+  it('writes nothing for a child the term does not declare', () => {
+    // THE GUARD, and it has a name: `cascade:contactEmail`. #27 hand-mapped
+    // that spelling into the deserializer on symmetry with `contactPhone`, and
+    // it appears nowhere in spec but one prose aside in checkup.ttl. Because
+    // `childrenOf` wrote every key of the object it was handed, a spelling read
+    // in on one side came straight back out of the WRITER on the other — under
+    // no domain, no range and no shape.
+    //
+    // Declaring the three children is what closes that, and an undeclared key
+    // is now dropped rather than emitted. Asserted as a WHOLE output rather
+    // than as one absence, so a guard that also lost a declared child would
+    // fail here rather than pass.
+    const outputs = termFor('emergencyContact')?.outputsFor({
+      id: PROFILE_ID,
+      type: 'PatientProfile',
+      emergencyContact: { contactName: 'Maria Rivera', contactEmail: 'maria@example.com' },
+    });
+
+    expect(outputs).toEqual([
+      {
+        kind: 'blankNode',
+        predicate: 'cascade:emergencyContact',
+        rdfType: 'cascade:EmergencyContact',
+        children: [
+          { kind: 'literal', predicate: 'cascade:contactName', value: 'Maria Rivera' },
+        ],
+      },
+    ]);
+  });
 });

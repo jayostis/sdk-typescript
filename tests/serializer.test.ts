@@ -394,15 +394,29 @@ describe('Turtle Serializer', () => {
     });
 
     it('writes every value of an array, whatever the vocabulary permits', () => {
-      // Two values are not a valid `resultValue` — `health:LabResultRecordShape`
-      // caps it at `sh:maxCount 1`. They are written anyway, in the order given,
-      // because a shape can only judge what reached the graph: a writer that
-      // dropped one would hand the validator a record with nothing left to
-      // violate. `validate()` is what reports it, and does
-      // (tests/conformance/lab.test.ts).
-      const result = serialize({ ...base, resultValue: ['4.2', '4.3'] } as unknown as CascadeRecord);
+      // `specimenType`, and the choice is the whole point of the test:
+      // registered (health:specimenType), claimed by NO term, and in none of
+      // the arity tables. It therefore reaches `emitField`'s member loop, which
+      // is the code under test here.
+      //
+      // This assertion used `resultValue` and silently stopped covering
+      // anything when that field was later termed — a term is forked to above
+      // the type-driven chain, so the loop was never entered and mutating it to
+      // write one member left the whole suite green. Any field named here has
+      // to be checked against `termFor` before it is trusted.
+      //
+      // Two values are written anyway, in the order given, because a shape can
+      // only judge what reached the graph: a writer that dropped one would hand
+      // the validator a record with nothing left to violate.
+      const result = serialize({
+        ...base,
+        specimenType: ['serum', 'plasma'],
+      } as unknown as CascadeRecord);
 
-      expect(triples(result).filter((t) => t.includes('#resultValue'))).toHaveLength(2);
+      expect(triples(result).filter((t) => t.includes('#specimenType'))).toEqual([
+        `${SUBJECT} <https://ns.cascadeprotocol.org/health/v1#specimenType> "serum"^^<http://www.w3.org/2001/XMLSchema#string>`,
+        `${SUBJECT} <https://ns.cascadeprotocol.org/health/v1#specimenType> "plasma"^^<http://www.w3.org/2001/XMLSchema#string>`,
+      ].sort());
     });
 
     it('writes nothing for an empty array, and no empty triple', () => {
