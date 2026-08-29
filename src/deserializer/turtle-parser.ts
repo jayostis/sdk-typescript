@@ -108,6 +108,39 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   // plan's status would be written and then dropped on read. Unambiguous: no
   // other field in this SDK maps to coverage:status.
   [`${NAMESPACES.coverage}status`]: 'status',
+
+  // Core v2.2 — the children of the three patient-profile sub-structures.
+  //
+  // These belong HERE and not in PROPERTY_PREDICATES, and the distinction is
+  // the whole reason this table exists: it resolves a predicate SPELLING to a
+  // JSON key without claiming the spelling is what the writer emits. A blank
+  // node's children are derived generically, from the node's prefix and the
+  // JSON key, so there is no write mapping to register — and registering one
+  // would make a nested key and a top-level key of the same name look like one
+  // property when they are two. `clinical:snomedCode` and
+  // `clinical:interpretationSourceCode` above are here on the same reasoning.
+  //
+  // Every one is needed. `triplesToNestedObject` drops an unresolved predicate
+  // at `if (!key) continue`, so eleven entries would rebuild a contact, an
+  // address or a pharmacy that looks complete and is not.
+  [`${NAMESPACES.cascade}contactName`]: 'contactName',
+  [`${NAMESPACES.cascade}contactRelationship`]: 'contactRelationship',
+  [`${NAMESPACES.cascade}contactPhone`]: 'contactPhone',
+  // Not written by this SDK — no fixture carries one, and the EmergencyContact
+  // model does not declare it — but core v2.2 defines cascade:contactEmail on
+  // the class, and the PROPERTY_PREDICATES row that used to resolve it (as
+  // `vcard:hasEmail`, which nothing has ever written) is gone with #27. Read,
+  // so a pod carrying one is not silently emptied of it.
+  [`${NAMESPACES.cascade}contactEmail`]: 'contactEmail',
+  [`${NAMESPACES.cascade}addressLine`]: 'addressLine',
+  [`${NAMESPACES.cascade}addressCity`]: 'addressCity',
+  [`${NAMESPACES.cascade}addressState`]: 'addressState',
+  [`${NAMESPACES.cascade}addressPostalCode`]: 'addressPostalCode',
+  [`${NAMESPACES.cascade}addressCountry`]: 'addressCountry',
+  [`${NAMESPACES.cascade}addressUse`]: 'addressUse',
+  [`${NAMESPACES.cascade}pharmacyName`]: 'pharmacyName',
+  [`${NAMESPACES.cascade}pharmacyAddress`]: 'pharmacyAddress',
+  [`${NAMESPACES.cascade}pharmacyPhone`]: 'pharmacyPhone',
 };
 
 const REVERSE_PREDICATE_MAP = buildReversePredicateMap(ADDITIONAL_REVERSE_MAPPINGS);
@@ -1024,12 +1057,24 @@ function acceptedTypeUris(typeUri: string): string[] {
  * Fields whose Turtle object is an inline blank node that must be rebuilt into
  * a nested JSON object rather than reported as a blank-node identifier.
  *
- * Deliberately narrow. The patient-profile sub-structures
- * (`emergencyContact`, `address`, `preferredPharmacy`) are also blank nodes and
- * are NOT reconstructed today; widening this to every blank node is a separate
- * change with its own compatibility question.
+ * Still deliberately narrow — a field is listed because this SDK writes it as
+ * an inline blank node, not because blank nodes are reconstructed in general.
+ * Widening this to EVERY blank node remains a separate change with its own
+ * compatibility question.
+ *
+ * The three patient-profile sub-structures joined the list with #27, in the
+ * same change that made them serialize at all. Their children resolve through
+ * `ADDITIONAL_REVERSE_MAPPINGS`, and the two halves move together: without the
+ * child spellings, a field listed here rebuilds as `{}` — every child dropped
+ * by `triplesToNestedObject`'s `if (!key) continue`, with nothing reported.
  */
-const NESTED_BLANK_NODE_FIELDS = new Set(['clinicalSummary', 'wellnessSummary']);
+const NESTED_BLANK_NODE_FIELDS = new Set([
+  'emergencyContact',
+  'address',
+  'preferredPharmacy',
+  'clinicalSummary',
+  'wellnessSummary',
+]);
 
 /**
  * Fields whose Turtle object is a REPEATED inline blank node, rebuilt into an
