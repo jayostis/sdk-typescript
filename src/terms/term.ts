@@ -10,7 +10,7 @@
  * @module terms
  */
 
-import { PROPERTY_PREDICATES } from '../vocabularies/namespaces.js';
+import { NAMESPACES, PROPERTY_PREDICATES } from '../vocabularies/namespaces.js';
 
 /** How a field's value becomes RDF. */
 export type FieldRule = {
@@ -20,8 +20,23 @@ export type FieldRule = {
    * boolean field and what no combination of `literal` and `datatype` can
    * express: `literal` always quotes. A value of the wrong runtime type falls
    * back to a quoted literal, the same fall-through `emitField` takes.
+   *
+   * `literalList` is the quoted counterpart of `iriList`: one ordered
+   * `( "a" "b" )` rather than a triple per member, which is what `emitField`'s
+   * `ARRAY_FIELDS` branch writes for `drugCodes`, `affectsVitalSigns` and
+   * `monitoredVitalSigns`. Without it those fields could only be migrated as
+   * `literal`, and `members()` would expand each into repeated triples — a
+   * silent output-shape change for anyone reading the list.
    */
-  form: 'literal' | 'number' | 'boolean' | 'iri' | 'iriList' | 'prefixedEnum' | 'blankNode';
+  form:
+    | 'literal'
+    | 'number'
+    | 'boolean'
+    | 'iri'
+    | 'iriList'
+    | 'literalList'
+    | 'prefixedEnum'
+    | 'blankNode';
   /** `literal` only, e.g. `xsd:integer`. */
   datatype?: string;
   /**
@@ -37,6 +52,18 @@ export type FieldRule = {
    * `a`, which is unparseable Turtle.
    */
   rdfType?: string;
+  /**
+   * `blankNode` only: the prefix this node's CHILD predicates are written
+   * under, defaulting to {@link DEFAULT_NESTED_PREFIX}.
+   *
+   * Not decorative. `serializeBlankNode` makes the same choice out of
+   * `BLANK_NODE_PREDICATE_PREFIXES`, which maps `hasParticipant` to `clinical`,
+   * and clinical v1.16 declares that node's children as
+   * `clinical:participantRoleCode` / `clinical:participantName`. Migrating
+   * `hasParticipant` without this would write them under `cascade:` — valid
+   * Turtle that every query for the declared predicate misses.
+   */
+  nestedPrefix?: string;
 };
 
 /** The declaration a term module exports. */
@@ -45,7 +72,10 @@ export type TermSpec = {
   key: string;
   /** From {@link requirePredicate}, never a literal. */
   predicate: string;
-  /** recordType -> predicate. */
+  /**
+   * recordType -> predicate. Values are checked at {@link defineTerm} time; a
+   * term may no more author vocabulary here than it can in `predicate`.
+   */
   predicateByType?: Record<string, string>;
   rule: FieldRule;
   /** recordType -> rule. */
@@ -61,6 +91,8 @@ export type Output =
   | { kind: 'boolean'; predicate: string; value: boolean }
   | { kind: 'uri'; predicate: string; value: string }
   | { kind: 'uriList'; predicate: string; items: string[] }
+  /** An ordered `rdf:List` of QUOTED literals: `clinical:drugCode ( "a" "b" )`. */
+  | { kind: 'list'; predicate: string; items: string[] }
   /** `rdfType` absent means an untyped blank node, not an empty `a`. */
   | { kind: 'blankNode'; predicate: string; rdfType?: string; children: Output[] };
 
@@ -72,8 +104,27 @@ export type Term = TermSpec & {
   outputsFor(record: Record<string, unknown>): Output[];
 };
 
-/** The prefix a blank node's nested fields are written under. */
-const NESTED_PREFIX = 'cascade';
+/** The prefix a blank node's nested fields are written under by default. */
+const DEFAULT_NESTED_PREFIX = 'cascade';
+
+/** `prefix:localName`, the only shape a term may spell a predicate in. */
+const PREFIXED_NAME = /^([A-Za-z][\w-]*):([\w-]+)$/;
+
+/**
+ * Read a key's OWN value out of a lookup table, never an inherited one.
+ *
+ * `predicateByType` and `ruleByType` are plain object literals indexed by
+ * DATA — `record.type` — so a record typed `'toString'`, `'constructor'` or
+ * `'valueOf'` would otherwise resolve `Object.prototype`'s member as though a
+ * term had declared it. `?? predicate` does not catch that: a function is not
+ * nullish, and it reaches the Turtle as
+ * `function toString() { [native code] }`, which does not parse.
+ * {@link requirePredicate} guards its own lookup for the same reason.
+ */
+function ownEntry<T>(table: Record<string, T> | undefined, key: string | undefined): T | undefined {
+  if (table === undefined || key === undefined) return undefined;
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
 
 /**
  * Resolve a JSON field name to its registered predicate.
@@ -100,6 +151,55 @@ export function requirePredicate(key: string): string {
   return PROPERTY_PREDICATES[key] as string;
 }
 
+/**
+ * Check one `predicateByType` value the way {@link requirePredicate} checks a
+ * key, and for the same reason: a term references vocabulary, it never declares
+ * any. Without this the override map is free-form string nothing validates.
+ *
+ * An override is a RE-PREFIXING of the registered predicate and nothing else.
+ * That rule is not invented here — every entry in the serializer's
+ * `TYPE_PREDICATE_OVERRIDES` moves the same local name to another namespace:
+ * `snomedCode` from `health:` to `clinical:`, `notes` from `health:` to
+ * `cascade:`, `status` from `health:` to `coverage:`. Both halves are checked
+ * because both are silent when wrong. A mistyped prefix
+ * (`clincal:snomedCode`) writes an undeclared prefix, and the whole document
+ * stops parsing; a mistyped local name (`clinical:snomedCoed`) writes valid
+ * Turtle under a predicate no shape constrains and no query finds.
+ *
+ * If an override ever genuinely has to rename the local part, this throws at
+ * load time and says what it saw — which is the point. It is a rule to be
+ * revisited deliberately, not routed around in silence.
+ *
+ * @throws when `value` is not `prefix:localName`, when its prefix is not a
+ * declared namespace, or when its local name is not the one `key` is
+ * registered under.
+ */
+function requireOverridePredicate(key: string, recordType: string, value: string): string {
+  const registered = requirePredicate(key);
+  const expected = PREFIXED_NAME.exec(registered)?.[2];
+
+  const reject = (why: string): never => {
+    throw new Error(
+      `predicateByType['${recordType}'] for field '${key}' is '${value}': ${why}. ` +
+        `A per-type override re-prefixes the registered predicate ` +
+        `('${registered}'); it never declares a new one.`,
+    );
+  };
+
+  const parsed = PREFIXED_NAME.exec(value);
+  if (parsed === null) reject(`not a prefixed name of the form 'prefix:localName'`);
+
+  const [, prefix, localName] = parsed as RegExpExecArray;
+  if (!Object.prototype.hasOwnProperty.call(NAMESPACES, prefix as string)) {
+    reject(`'${prefix}' is not a namespace declared in NAMESPACES`);
+  }
+  if (expected !== undefined && localName !== expected) {
+    reject(`'${localName}' is not the local name '${key}' is registered under ('${expected}')`);
+  }
+
+  return value;
+}
+
 /** Present enough to write: `null` and `undefined` are absent, `0` and `''` are not. */
 function present(value: unknown): boolean {
   return value !== undefined && value !== null;
@@ -108,6 +208,11 @@ function present(value: unknown): boolean {
 /** Every member of an array value, or the bare scalar as a one-member list. */
 function members(value: unknown): unknown[] {
   return (Array.isArray(value) ? value : [value]).filter(present);
+}
+
+/** A value with fields to write as a blank node's children — not a scalar, not an array. */
+function isNestedObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -120,64 +225,91 @@ function members(value: unknown): unknown[] {
 const NESTED_SKIP = new Set(['type', 'id']);
 
 /**
- * A nested field's output, chosen by the value's RUNTIME type — the same
+ * A nested field's outputs, chosen by the value's RUNTIME type — the same
  * dispatch `serializeBlankNode` does across `b.literal` / `b.boolean` /
  * `b.number` / `b.decimal`. Stringifying every value instead would change a
  * nested `42` from an xsd:integer to an xsd:string.
+ *
+ * Plural because arity is part of that dispatch. An ARRAY is one output per
+ * member — the repeated-predicate form `serializeBlankNode` writes for a 0..*
+ * nested field. Clinical v1.16's `participantRoleCode: ['ATND', 'REF']` is two
+ * `clinical:participantRoleCode` triples; joined into `"ATND,REF"` it is one
+ * literal no consumer can split back apart, and an emergency contact's two
+ * phone numbers would be one unusable string. A nested OBJECT yields nothing,
+ * again matching `serializeBlankNode`, whose chain covers `string` / `boolean`
+ * / `number` and leaves a child object unwritten rather than stamping
+ * `[object Object]` into the graph.
  */
-function nestedOutput(predicate: string, value: unknown): Output {
-  if (typeof value === 'boolean') return { kind: 'boolean', predicate, value };
-  if (typeof value === 'number') return { kind: 'number', predicate, value };
-  return { kind: 'literal', predicate, value: String(value) };
+function nestedOutputs(predicate: string, value: unknown): Output[] {
+  if (Array.isArray(value)) {
+    return value.filter(present).flatMap((member) => nestedOutputs(predicate, member));
+  }
+  if (typeof value === 'boolean') return [{ kind: 'boolean', predicate, value }];
+  if (typeof value === 'number') return [{ kind: 'number', predicate, value }];
+  if (typeof value === 'object') return [];
+  return [{ kind: 'literal', predicate, value: String(value) }];
 }
 
-/** The children of a blank node: one output per present field of the nested object. */
-function childrenOf(value: unknown): Output[] {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
-  return Object.entries(value as Record<string, unknown>)
+/** The children of a blank node: the outputs of every present field of the nested object. */
+function childrenOf(value: unknown, nestedPrefix: string): Output[] {
+  if (!isNestedObject(value)) return [];
+  return Object.entries(value)
     .filter(([nestedKey, nested]) => !NESTED_SKIP.has(nestedKey) && present(nested))
-    .map(([nestedKey, nested]) => nestedOutput(`${NESTED_PREFIX}:${nestedKey}`, nested));
+    .flatMap(([nestedKey, nested]) => nestedOutputs(`${nestedPrefix}:${nestedKey}`, nested));
 }
 
-/** One member of a value, under an already-resolved predicate and rule. */
-function outputForMember(member: unknown, predicate: string, rule: FieldRule): Output {
+/**
+ * One member of a value, under an already-resolved predicate and rule.
+ *
+ * Returns a LIST because a member can legitimately produce no triple at all:
+ * see the `blankNode` case.
+ */
+function outputsForMember(member: unknown, predicate: string, rule: FieldRule): Output[] {
   switch (rule.form) {
     case 'iri':
-      return { kind: 'uri', predicate, value: String(member) };
+      return [{ kind: 'uri', predicate, value: String(member) }];
     case 'prefixedEnum':
-      return {
-        kind: 'uri',
-        predicate,
-        value: rule.prefix ? `${rule.prefix}:${String(member)}` : String(member),
-      };
+      return [
+        {
+          kind: 'uri',
+          predicate,
+          value: rule.prefix ? `${rule.prefix}:${String(member)}` : String(member),
+        },
+      ];
     case 'number':
       // Not `Number(member)`: `emitField` takes its numeric branch only for a
       // value that already IS a number, and falls through to a quoted literal
       // otherwise. Coercing here would write a bare token for the string
       // '8432' where the existing writer writes "8432".
       return typeof member === 'number' && Number.isFinite(member)
-        ? { kind: 'number', predicate, value: member }
-        : { kind: 'literal', predicate, value: String(member) };
+        ? [{ kind: 'number', predicate, value: member }]
+        : [{ kind: 'literal', predicate, value: String(member) }];
     case 'boolean':
       return typeof member === 'boolean'
-        ? { kind: 'boolean', predicate, value: member }
-        : { kind: 'literal', predicate, value: String(member) };
-    case 'blankNode':
+        ? [{ kind: 'boolean', predicate, value: member }]
+        : [{ kind: 'literal', predicate, value: String(member) }];
+    case 'blankNode': {
+      // A scalar under a blankNode rule writes NOTHING — the same guard
+      // `emitField`'s BLANK_NODE_ARRAY_FIELDS branch applies before calling
+      // `serializeBlankNode`. The alternative is an anonymous node asserting
+      // nothing, `[ ]`, with the IRI it was built from dropped entirely.
+      if (!isNestedObject(member)) return [];
+      const children = childrenOf(member, rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX);
       // An absent `rdfType` leaves the field off entirely. Carrying `''` would
       // reach `b.type('')` and emit a bare `a`, which does not parse.
-      return rule.rdfType
-        ? {
-            kind: 'blankNode',
-            predicate,
-            rdfType: rule.rdfType,
-            children: childrenOf(member),
-          }
-        : { kind: 'blankNode', predicate, children: childrenOf(member) };
+      return [
+        rule.rdfType
+          ? { kind: 'blankNode', predicate, rdfType: rule.rdfType, children }
+          : { kind: 'blankNode', predicate, children },
+      ];
+    }
     case 'literal':
     default:
-      return rule.datatype
-        ? { kind: 'literal', predicate, value: String(member), datatype: rule.datatype }
-        : { kind: 'literal', predicate, value: String(member) };
+      return [
+        rule.datatype
+          ? { kind: 'literal', predicate, value: String(member), datatype: rule.datatype }
+          : { kind: 'literal', predicate, value: String(member) },
+      ];
   }
 }
 
@@ -188,9 +320,17 @@ function outputForMember(member: unknown, predicate: string, rule: FieldRule): O
  * destructured `outputsFor` still works; the spread leaves `key`, `predicate`
  * and `rule` on the object as plain data, so the table stays dumpable and
  * diffable against `spec`'s shapes.
+ *
+ * @throws when a `predicateByType` value is not a re-prefixing of the
+ * registered predicate. Checked HERE, at declaration, so a bad override takes
+ * its own module down at load time rather than writing bad Turtle at runtime.
  */
 export function defineTerm(spec: TermSpec): Term {
   const { key, predicate, predicateByType, rule, ruleByType } = spec;
+
+  for (const [recordType, override] of Object.entries(predicateByType ?? {})) {
+    requireOverridePredicate(key, recordType, override);
+  }
 
   return {
     ...spec,
@@ -199,9 +339,8 @@ export function defineTerm(spec: TermSpec): Term {
       if (!present(value)) return [];
 
       const recordType = typeof record.type === 'string' ? record.type : undefined;
-      const activePredicate =
-        (recordType ? predicateByType?.[recordType] : undefined) ?? predicate;
-      const activeRule = (recordType ? ruleByType?.[recordType] : undefined) ?? rule;
+      const activePredicate = ownEntry(predicateByType, recordType) ?? predicate;
+      const activeRule = ownEntry(ruleByType, recordType) ?? rule;
 
       if (activeRule.form === 'iriList') {
         // The prefix applies here exactly as it does to `prefixedEnum`:
@@ -214,8 +353,16 @@ export function defineTerm(spec: TermSpec): Term {
         return items.length === 0 ? [] : [{ kind: 'uriList', predicate: activePredicate, items }];
       }
 
-      return members(value).map((member) =>
-        outputForMember(member, activePredicate, activeRule),
+      if (activeRule.form === 'literalList') {
+        // No prefix branch, unlike `iriList`: these members are quoted
+        // literals, and a prefix on a literal is part of the string rather
+        // than a namespace.
+        const items = members(value).map(String);
+        return items.length === 0 ? [] : [{ kind: 'list', predicate: activePredicate, items }];
+      }
+
+      return members(value).flatMap((member) =>
+        outputsForMember(member, activePredicate, activeRule),
       );
     },
   };

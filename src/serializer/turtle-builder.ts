@@ -221,6 +221,9 @@ export class SubjectBuilder {
         case 'uriList':
           this.uriList(output.predicate, output.items);
           break;
+        case 'list':
+          this.list(output.predicate, output.items);
+          break;
         case 'blankNode':
           this.blankNode(output.predicate, (b) => {
             // Guarded like `serializeBlankNode`: an untyped blank node is
@@ -229,6 +232,16 @@ export class SubjectBuilder {
             b.addAll(output.children);
           });
           break;
+        default: {
+          // Exhaustive by construction: adding a kind to `Output` without a
+          // case here is a COMPILE error on this assignment. Without it the
+          // switch would fall through in silence and every output of the new
+          // kind would be dropped, producing records missing triples with
+          // nothing anywhere reporting it. The throw covers the runtime half —
+          // a JS caller, or an output widened past the type.
+          const unhandled: never = output;
+          throw new Error(`Unhandled output kind: ${JSON.stringify(unhandled)}`);
+        }
       }
     }
     return this;

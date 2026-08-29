@@ -188,10 +188,35 @@ describe('outputsFor', () => {
     });
   });
 
+  describe('form: literalList', () => {
+    // The quoted counterpart of iriList. emitField's ARRAY_FIELDS branch writes
+    // `clinical:drugCode ( "RX1" "RX2" )` — one ordered list — and iriList
+    // cannot express it, because uriList emits resources. Without this form
+    // drugCodes could only migrate as `literal`, and members() would expand it
+    // into repeated triples: the same codes, a different output shape, and no
+    // error anywhere to say the list stopped being a list.
+
+    const term = defineTerm({
+      key: 'drugCodes',
+      predicate: requirePredicate('drugCodes'),
+      rule: { form: 'literalList' },
+    });
+
+    it('writes one ordered list holding every member, not one triple each', () => {
+      expect(
+        term.outputsFor({ type: 'InteractionScenario', drugCodes: ['RX1', 'RX2'] }),
+      ).toEqual([{ kind: 'list', predicate: 'clinical:drugCode', items: ['RX1', 'RX2'] }]);
+    });
+
+    it('writes nothing for an empty list rather than an empty pair of parens', () => {
+      expect(term.outputsFor({ type: 'InteractionScenario', drugCodes: [] })).toEqual([]);
+    });
+  });
+
   describe('form: prefixedEnum', () => {
     it('qualifies a bare local name into a resource reference', () => {
       // `sleepQuality: 'Good'` is `health:sleepQuality health:Good`. There is no
-      // prefixedEnum output KIND to go looking for: seven rule forms, six
+      // prefixedEnum output KIND to go looking for: eight rule forms, seven
       // output kinds, and the mismatch is not an omission.
       const term = defineTerm({
         key: 'sleepQuality',
@@ -283,6 +308,117 @@ describe('outputsFor', () => {
           { kind: 'number', predicate: 'cascade:meanPerDay', value: 1.5 },
         ]);
       });
+
+      it('writes one triple per member of an array child, not one joined literal', () => {
+        // String(['a','b']) is "a,b" — one literal no consumer can split back
+        // apart. serializeBlankNode writes a 0..* nested field as repeated
+        // predicates, and the arity is the whole content of the field.
+        //
+        // Declared on clinicalSummary because the emergency contact that
+        // motivates it is not in PROPERTY_PREDICATES yet, and a term may not
+        // invent vocabulary to make a test convenient. The shape under test is
+        // the array, not which field carries it.
+        expect(
+          childrenOf(
+            typed.outputsFor({
+              type: 'ExportManifest',
+              clinicalSummary: { domain: 'clinical', sourceFile: ['a.ttl', 'b.ttl'] },
+            }),
+          ),
+        ).toEqual([
+          { kind: 'literal', predicate: 'cascade:domain', value: 'clinical' },
+          { kind: 'literal', predicate: 'cascade:sourceFile', value: 'a.ttl' },
+          { kind: 'literal', predicate: 'cascade:sourceFile', value: 'b.ttl' },
+        ]);
+      });
+
+      it('skips an object child rather than writing [object Object]', () => {
+        // serializeBlankNode's chain is string / boolean / number: a child
+        // object is left unwritten. Stringifying it puts a literal in the graph
+        // that reads as data and is not.
+        expect(
+          childrenOf(
+            typed.outputsFor({
+              type: 'ExportManifest',
+              clinicalSummary: { domain: 'clinical', nested: { deeper: 1 } },
+            }),
+          ),
+        ).toEqual([{ kind: 'literal', predicate: 'cascade:domain', value: 'clinical' }]);
+      });
+    });
+
+    describe('nestedPrefix', () => {
+      // BLANK_NODE_PREDICATE_PREFIXES maps hasParticipant to `clinical`, and
+      // clinical v1.16 declares the children of that node as
+      // clinical:participantRoleCode / clinical:participantName. Hardcoding
+      // `cascade` writes valid Turtle that every query for the declared
+      // predicate misses.
+
+      const participant = defineTerm({
+        key: 'hasParticipant',
+        predicate: requirePredicate('hasParticipant'),
+        rule: { form: 'blankNode', nestedPrefix: 'clinical' },
+      });
+
+      it('writes the children under the declared prefix, not cascade', () => {
+        expect(
+          childrenOf(
+            participant.outputsFor({
+              type: 'Encounter',
+              hasParticipant: {
+                participantName: 'Dr Reyes',
+                participantRoleCode: ['ATND', 'REF'],
+              },
+            }),
+          ),
+        ).toEqual([
+          { kind: 'literal', predicate: 'clinical:participantName', value: 'Dr Reyes' },
+          { kind: 'literal', predicate: 'clinical:participantRoleCode', value: 'ATND' },
+          { kind: 'literal', predicate: 'clinical:participantRoleCode', value: 'REF' },
+        ]);
+      });
+
+      it('falls back to cascade when the rule declares none', () => {
+        const untyped = defineTerm({
+          key: 'hasParticipant',
+          predicate: requirePredicate('hasParticipant'),
+          rule: { form: 'blankNode' },
+        });
+
+        expect(
+          childrenOf(untyped.outputsFor({ type: 'Encounter', hasParticipant: { note: 'x' } })),
+        ).toEqual([{ kind: 'literal', predicate: 'cascade:note', value: 'x' }]);
+      });
+    });
+
+    it('writes nothing for a scalar member instead of an empty anonymous node', () => {
+      // childrenOf has nothing to read off a string, so the node would be
+      // `clinical:hasParticipant [ ]` — asserting nothing, with the IRI gone.
+      // emitField's BLANK_NODE_ARRAY_FIELDS branch skips a non-object member
+      // outright, and writes no triple at all.
+      const participant = defineTerm({
+        key: 'hasParticipant',
+        predicate: requirePredicate('hasParticipant'),
+        rule: { form: 'blankNode', nestedPrefix: 'clinical' },
+      });
+
+      expect(
+        participant.outputsFor({ type: 'Encounter', hasParticipant: ['urn:uuid:p1'] }),
+      ).toEqual([]);
+      expect(
+        participant.outputsFor({
+          type: 'Encounter',
+          hasParticipant: ['urn:uuid:p1', { participantName: 'Dr Reyes' }],
+        }),
+      ).toEqual([
+        {
+          kind: 'blankNode',
+          predicate: 'clinical:hasParticipant',
+          children: [
+            { kind: 'literal', predicate: 'clinical:participantName', value: 'Dr Reyes' },
+          ],
+        },
+      ]);
     });
   });
 
@@ -349,6 +485,74 @@ describe('outputsFor', () => {
       expect(byRule.outputsFor({ type: 'Condition', snomedCode: SCT_URI })).toEqual([
         { kind: 'literal', predicate: 'health:snomedCode', value: SCT_URI },
       ]);
+    });
+
+    describe('a record type that names an Object.prototype member', () => {
+      // Both maps are plain object literals indexed by DATA. `?? predicate`
+      // does not catch an inherited member, because a function is not nullish:
+      // `predicateByType['toString']` would be interpolated into the Turtle as
+      // `function toString() { [native code] }` and the document stops parsing.
+
+      it('takes the base predicate, not the inherited member', () => {
+        for (const inherited of ['toString', 'constructor', 'valueOf']) {
+          expect(byPredicate.outputsFor({ type: inherited, snomedCode: '38341003' })).toEqual([
+            { kind: 'literal', predicate: 'health:snomedCode', value: '38341003' },
+          ]);
+        }
+      });
+
+      it('takes the base rule, not the inherited member', () => {
+        // The base rule here is `iri`, not `literal`, on purpose: an inherited
+        // `toString` has no `form`, so the switch falls to its `literal`
+        // default and a `literal` base rule would agree with the bug by
+        // accident. Against an `iri` base the two answers differ, and a code
+        // quoted instead of referenced is a different triple.
+        const byRule = defineTerm({
+          key: 'snomedCode',
+          predicate: requirePredicate('snomedCode'),
+          rule: { form: 'iri' },
+          ruleByType: { Condition: { form: 'literal' } },
+        });
+
+        expect(byRule.outputsFor({ type: 'toString', snomedCode: SCT_URI })).toEqual([
+          { kind: 'uri', predicate: 'health:snomedCode', value: SCT_URI },
+        ]);
+      });
+    });
+
+    describe('an override predicate that is not one', () => {
+      // `predicate` is documented "from requirePredicate, never a literal", and
+      // requirePredicate exists so a term can never author vocabulary. An
+      // unvalidated override map is the same hole one field over: a typo
+      // compiles, loads, and passes every registry check, then writes codes
+      // under a prefix no reader has declared or a predicate no shape
+      // constrains. Checked at DECLARATION so the module fails at load.
+
+      function withOverride(value: string) {
+        return () =>
+          defineTerm({
+            key: 'snomedCode',
+            predicate: requirePredicate('snomedCode'),
+            predicateByType: { VitalSign: value },
+            rule: { form: 'literal' },
+          });
+      }
+
+      it('rejects a mistyped prefix, which would be unparseable Turtle', () => {
+        expect(withOverride('clincal:snomedCode')).toThrow(/clincal/);
+      });
+
+      it('rejects a mistyped local name, which no shape would constrain', () => {
+        expect(withOverride('clinical:snomedCoed')).toThrow(/snomedCoed/);
+      });
+
+      it('rejects a value that is not a prefixed name at all', () => {
+        expect(withOverride('snomedCode')).toThrow(/prefix:localName/);
+      });
+
+      it('accepts the re-prefixing every real override is', () => {
+        expect(withOverride('clinical:snomedCode')).not.toThrow();
+      });
     });
   });
 

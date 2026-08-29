@@ -23,9 +23,25 @@ import type { Term } from './term.js';
  * Empty for now: this issue establishes the mechanism, and the first real term
  * arrives with its first consumer.
  */
-const TERMS: readonly Term[] = [];
+const TERMS: readonly Term[] = Object.freeze([]);
 
 const BY_KEY: ReadonlyMap<string, Term> = new Map(TERMS.map((term) => [term.key, term]));
+
+/**
+ * Every registered term, in barrel order.
+ *
+ * Exists so the registry invariants can be run against the registry we SHIP,
+ * not only against synthetic input. `duplicateKeys` and `unregisteredKeys`
+ * proven on hand-built arrays say the detectors work; pointed here they say
+ * this SDK is clean, which is the claim that matters. `unbarrelled` already
+ * gets to make it by reading the directory.
+ *
+ * Reading it, not mutating it: the array is frozen, so a caller cannot register
+ * a term at runtime and route the writer through vocabulary no module declares.
+ */
+export function allTerms(): readonly Term[] {
+  return TERMS;
+}
 
 /**
  * The term that claims `key`, or `undefined` when no module claims it — not an

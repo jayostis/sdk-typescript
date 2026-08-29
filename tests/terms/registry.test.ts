@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { allTerms } from '../../src/terms/index.js';
 import { unbarrelled, duplicateKeys, unregisteredKeys } from './registry.js';
 
 const TERMS_DIR = fileURLToPath(new URL('../../src/terms/', import.meta.url));
@@ -31,6 +32,14 @@ describe('duplicateKeys', () => {
   it('stays silent when every term claims a different key', () => {
     expect(duplicateKeys([{ key: 'snomedCode' }, { key: 'interpretation' }])).toEqual([]);
   });
+
+  it('finds no key claimed twice in the registry we actually ship', () => {
+    // Asserts nothing today — TERMS is empty — and is the guard rather than the
+    // proof, exactly as the `unbarrelled` case below is. The two proofs above
+    // are what make it trustworthy the day a term lands: a detector aimed only
+    // at silence has demonstrated nothing.
+    expect(duplicateKeys(allTerms())).toEqual([]);
+  });
 });
 
 describe('unregisteredKeys', () => {
@@ -46,6 +55,10 @@ describe('unregisteredKeys', () => {
 
   it('stays silent when every key is registered', () => {
     expect(unregisteredKeys([{ key: 'snomedCode' }, { key: 'sleepQuality' }])).toEqual([]);
+  });
+
+  it('finds no unregistered key in the registry we actually ship', () => {
+    expect(unregisteredKeys(allTerms())).toEqual([]);
   });
 });
 

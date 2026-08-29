@@ -109,6 +109,15 @@ describe('SubjectBuilder.addAll', () => {
       );
     });
 
+    it('list', () => {
+      // `sub.list` quotes each member: `clinical:drugCode ( "RX1" "RX2" )`.
+      // Distinct from uriList, which emits resources — the two are not
+      // interchangeable, and the `list` kind is the only way a term reaches it.
+      expect(
+        viaAddAll([{ kind: 'list', predicate: 'clinical:drugCode', items: ['RX1', 'RX2'] }]),
+      ).toBe(viaBuilder((sub) => sub.list('clinical:drugCode', ['RX1', 'RX2'])));
+    });
+
     it('writes no type line at all when rdfType is absent', () => {
       // Not an empty `a`, which is unparseable and would fail the document.
       expect(
@@ -126,6 +135,19 @@ describe('SubjectBuilder.addAll', () => {
           }),
         ),
       );
+    });
+  });
+
+  describe('an unhandled output kind', () => {
+    it('throws rather than dropping the output in silence', () => {
+      // The failure this guards is not a bad cast — it is adding a kind to
+      // `Output` and forgetting a case. Without a default the switch skips it,
+      // every record missing those triples serializes clean, and nothing
+      // anywhere reports it. The `never` assignment makes that a compile error;
+      // this is the runtime half of the same guard.
+      const unknown = { kind: 'rdfStar', predicate: 'cascade:x', value: 'y' };
+
+      expect(() => viaAddAll([unknown as unknown as Output])).toThrow(/Unhandled output kind/);
     });
   });
 
