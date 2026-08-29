@@ -49,10 +49,12 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   VitalSign: {
     snomedCode: 'clinical:snomedCode',
     interpretation: 'clinical:interpretation',
-    // health v2.7 / clinical v1.15: the verbatim escape hatch follows the
-    // property it explains into the clinical: namespace, so a consumer reading
-    // one always finds the other on the same side.
-    interpretationSourceCode: 'clinical:interpretationSourceCode',
+    // `interpretationSourceCode` is NOT here: it is declared by
+    // `src/terms/interpretation-source-code.ts`, whose `predicateByType` says
+    // the same thing. `emitField` and `collectPrefixes` both fork on `termFor`
+    // ahead of this table, so a termed key never reaches
+    // `getPredicateForField` — an entry left here would be a second copy of
+    // one fact, unread, and free to drift from the one that is read.
   },
   // Core v3.4: the export-manifest classes carry cascade:notes, not the
   // health:notes that health records use. Same JSON key, different predicate.

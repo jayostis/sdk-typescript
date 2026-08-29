@@ -1,40 +1,43 @@
 /**
- * STUB — the declaration #15 fills in.
- *
  * health v2.7 / clinical v1.15 — `interpretationSourceCode`: the source's own
  * verbatim code for an interpretation whose ratified reading is carried on
  * `interpretation` beside it.
  *
- * This exists so the tests in `tests/terms/interpretation-source-code.test.ts`
- * can NAME the term and fail on what it returns rather than on an import that
- * does not resolve. It writes nothing, and it is deliberately not listed in
- * `./index.ts`: a term reaches the serializer only through that barrel, so
- * leaving it out keeps every fixture serializing exactly as it does today
- * while the tests that describe the finished rule stay red.
+ * `{ form: 'literal' }` with nothing else is the REPEATED-literal form:
+ * `outputsFor` ends at `members(value).flatMap(...)`, and `members` reads an
+ * array as its members and a scalar as a one-member list, so `lab-013`'s two
+ * codes are two triples and `lab-012`'s bare string is one. Not `literalList` —
+ * that is the ordered `( "a" "b" )` rdf:List form, which would write a single
+ * node where the fixture expects two triples, and `sh:maxCount 1` would count
+ * that node as one conforming value.
  *
- * What the shape of this declaration commits to, and what #15 has to supply:
+ * Two is ILLEGAL, and writing both is the point.
+ * `health:LabResultRecordShape` caps `health:interpretationSourceCode` at
+ * `sh:maxCount 1`, so a writer that keeps the first value hands the validator a
+ * record with nothing left to violate and gets back a clean verdict on
+ * incomplete data (#15). Faithful first, judged second.
  *
- *   - `key` / `predicate` — the registered field and its `health:` default,
- *     resolved through `requirePredicate` because a term references vocabulary
- *     and never declares any.
- *   - `predicateByType` — `{ VitalSign: 'clinical:interpretationSourceCode' }`,
- *     the entry `TYPE_PREDICATE_OVERRIDES` carries today, moved onto the term
- *     so `outputsFor` and `collectPrefixes` resolve it from one place.
- *   - `rule: { form: 'literal' }` — the REPEATED-literal form, one triple per
- *     value in the order given, which is what makes `lab-013`'s two codes both
- *     reach the graph. Not `literalList`: an ordered `( "a" "b" )` is a single
- *     node, and `sh:maxCount 1` would count it as one conforming value.
+ * `predicateByType` carries what `TYPE_PREDICATE_OVERRIDES` used to say for
+ * this field, and it is the first thing in the codebase to exercise the
+ * mechanism. The escape hatch follows the property it explains: a vital sign
+ * writes `clinical:interpretation`, so its verbatim code is
+ * `clinical:interpretationSourceCode` and a consumer reading one always finds
+ * the other in the same namespace. The override table's entry is gone rather
+ * than left beside this one — `getPredicateForField` is no longer reached for a
+ * termed key, so keeping it would be a second copy of the same fact.
  *
- * @see spec/ontologies/health/v1/health.shapes.ttl    health:LabResultRecordShape
+ * No `datatype`: the field is a plain string literal, and setting one would
+ * write a typed literal the fixtures do not carry.
+ *
+ * @see spec/ontologies/health/v1/health.shapes.ttl     health:LabResultRecordShape
  * @see spec/ontologies/clinical/v1/clinical.shapes.ttl clinical:VitalSignShape
  */
 
-import { requirePredicate } from './term.js';
-import type { Term } from './term.js';
+import { defineTerm, requirePredicate } from './term.js';
 
-export const interpretationSourceCode: Term = {
+export const interpretationSourceCode = defineTerm({
   key: 'interpretationSourceCode',
   predicate: requirePredicate('interpretationSourceCode'),
+  predicateByType: { VitalSign: 'clinical:interpretationSourceCode' },
   rule: { form: 'literal' },
-  outputsFor: () => [],
-};
+});
