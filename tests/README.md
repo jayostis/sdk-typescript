@@ -27,6 +27,19 @@ copying the shape of whatever file you opened first.
   the `describe` rather than being restated in every `it`. A file testing two
   units is two files: `addAll` lives in `tests/turtle-builder.test.ts` and not
   beside `outputsFor`, because they are different modules.
+- **A comment earns its place by changing what the reader does.** Not by being
+  true, and not by being well argued. The test: would someone who skipped it
+  write something different from someone who read it? A fact that lives OUTSIDE
+  this file passes — what an `sh:in` list contains, two different sets sharing
+  one name, a spelling `spec` and the corpus disagree on. The strongest case is a
+  test that is *absent*: nothing but prose can say why a question was not asked,
+  and without it someone will "fix" the gap. Restating the assertion fails.
+  Defending the decision fails too — that argument is scoped to one change, so it
+  belongs in the commit message or the PR, where it rots honestly instead of
+  outliving the thing it justified. **Anything true only of a branch — "red at
+  HEAD", "green until the fork lands" — is in this second class and always
+  wrong here**; it is already recorded in the commit and the PR checklist with
+  its SHAs, and it becomes false on merge.
 - **Never derive the expected value from the code under test.** Write the
   predicate, the datatype, the local name out by hand. Reading `snomedCode`'s
   predicate from `PROPERTY_PREDICATES` to assert what the serializer wrote makes
