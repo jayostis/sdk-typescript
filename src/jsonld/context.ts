@@ -189,8 +189,31 @@ export function getContext(): object {
   // collision rather than the other way round. A context term has exactly one
   // meaning, and where a spelling is both a registered top-level field and a
   // sub-structure child, the registered field is the one a document's top level
-  // actually carries. No such collision exists today; this decides which way it
-  // falls if one is ever added, instead of leaving it to declaration order.
+  // actually carries.
+  //
+  // COLLISIONS ARE THE RULE, not the exception, now that this map is generated
+  // from the terms rather than hand-written: twenty of the twenty-one child
+  // keys are also registered top-level fields. Twenty of those twenty agree
+  // about the predicate, so the loop below rewrites them to what they already
+  // said and the order decides nothing.
+  //
+  // `notes` IS THE ONE THAT DISAGREES, and this loop cannot settle it —
+  // `tests/rules/context-collision.test.ts` pins both halves. A `RecordSummary`
+  // carries `cascade:notes` (spec's own spelling, which
+  // `TYPE_PREDICATE_OVERRIDES` forks the writer to) where a health record
+  // carries `health:notes`. One flat term cannot mean both, so whichever way
+  // this falls, the other occurrence expands to a predicate the Turtle does not
+  // write. It falls to `health:notes` because that is what a document's TOP
+  // LEVEL carries, and the nested `notes` inside a `clinicalSummary` or
+  // `wellnessSummary` is left expanding to the wrong property — the same
+  // TTL-carries-it / JSON-LD-loses-it split `NESTED_CHILD_PREDICATES` was added
+  // to close, on the one key it cannot close by adding a term.
+  //
+  // Closing it means saying which occurrence is meant where a flat term cannot:
+  // a local `@context` on the nested node object (JSON-LD 1.0 permits one), or
+  // a term-scoped context (JSON-LD 1.1, which `@version` rules out here). Both
+  // change the shape of the document `toJsonLd` emits, which is a decision
+  // about public output and not one to take while tidying a comment.
   for (const [key, pred] of Object.entries(NESTED_CHILD_PREDICATES)) {
     context[key] = pred;
   }

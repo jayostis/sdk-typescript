@@ -151,14 +151,6 @@ function hasField(rec: RecordFields, field: string): boolean {
   return true;
 }
 
-function hasNonEmptyString(rec: RecordFields, field: string): boolean {
-  const val = rec[field];
-  return typeof val === 'string' && val.trim().length > 0;
-}
-
-function hasNumber(rec: RecordFields, field: string): boolean {
-  return typeof rec[field] === 'number';
-}
 
 // ─── Validation Logic ───────────────────────────────────────────────────────
 
@@ -175,12 +167,17 @@ function hasNumber(rec: RecordFields, field: string): boolean {
  * position is that the writer and reader move data and `validate()` judges it;
  * a judge that dies on exactly the input its own faithfulness produces reports
  * nothing about the document at all — not the duplicate, not the eight other
- * things wrong with it. `hasNonEmptyString` has guarded with `typeof` all
- * along; these two are the ones that did not.
+ * things wrong with it. A `typeof` guard is what keeps the judge alive.
  *
  * An ARRAY is reported as what it is rather than as "must be present". It IS
  * present, and a message naming the wrong defect sends the caller looking for a
  * missing field they supplied twice.
+ *
+ * EVERY required field goes through here, base and type-specific alike. Two
+ * fields were fixed and a dozen were left with their own `typeof` check and an
+ * "is required" message, which is the wrong-defect message this function was
+ * introduced to remove — reachable on those fields for the first time now that
+ * the reader returns what the graph actually carried.
  */
 function singleStringError(
   value: unknown,
@@ -192,6 +189,38 @@ function singleStringError(
     field,
     message: Array.isArray(value)
       ? `${field} carries ${value.length} values; it must be a single non-empty string`
+      : absent,
+    severity: 'error',
+  };
+}
+
+/** {@link singleStringError} for a required field of a record under test. */
+function requiredString(
+  rec: RecordFields,
+  field: string,
+  absent: string,
+): ValidationError | undefined {
+  return singleStringError(rec[field], field, absent);
+}
+
+/**
+ * {@link singleStringError} for a field whose one value must be a NUMBER.
+ *
+ * `clinical:value` is the only one today. Its own message already said "and
+ * must be a number", so absence and wrong-type shared a message here before
+ * arity joined them; this separates the count from the type and leaves the
+ * other two exactly as they were.
+ */
+function singleNumberError(
+  value: unknown,
+  field: string,
+  absent: string,
+): ValidationError | undefined {
+  if (typeof value === 'number') return undefined;
+  return {
+    field,
+    message: Array.isArray(value)
+      ? `${field} carries ${value.length} values; it must be a single number`
       : absent,
     severity: 'error',
   };
@@ -281,13 +310,8 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
 
   switch (record.type) {
     case 'MedicationRecord': {
-      if (!hasNonEmptyString(rec, 'medicationName')) {
-        errors.push({
-          field: 'medicationName',
-          message: 'medicationName is required for MedicationRecord',
-          severity: 'error',
-        });
-      }
+      const nameError = requiredString(rec, 'medicationName', 'medicationName is required for MedicationRecord');
+      if (nameError) errors.push(nameError);
       if (!hasField(rec, 'isActive')) {
         errors.push({
           field: 'isActive',
@@ -299,13 +323,8 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
     }
 
     case 'ConditionRecord': {
-      if (!hasNonEmptyString(rec, 'conditionName')) {
-        errors.push({
-          field: 'conditionName',
-          message: 'conditionName is required for ConditionRecord',
-          severity: 'error',
-        });
-      }
+      const nameError = requiredString(rec, 'conditionName', 'conditionName is required for ConditionRecord');
+      if (nameError) errors.push(nameError);
       const status = rec['status'];
       if (typeof status !== 'string' || !VALID_CONDITION_STATUSES.has(status)) {
         errors.push({
@@ -318,24 +337,14 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
     }
 
     case 'AllergyRecord': {
-      if (!hasNonEmptyString(rec, 'allergen')) {
-        errors.push({
-          field: 'allergen',
-          message: 'allergen is required for AllergyRecord',
-          severity: 'error',
-        });
-      }
+      const allergenError = requiredString(rec, 'allergen', 'allergen is required for AllergyRecord');
+      if (allergenError) errors.push(allergenError);
       break;
     }
 
     case 'LabResultRecord': {
-      if (!hasNonEmptyString(rec, 'testName')) {
-        errors.push({
-          field: 'testName',
-          message: 'testName is required for LabResultRecord',
-          severity: 'error',
-        });
-      }
+      const testNameError = requiredString(rec, 'testName', 'testName is required for LabResultRecord');
+      if (testNameError) errors.push(testNameError);
       if (!hasField(rec, 'resultValue')) {
         errors.push({
           field: 'resultValue',
@@ -343,13 +352,8 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
           severity: 'error',
         });
       }
-      if (!hasNonEmptyString(rec, 'resultUnit')) {
-        errors.push({
-          field: 'resultUnit',
-          message: 'resultUnit is required for LabResultRecord',
-          severity: 'error',
-        });
-      }
+      const resultUnitError = requiredString(rec, 'resultUnit', 'resultUnit is required for LabResultRecord');
+      if (resultUnitError) errors.push(resultUnitError);
       break;
     }
 
@@ -362,31 +366,20 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
           severity: 'error',
         });
       }
-      if (!hasNumber(rec, 'value')) {
-        errors.push({
-          field: 'value',
-          message: 'value is required for VitalSign and must be a number',
-          severity: 'error',
-        });
-      }
-      if (!hasNonEmptyString(rec, 'unit')) {
-        errors.push({
-          field: 'unit',
-          message: 'unit is required for VitalSign',
-          severity: 'error',
-        });
-      }
+      const valueError = singleNumberError(
+        rec['value'],
+        'value',
+        'value is required for VitalSign and must be a number',
+      );
+      if (valueError) errors.push(valueError);
+      const unitError = requiredString(rec, 'unit', 'unit is required for VitalSign');
+      if (unitError) errors.push(unitError);
       break;
     }
 
     case 'ImmunizationRecord': {
-      if (!hasNonEmptyString(rec, 'vaccineName')) {
-        errors.push({
-          field: 'vaccineName',
-          message: 'vaccineName is required for ImmunizationRecord',
-          severity: 'error',
-        });
-      }
+      const vaccineNameError = requiredString(rec, 'vaccineName', 'vaccineName is required for ImmunizationRecord');
+      if (vaccineNameError) errors.push(vaccineNameError);
       const status = rec['status'];
       if (status !== undefined && typeof status === 'string' && !VALID_IMMUNIZATION_STATUSES.has(status)) {
         errors.push({
@@ -400,31 +393,16 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
 
     case 'CoverageRecord':
     case 'InsurancePlan': {
-      if (!hasNonEmptyString(rec, 'providerName')) {
-        errors.push({
-          field: 'providerName',
-          message: 'providerName is required for Coverage records',
-          severity: 'error',
-        });
-      }
+      const providerNameError = requiredString(rec, 'providerName', 'providerName is required for Coverage records');
+      if (providerNameError) errors.push(providerNameError);
       break;
     }
 
     case 'PatientProfile': {
-      if (!hasNonEmptyString(rec, 'givenName')) {
-        errors.push({
-          field: 'givenName',
-          message: 'givenName is required for PatientProfile',
-          severity: 'error',
-        });
-      }
-      if (!hasNonEmptyString(rec, 'familyName')) {
-        errors.push({
-          field: 'familyName',
-          message: 'familyName is required for PatientProfile',
-          severity: 'error',
-        });
-      }
+      const givenNameError = requiredString(rec, 'givenName', 'givenName is required for PatientProfile');
+      if (givenNameError) errors.push(givenNameError);
+      const familyNameError = requiredString(rec, 'familyName', 'familyName is required for PatientProfile');
+      if (familyNameError) errors.push(familyNameError);
       break;
     }
 

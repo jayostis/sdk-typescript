@@ -196,7 +196,7 @@ export { applyConsent, clinicalOnlyPolicy, fullAccessPolicy, noAccessPolicy, typ
 
 // ─── Validator ───────────────────────────────────────────────────────────────
 
-export { validate, validateAll, type ValidationError, type ValidationResult } from './validator/index.js';
+export { validate, validateAll, type ValidationError, type ValidationResult, type Severity } from './validator/index.js';
 
 // ─── Deterministic URI Utilities ─────────────────────────────────────────────
 

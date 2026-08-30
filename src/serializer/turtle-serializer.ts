@@ -49,13 +49,17 @@ import type { SleepSnapshot } from '../models/sleep-snapshot.js';
 const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   VitalSign: {
     snomedCode: 'clinical:snomedCode',
-    interpretation: 'clinical:interpretation',
-    // `interpretationSourceCode` is NOT here: it is declared by
-    // `src/terms/interpretation-source-code.ts`, whose `predicateByType` says
+    // NEITHER `interpretation` NOR `interpretationSourceCode` is here: both are
+    // declared by their own term module — `src/terms/interpretation.ts` and
+    // `src/terms/interpretation-source-code.ts` — whose `predicateByType` says
     // the same thing. `emitField` and `collectPrefixes` both fork on `termFor`
     // ahead of this table, so a termed key never reaches
     // `getPredicateForField` — an entry left here would be a second copy of
     // one fact, unread, and free to drift from the one that is read.
+    //
+    // `tests/terms/superseded-overrides.test.ts` is what keeps that a rule
+    // rather than a habit: it goes red on any field in this table that a term
+    // has since taken over.
   },
   // Core v3.4: the export-manifest classes carry cascade:notes, not the
   // health:notes that health records use. Same JSON key, different predicate.
@@ -366,6 +370,14 @@ export const SERIALIZER_FIELD_TABLES: Readonly<Record<string, readonly string[]>
   BLANK_NODE_TYPES: Object.keys(BLANK_NODE_TYPES),
   BLANK_NODE_PREDICATE_PREFIXES: Object.keys(BLANK_NODE_PREDICATE_PREFIXES),
   BLANK_NODE_ARRAY_FIELDS: [...BLANK_NODE_ARRAY_FIELDS],
+  // Keyed by record type rather than by field, so the FIELD names are what is
+  // published — flattened and deduplicated. That makes it answerable by the
+  // same "is this a registered predicate" check as every table above, and by
+  // the one this table needs and they do not: is the field TERMED, in which
+  // case its row here is never read.
+  TYPE_PREDICATE_OVERRIDES: [
+    ...new Set(Object.values(TYPE_PREDICATE_OVERRIDES).flatMap((byField) => Object.keys(byField))),
+  ],
 });
 
 /**
@@ -645,13 +657,21 @@ function serializeRecord(record: CascadeEntity): string {
     // in the order given, whether the caller passed a bare value or an array.
     // Object form (URI reference vs literal) is unchanged from the single-value
     // case, so a record carrying one code serializes byte-identically to before.
+    //
+    // NO FILTER. `typeof item === 'string'` stood here and dropped every other
+    // member with no error, while the generic loop below — which this branch
+    // exists only to precede, for the URI form — would have written them. The
+    // reader's `convertObject` types a `"5"^^xsd:integer` object as a number,
+    // so `snomedCode: ["abc", 5]` is a shape a real graph hands back, and one
+    // triple went out where two came in.
     if (MULTI_VALUE_FIELDS.has(key) && (typeof value === 'string' || Array.isArray(value))) {
-      const values = (Array.isArray(value) ? value : [value]).filter(
-        (item): item is string => typeof item === 'string',
-      );
-      if (values.length === 0) return;
-      for (const item of values) {
-        if (URI_FIELDS.has(key)) {
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (item === undefined || item === null) continue;
+        if (typeof item !== 'string') {
+          // Form is `emitMember`'s question, and it throws for a member no
+          // branch can write rather than losing it.
+          emitMember(key, pred, item);
+        } else if (URI_FIELDS.has(key)) {
           sub.uri(pred, item);
         } else {
           sub.literal(pred, item);
@@ -798,36 +818,65 @@ function serializeBlankNode(
       // an untermed node has vouched for no child.
       const nestedPred = childPredicateFor(k, nsPrefix);
 
-      // 0..* nested properties (clinical v1.16 participantRoleCode). One
-      // repeated-predicate triple per value, arity preserved, matching how the
-      // top-level writer treats a MULTI_VALUE_FIELDS member.
-      if (MULTI_VALUE_FIELDS.has(k) && (typeof v === 'string' || Array.isArray(v))) {
-        const values = (Array.isArray(v) ? v : [v]).filter(
-          (item): item is string => typeof item === 'string',
-        );
-        for (const item of values) {
-          b.literal(nestedPred, item);
-        }
-        continue;
-      }
-
-      if (INTEGER_FIELDS.has(k) && typeof v === 'number') {
-        b.integer(nestedPred, v);
-        continue;
-      }
-      if (typeof v === 'string') {
-        b.literal(nestedPred, v);
-      } else if (typeof v === 'boolean') {
-        b.boolean(nestedPred, v);
-      } else if (typeof v === 'number') {
-        if (Number.isInteger(v)) {
-          b.number(nestedPred, v);
-        } else {
-          b.decimal(nestedPred, v);
-        }
+      // MEMBER BY MEMBER, the same split the top-level writer makes: this loop
+      // decides the child's ARITY and `emitNestedMember` decides one value's
+      // FORM.
+      //
+      // A `MULTI_VALUE_FIELDS` branch stood here instead, and it was the only
+      // thing on this path that understood an array at all. That was in step
+      // with the old reader, which returned an array for a declared 0..* child
+      // and a scalar for everything else. It is not in step with the faithful
+      // one: `triplesToNestedObject` returns an array for ANY repeated child
+      // now, so a second `cascade:domain` on a `wellnessSummary` came back
+      // correctly, matched no branch, and was written NOWHERE — both triples
+      // gone, and `validate()` clean on what was left. That vacuous pass is the
+      // failure mode this SDK is least able to detect, and it was open on the
+      // one nesting path no term covers.
+      for (const member of Array.isArray(v) ? v : [v]) {
+        if (member === undefined || member === null) continue;
+        emitNestedMember(b, nestedPred, k, member);
       }
     }
   });
+}
+
+/**
+ * One value of a nested child, in whatever form its type calls for.
+ *
+ * The blank-node counterpart of `emitMember`, and deliberately never asked
+ * about arity — see the loop that calls it.
+ *
+ * A member no branch claims is SKIPPED rather than thrown on, which is the one
+ * place this path still differs from the top-level writer. Nothing reaches it
+ * today: the reader produces strings, numbers and booleans for a nested child,
+ * and the only other shape is an object, which would be a second level of
+ * nesting no term declares and no reader reconstructs. Left as it was because
+ * changing it is a decision about what `serialize()` REFUSES, which is a
+ * separate question from what it drops.
+ */
+function emitNestedMember(
+  b: SubjectBuilder,
+  predicate: string,
+  key: string,
+  value: unknown,
+): void {
+  if (typeof value === 'string') {
+    b.literal(predicate, value);
+    return;
+  }
+  if (typeof value === 'boolean') {
+    b.boolean(predicate, value);
+    return;
+  }
+  if (typeof value === 'number') {
+    if (INTEGER_FIELDS.has(key)) {
+      b.integer(predicate, value);
+    } else if (Number.isInteger(value)) {
+      b.number(predicate, value);
+    } else {
+      b.decimal(predicate, value);
+    }
+  }
 }
 
 // ─── Type-Specific Serializers ──────────────────────────────────────────────

@@ -376,3 +376,32 @@ pots=1.4
 #     of an array — the type was narrower than the data this SDK produces.
 #     Nothing new is registered and nothing previously claimed is withdrawn, so
 #     bumping a row would claim support this package did not just gain.
+
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/jsonld/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     A COMMENT CORRECTION AND ONE OPEN DEFECT NAMED. No term is registered,
+#     withdrawn or respelled, and getContext() returns exactly what it did.
+#     The comment beside getContext()'s collision rule read "No such collision
+#     exists today", which stopped being true when NESTED_CHILD_PREDICATES
+#     became generated from the terms: twenty of the twenty-one declared child
+#     keys are ALSO registered top-level fields, so the loop that overwrites
+#     them now fires twenty times per call instead of never.
+#     Twenty of those twenty agree about the predicate and the overwrite is a
+#     no-op. `notes` DISAGREES — cascade:notes as a RecordSummary child (spec's
+#     own spelling, which TYPE_PREDICATE_OVERRIDES forks the writer to) against
+#     health:notes as a health record's registered field — and this is the core
+#     v3.4 collision that entry above already flagged, arriving on the JSON-LD
+#     side.
+#     STILL BROKEN, deliberately not fixed here: a flat context term has one
+#     meaning and this key has two, so whichever way the loop falls, the other
+#     occurrence expands to a predicate the Turtle does not write. It falls to
+#     health:notes, which is right for a document's top level and leaves a
+#     nested notes inside a clinicalSummary / wellnessSummary expanding wrong.
+#     toJsonLd on an ExportManifest has the same split at TOP level, from
+#     TYPE_PREDICATE_OVERRIDES, and predates NESTED_CHILD_PREDICATES entirely.
+#     Closing either means changing the document toJsonLd emits — a local
+#     @context on the nested node object (JSON-LD 1.0 permits one; term-scoped
+#     contexts, which need @version 1.1, do not apply), or 1.1 scoping — which
+#     is a decision about public output rather than a comment fix.
+#     Pinned by tests/rules/context-collision.test.ts, including an assertion
+#     labelled OPEN DEFECT that goes RED when this is fixed.
