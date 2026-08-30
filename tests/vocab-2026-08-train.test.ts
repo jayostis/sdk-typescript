@@ -34,8 +34,11 @@ import {
   LAB_INTERPRETATION_CHECKSUM,
 } from '../src/models/common.js';
 import { PROPERTY_PREDICATES, TYPE_MAPPING } from '../src/vocabularies/namespaces.js';
+import { clinical, parseTurtle } from './support/graph.js';
+import { asArray } from '../src/models/common.js';
 import type { CascadeRecord } from '../src/models/common.js';
 import type { VitalSign } from '../src/models/vital-sign.js';
+import type { LabResult } from '../src/models/lab-result.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = resolve(__dirname, '../../conformance/fixtures');
@@ -149,6 +152,32 @@ describe('interpretationSourceCode (health v2.7 / clinical v1.15)', () => {
     expect(turtle).not.toContain('health:interpretationSourceCode');
   });
 
+  it('declares the clinical: prefix on a record whose only clinical: field is this one', () => {
+    // The `toContain` above passes whether or not the matching `@prefix` line
+    // is in the header, and on vital-001 it could not fail either way:
+    // `snomedCode` re-prefixes to clinical: on a VitalSign too, so the
+    // declaration is there regardless of what this field does. The case that
+    // can fail is a record carrying no other clinical: field, and the way to
+    // ask it is to PARSE rather than string-match — an undeclared prefix is
+    // invisible to `toContain` and fatal to a reader, so `parseTurtle`
+    // throwing is itself the assertion, and the values are what it should say
+    // once it parses.
+    //
+    // Worth keeping past this issue: every future per-type predicate has to
+    // resolve the same way in the header as in the subject block, and this is
+    // the shape that notices when it does not.
+    const turtle = serialize({
+      id: 'urn:uuid:00000000-0000-4000-8000-0000000000bb',
+      type: 'VitalSign',
+      interpretationSourceCode: 'elevated',
+      dataProvenance: 'ClinicalGenerated',
+      schemaVersion: '1.3',
+    } as unknown as CascadeRecord);
+
+    const node = parseTurtle(turtle).namedNode('urn:uuid:00000000-0000-4000-8000-0000000000bb');
+    expect(node.out(clinical.interpretationSourceCode).values).toEqual(['elevated']);
+  });
+
   it('writes the health: spelling on a lab result', () => {
     const turtle = serialize({
       id: 'urn:uuid:00000000-0000-4000-8000-0000000000aa',
@@ -236,6 +265,62 @@ describe('VitalSign.interpretation is no longer an open binding', () => {
       const v: VitalSign['interpretation'] = code;
       expect(v).toBe(code);
     }
+  });
+});
+
+// ─── 4b. The arity of the source code, at the type level ─────────────────────
+
+describe('interpretationSourceCode is typed for the arity the SDK reads', () => {
+  // The serializer writes a triple per value and the deserializer returns every
+  // one of them (MULTI_VALUE_FIELDS in turtle-parser.ts), so a record that went
+  // in with two codes comes back with an array. A model that still says
+  // `string` describes data this SDK does not produce, and the gap is not
+  // caught by any round trip: vitest does not typecheck, so the only place it
+  // can fail is tsconfig.typecheck.json.
+  //
+  // Arity here is deliberately the same MultiValue<string> the other 0..* code
+  // properties carry — snomedCode next door on this same interface, icd10Code,
+  // testCode, labCategory, encounterReason. `sh:maxCount 1` on the shape is a
+  // rule about validating data, not about what a reader may find in a graph.
+
+  it('accepts one code and several on a vital sign', () => {
+    const one: VitalSign['interpretationSourceCode'] = 'elevated';
+    const several: VitalSign['interpretationSourceCode'] = ['ZQ7', 'HIGH-LOCAL'];
+
+    expect(asArray(one)).toEqual(['elevated']);
+    expect(asArray(several)).toEqual(['ZQ7', 'HIGH-LOCAL']);
+  });
+
+  it('accepts one code and several on a lab result', () => {
+    // lab-013 supplies two. Reading them back off `LabResult` needed a local
+    // widening of `CascadeRecord` in tests/conformance/lab.test.ts, because no
+    // model declared the property at all.
+    const one: LabResult['interpretationSourceCode'] = 'HIGH-LOCAL';
+    const several: LabResult['interpretationSourceCode'] = ['ZQ7', 'HIGH-LOCAL'];
+
+    expect(asArray(one)).toEqual(['HIGH-LOCAL']);
+    expect(asArray(several)).toEqual(['ZQ7', 'HIGH-LOCAL']);
+  });
+
+  it('refuses a bare string method on a value that may be an array', () => {
+    // The assertion that fails if the property narrows back to `string`, in
+    // both halves. `.trim()` is not on `string[]`, so a caller must narrow —
+    // `asArray` above — before reaching for a string method.
+    const vital: VitalSign['interpretationSourceCode'] = ['ZQ7', 'HIGH-LOCAL'];
+
+    // Type half. NEVER CALLED: the claim is that the line does not COMPILE,
+    // and under tsconfig.typecheck.json an unused @ts-expect-error is itself
+    // an error, so it cannot go quiet if the type is re-narrowed. Calling it
+    // would throw, which is the runtime half below.
+    const readAsString = (): unknown =>
+      // @ts-expect-error `trim` exists on string but not on MultiValue<string>.
+      vital?.trim();
+    expect(readAsString).toBeTypeOf('function');
+
+    // Runtime half: what a `string` type let through the compiler and into a
+    // caller's hands. The cast is how the test reaches a throw the type now
+    // forbids.
+    expect(() => (vital as unknown as string).trim()).toThrow(TypeError);
   });
 });
 

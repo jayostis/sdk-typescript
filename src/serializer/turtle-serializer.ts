@@ -19,6 +19,7 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
+import { predicateFor, termFor } from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
@@ -48,10 +49,12 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   VitalSign: {
     snomedCode: 'clinical:snomedCode',
     interpretation: 'clinical:interpretation',
-    // health v2.7 / clinical v1.15: the verbatim escape hatch follows the
-    // property it explains into the clinical: namespace, so a consumer reading
-    // one always finds the other on the same side.
-    interpretationSourceCode: 'clinical:interpretationSourceCode',
+    // `interpretationSourceCode` is NOT here: it is declared by
+    // `src/terms/interpretation-source-code.ts`, whose `predicateByType` says
+    // the same thing. `emitField` and `collectPrefixes` both fork on `termFor`
+    // ahead of this table, so a termed key never reaches
+    // `getPredicateForField` — an entry left here would be a second copy of
+    // one fact, unread, and free to drift from the one that is read.
   },
   // Core v3.4: the export-manifest classes carry cascade:notes, not the
   // health:notes that health records use. Same JSON key, different predicate.
@@ -368,7 +371,24 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
   for (const [key, value] of Object.entries(record)) {
     if (key === 'id' || key === 'type' || value === undefined || value === null) continue;
 
-    const pred = getPredicateForField(key, record.type);
+    // The same fork `emitField` takes at the write step, and it has to be
+    // taken here too. A term resolves its own predicate out of `predicate` /
+    // `predicateByType`, so asking `getPredicateForField` for a TERMED field is
+    // a second, independent answer to "which namespace does this field write
+    // under" — and the two answers decide different halves of one document.
+    // This one picks the `@prefix` lines the header declares; the other picks
+    // what the subject block writes.
+    //
+    // Harmless while they agree, which they do for every term shipped today.
+    // It stops being harmless at the first term that re-prefixes a field per
+    // type — the shape every `TYPE_PREDICATE_OVERRIDES` entry already has, e.g.
+    // `snomedCode` under `clinical:` on a VitalSign. Resolved the old way, the
+    // header would declare `health:` and the subject block would write
+    // `clinical:snomedCode` under a prefix that was never declared. That is not
+    // a wrong triple: it is a document that does not parse, and it fails on the
+    // whole record rather than on the field.
+    const term = termFor(key);
+    const pred = term ? predicateFor(term, record.type) : getPredicateForField(key, record.type);
     if (pred) {
       const nsPrefix = pred.split(':')[0];
       if (nsPrefix && nsPrefix in NAMESPACES) {
@@ -491,6 +511,20 @@ function serializeRecord(record: CascadeEntity): string {
     const value = rec[key];
     if (value === undefined || value === null) return;
     if (key === 'id' || key === 'type') return;
+
+    // A term module owns this field's predicate and rule, so it writes it and
+    // the type-driven chain below never sees it. Placed AFTER the three guards
+    // above rather than at the top of the function: jumping them would leave a
+    // termed field out of `emitted` and run `outputsFor` on an absent value.
+    //
+    // `termFor` is undefined for every field no module claims, which is all of
+    // them but one — so this fork's job is to RETURN CONTROL, and everything
+    // below is reached exactly as often as it is today.
+    const term = termFor(key);
+    if (term) {
+      sub.addAll(term.outputsFor(rec));
+      return;
+    }
 
     const pred = getPredicateForField(key, record.type);
     if (!pred) return;
@@ -625,6 +659,34 @@ function serializeRecord(record: CascadeEntity): string {
     if (typeof value === 'string') {
       sub.literal(pred, value);
       return;
+    }
+
+    // Reached only when every branch above declined, and an ARRAY is the only
+    // value that can get here: `isBooleanField` takes every boolean, the bare
+    // `typeof value === 'number'` branch takes every number, the blank-node
+    // branch takes every non-array object, and the default above takes every
+    // string. An array with no rule matched no branch and would be written
+    // NOWHERE — the record serializes as though the field had been absent,
+    // which is how lab-013's two source codes were lost. A caller is owed an
+    // error naming the field instead of a graph that quietly disagrees.
+    //
+    // Safe to throw here because nothing in the corpus reaches it: scanning
+    // the 90 wrapped fixtures for an array-valued field with a registered
+    // predicate, no entry in any of the five rule sets and no term module
+    // returned one result — `interpretationSourceCode` on lab-013 — and the
+    // term above removes it. This fires on no fixture that exists today, and
+    // on any field added tomorrow that nobody gave a rule.
+    if (Array.isArray(value)) {
+      // An EMPTY array carries nothing to lose, so the reasoning above does not
+      // reach it: no triple is the faithful graph for it, and it is what every
+      // arity table already writes for one (IRI_LIST_FIELDS, MULTI_VALUE_FIELDS
+      // and ARRAY_FIELDS each return early on an empty array). A field with no
+      // rule must not be stricter than a field with one — a caller that
+      // normalises an absent optional to `[]` is not the caller this throw is
+      // for, and PodBuilder.build maps serialize over every record it holds, so
+      // one such record would fail a whole pod build over an absent field.
+      if (value.length === 0) return;
+      throw new Error(`No serialization rule for array-valued '${key}' (predicate ${pred})`);
     }
   };
 

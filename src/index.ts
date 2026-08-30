@@ -173,6 +173,11 @@ export {
 
 export { TurtleBuilder, SubjectBuilder, escapeTurtleString } from './serializer/index.js';
 
+// `SubjectBuilder.addAll` is a method on a shipped class, so its argument type
+// is public too, and the package's `exports` map allows no deep import to name
+// it from anywhere else.
+export type { Output } from './terms/term.js';
+
 // ─── Turtle Deserializer ────────────────────────────────────────────────────
 
 export { deserialize, deserializeOne } from './deserializer/index.js';

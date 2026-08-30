@@ -23,6 +23,8 @@
  * @module serializer
  */
 
+import type { Output } from '../terms/term.js';
+
 // ─── String Escaping ────────────────────────────────────────────────────────
 
 /**
@@ -179,6 +181,69 @@ export class SubjectBuilder {
       return `        ${p}${sep}`;
     });
     this._predicates.push(`${predicate} [\n${innerLines.join('\n')}\n    ]`);
+    return this;
+  }
+
+  /**
+   * Write every {@link Output} a term produced, dispatching each to the
+   * builder method for its kind.
+   *
+   * A dispatcher, not a second implementation: the Turtle produced for each
+   * kind is identical to calling that method directly. An empty array is a
+   * no-op, so a caller holding `term.outputsFor(record)` needs no guard for an
+   * absent field.
+   *
+   * Every {@link Output} carries a finished value, so each case here has one
+   * method to call and one way to pass its arguments: the prefix, the datatype
+   * and the escaping were all decided in the term, where they are pure data.
+   */
+  addAll(outputs: Output[]): this {
+    for (const output of outputs) {
+      switch (output.kind) {
+        case 'literal':
+          this.literal(output.predicate, output.value, output.datatype);
+          break;
+        case 'number':
+          // Both write a bare token today; the split mirrors `emitField` so the
+          // two paths stay aligned if either method ever spells a datatype out.
+          if (Number.isInteger(output.value)) {
+            this.number(output.predicate, output.value);
+          } else {
+            this.decimal(output.predicate, output.value);
+          }
+          break;
+        case 'boolean':
+          this.boolean(output.predicate, output.value);
+          break;
+        case 'uri':
+          this.uri(output.predicate, output.value);
+          break;
+        case 'uriList':
+          this.uriList(output.predicate, output.items);
+          break;
+        case 'list':
+          this.list(output.predicate, output.items);
+          break;
+        case 'blankNode':
+          this.blankNode(output.predicate, (b) => {
+            // Guarded like `serializeBlankNode`: an untyped blank node is
+            // written without an `a` line, never with an empty one.
+            if (output.rdfType) b.type(output.rdfType);
+            b.addAll(output.children);
+          });
+          break;
+        default: {
+          // Exhaustive by construction: adding a kind to `Output` without a
+          // case here is a COMPILE error on this assignment. Without it the
+          // switch would fall through in silence and every output of the new
+          // kind would be dropped, producing records missing triples with
+          // nothing anywhere reporting it. The throw covers the runtime half —
+          // a JS caller, or an output widened past the type.
+          const unhandled: never = output;
+          throw new Error(`Unhandled output kind: ${JSON.stringify(unhandled)}`);
+        }
+      }
+    }
     return this;
   }
 
