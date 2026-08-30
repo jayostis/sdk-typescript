@@ -98,4 +98,59 @@ describe('sh:in', () => {
       expect(errorFields(validate(patientProfile()))).not.toContain('biologicalSex');
     });
   });
+
+  describe('sh:severity, which the same list carries differently per class', () => {
+    // ONE LIST, TWO SEVERITIES. `clinical:LabResultShape` binds these 74 codes
+    // with no `sh:severity`, so sh:Violation by SHACL's default;
+    // `clinical:VitalSignShape` binds the byte-identical list at
+    // `sh:severity sh:Warning`, deliberately and with the reason written out —
+    // emitted vital data carries "elevated", and core v3.5's ratchet is that
+    // such a value is REPORTED, never rejected, until a later clinical version
+    // raises it. Both shapes also say it in prose: "Interpretation MUST be a
+    // code…" on the lab shape, "…SHOULD be a code… WARNING in clinical v1.15;
+    // this becomes a VIOLATION in a later version" on the vital.
+    //
+    // The term declares it PER RECORD TYPE and not per rule, because that is
+    // the granularity SHACL has. `sh:severity` belongs to the property shape,
+    // so every constraint inside one — `sh:datatype`, `sh:maxCount`, `sh:in` —
+    // reports at that shape's severity; measured on a vital sign breaking all
+    // three at once, every result comes back Warning. clinical.shapes.ttl:43
+    // says so in as many words: "sh:severity is a property of the shape a
+    // constraint belongs to and cannot be applied to one nested result."
+
+    it('reports a lab result at error, and the record is invalid', () => {
+      const result = validate(labResult({ interpretation: 'quite high' }));
+
+      expect(errorFields(result)).toContain('interpretation');
+      expect(result.valid).toBe(false);
+    });
+
+    it('reports a vital sign at warning, and the record stays valid', () => {
+      // "elevated" is the value the ratchet exists for. A vital sign carrying
+      // it is a record spec accepts-with-a-warning, and `validate()` rejecting
+      // it is the SDK being stricter than the vocabulary — the failure mode
+      // this whole file's doc comment sets out to avoid, in the direction that
+      // is harder to notice.
+      const result = validate(record('VitalSign', {
+        vitalType: 'heartRate',
+        value: 88,
+        unit: 'bpm',
+        interpretation: 'elevated',
+      }));
+
+      expect(errorFields(result)).not.toContain('interpretation');
+      expect(result.warnings.map((w) => w.field)).toContain('interpretation');
+      expect(result.warnings.find((w) => w.field === 'interpretation')?.message)
+        .toContain('elevated');
+    });
+
+    it('is declared on the term, per record type, and defaults to error', () => {
+      // Asserted on the declaration as well as the behaviour: a severity that
+      // stopped being declared would otherwise show up only as one of the two
+      // tests above, and which one depends on the default.
+      expect(termFor('interpretation')?.severityByType).toEqual({ VitalSign: 'warning' });
+      expect(termFor('biologicalSex')?.severityByType).toBeUndefined();
+      expect(termFor('dataAbsentReason')?.severityByType).toBeUndefined();
+    });
+  });
 });

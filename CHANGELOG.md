@@ -80,6 +80,46 @@
   it was DROPPED rather than written, since a declared `children` writes nothing
   else. Added to the term, to the `Address` model, and — by derivation from the
   term — to the generated JSON-LD context and the deserializer's reverse map.
+- **A nested child a term does not declare is written, and reported.**
+  `childrenOf` filtered on the `children` map, so an undeclared key was dropped
+  by the writer: the caller's value vanished with no error and the record
+  reached `validate()` with nothing left to violate. It stopped the triple and
+  not the defect. Every present key is now written — a declared child by its
+  rule's form, an undeclared one by runtime type — and `validate()` reports it
+  as `clinicalSummary.supplementTally`, naming the child and the predicate it
+  went out under. Nothing in `tests/shapes/` is `sh:closed`, so SHACL returns
+  `conforms: true` on such a graph and `validate()` is the only judge that can
+  see it; `spec` issue jayostis/spec#2 asks for the shape to close. (#37)
+- **`RecordSummary.dataProvenance` is written.** `cascade:RecordSummaryShape`
+  declares it (`core.shapes.ttl:1085`) and `RecordSummary` reaches it through
+  `CascadeEntity`, so a caller building a summary off the model had it dropped.
+  Declared as `prefixedEnum` so a nested summary writes `cascade:EHRVerified`
+  like the top-level writer, rather than the plain literal the pre-term nested
+  path wrote.
+- **`cascade:AddressShape`'s five simplified aliases are declared.** `city`,
+  `state`, `country`, `postalCode` and `streetAddress`, which the shape accepts
+  in as many words — *"Accepts both simplified aliases (city, state) and
+  FHIR-aligned properties (addressCity, addressState)"*. With the term read as
+  the legal set, an address carrying `city` would otherwise have been rejected:
+  the SDK refusing what spec permits.
+- **The reader returns a nested child no term declares.** `triplesToNestedObject`
+  skipped every predicate missing from the reverse map, so this SDK could write
+  a document it could not read back, and a read-modify-write deleted the key
+  from somebody else's pod with nothing raised. The key is the local name where
+  the writer would put that exact predicate back, and the full IRI otherwise —
+  written in angle brackets, because `cascade:odd(name)` does not parse and
+  abbreviating a foreign namespace into `cascade:` would write a different
+  predicate. This reverses #27's decision to drop `cascade:contactEmail` on
+  read: that reasoning turned on nothing reporting it, and `validate()` now
+  does. The same drop at TOP level is untouched and filed as #38.
+- **A term's rules are reported at the severity its shape declares.**
+  `clinical:VitalSignShape` binds `interpretation`'s 74 codes at
+  `sh:severity sh:Warning` where the two lab shapes leave them at SHACL's
+  `sh:Violation` default — deliberately, because emitted vital data carries
+  `"elevated"` and core v3.5's ratchet reports such a value rather than
+  rejecting it. `validate()` emitted `error` for all three, and `valid` counts
+  errors alone, so a vital sign spec accepts-with-a-warning came back
+  `valid: false`. (#37)
 
 ### Changed
 
@@ -116,6 +156,22 @@
   outputs nest. None declares a `nestedPrefix`: `childrenOf` defaults to
   `cascade` and this fixture family's child keys are already disambiguated in
   the JSON.
+- `TermSpec.severityByType` — recordType to `'error'` / `'warning'`, defaulting
+  to `'error'`. Per record type like `predicateByType` beside it, and NOT per
+  rule: `sh:severity` belongs to the property shape, so one block's
+  `sh:datatype`, `sh:maxCount` and `sh:in` all report at that block's severity
+  (measured — a vital sign breaking all three returns three Warnings), and this
+  governs every rule the term declares for the type.
+- `validate()` partitions findings by `severity` rather than by which function
+  produced them. Those four sources were positional — whatever `validateWarnings`
+  returned was a warning — which a term reading severity off its shape breaks,
+  since one walk now raises both. No existing finding changes bucket.
+- `tests/terms/children-complete.test.ts` asserts that every `sh:path` on a
+  termed blank node's shape is declared as a child of that term, resolving the
+  shape from the term's own `rdfType` via `sh:targetClass`. With the children
+  map read as the legal set, a term falling behind its shape stopped being a
+  silent drop and became a false rejection; this is what catches it. Three such
+  gaps were found by hand before it existed.
 
 ## [3.1.0] - 2026-08-28
 

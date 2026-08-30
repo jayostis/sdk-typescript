@@ -25,7 +25,8 @@ import {
   TYPE_TO_MAPPING_KEY,
   buildReversePredicateMap,
 } from '../vocabularies/namespaces.js';
-import { blankNodeTermKeys, termSpellings } from '../terms/index.js';
+import { blankNodeTermKeys, termFor, termSpellings } from '../terms/index.js';
+import { DEFAULT_NESTED_PREFIX } from '../terms/term.js';
 import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
@@ -1045,9 +1046,63 @@ const NESTED_BLANK_NODE_FIELDS = new Set([
 const NESTED_BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
 
 /** Rebuild an inline blank node's predicates into a plain nested object. */
+/**
+ * The child key an unmapped predicate is returned under.
+ *
+ * NOTHING IS DROPPED. The key is the short local name where the writer would
+ * put that exact predicate back from it, and the full IRI otherwise — which
+ * `childPredicateFor` writes in angle brackets, so the round trip is exact
+ * either way. The test is never "can a name be extracted"; it is "does the
+ * abbreviation mean the same thing", and there are two ways it does not:
+ *
+ *   THE NAMESPACE DIFFERS from the one this node's children are written under.
+ *   `childrenOf` abbreviates a child as `nestedPrefix:key`, so a bare
+ *   `wardCount` recovered from `<https://other.example.org/ns#wardCount>` would
+ *   be written back as `cascade:wardCount` — a DIFFERENT predicate. A triple
+ *   silently reassigned to a vocabulary that never declared it is worse than
+ *   one dropped, and this is what stops it.
+ *
+ *   THE LOCAL NAME IS NOT A PN_LOCAL. `cascade:odd(name)` does not parse, while
+ *   `<https://ns.cascadeprotocol.org/core/v1#odd(name)>` is valid Turtle saying
+ *   the same thing. The abbreviation is what fails there, not the format.
+ *
+ * Both fall back to the IRI rather than to silence, because Turtle can express
+ * any predicate that could have reached this reader — a document carrying one
+ * it could not express would not have parsed on the way in.
+ */
+function recoverableChildKey(predicate: string, expectedNs: string | undefined): string {
+  if (!expectedNs || !predicate.startsWith(expectedNs)) return predicate;
+  const local = predicate.slice(expectedNs.length);
+  return PN_LOCAL_SAFE.test(local) ? local : predicate;
+}
+
+/**
+ * The local part of a prefixed name, as `term.ts`'s `PREFIXED_NAME` spells it.
+ *
+ * Deliberately the same character class and not a fuller `PN_LOCAL`: the test
+ * that matters is what the WRITER will accept, so a name this admits and the
+ * writer refuses would be a round trip that throws instead of one that parses.
+ */
+const PN_LOCAL_SAFE = /^[\w-]+$/;
+
+/**
+ * The namespace a field's nested children are written under, if it has a term.
+ *
+ * `undefined` for an untermed nested field — `wellnessSummary`, and whatever
+ * else has not been migrated — and the fallback is then off entirely rather
+ * than guessing `cascade:`. Guessing is how the corruption above happens:
+ * `hasParticipant`'s children are `clinical:`, so a default would rewrite them.
+ */
+function nestedNamespaceOf(jsonKey: string): string | undefined {
+  const rule = termFor(jsonKey)?.rule;
+  if (!rule || rule.form !== 'blankNode') return undefined;
+  return (NAMESPACES as Record<string, string>)[rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX];
+}
+
 function triplesToNestedObject(
   bnodeId: string,
   triples: ParsedTriple[],
+  expectedNs?: string,
 ): Record<string, unknown> {
   // Every child triple, collected per key and converted the same way a
   // top-level one is. Identical to `triplesToRecord`'s loop on purpose: a
@@ -1058,7 +1113,40 @@ function triplesToNestedObject(
 
   for (const t of triples) {
     if (t.subject !== bnodeId || t.predicate === RDF_TYPE) continue;
-    const key = REVERSE_PREDICATE_MAP.get(t.predicate);
+
+    // AN UNMAPPED CHILD IS RETURNED, under the predicate's local name.
+    //
+    // `REVERSE_PREDICATE_MAP` is generated from the terms' declared `children`,
+    // so a predicate no term declares had no entry and this loop skipped it —
+    // silently, one child at a time, leaving the rest of the node intact. That
+    // was survivable while `childrenOf` dropped the same keys on the way out:
+    // neither side could see them, and neither side could produce one.
+    //
+    // It stopped being survivable when the writer became faithful. A triple
+    // this SDK writes and will not read back means a document it cannot
+    // round-trip, and the loss lands hardest on data it did not author: read a
+    // pod carrying `cascade:wardCount`, change one field, write it back, and
+    // the key is gone from someone else's document with nothing raised
+    // anywhere. Skipping it also LAUNDERS it — the record that comes back
+    // conforms, so `validate()` has nothing left to refuse, which is the
+    // vacuous pass this SDK is least able to detect.
+    //
+    // The local name, because that is the inverse of what the writer did:
+    // `childrenOf` builds a child predicate as `prefix:key` from the JSON key,
+    // so the key is recoverable from the predicate by construction. Two
+    // predicates in different namespaces sharing a local name would collide
+    // into one key — `health:status` and `coverage:status` under one node —
+    // which is a real limit of this reading and not reachable from any
+    // vocabulary the writer emits today, since a node's children are all
+    // written under a single `nestedPrefix`.
+    //
+    // NOT the same reading at TOP LEVEL, where an unmapped predicate is still
+    // skipped (`triplesToRecord`). Every predicate a record carries is a field
+    // name in that namespace, so falling back there would turn any vocabulary
+    // this SDK has not implemented into invented model fields. Here the scope
+    // is one blank node whose children the writer just produced.
+    const key =
+      REVERSE_PREDICATE_MAP.get(t.predicate) ?? recoverableChildKey(t.predicate, expectedNs);
     if (!key) continue;
 
     const values = collected.get(key);
@@ -1190,7 +1278,7 @@ function triplesToRecord<T extends CascadeEntity>(
     ) {
       const nodes = predTriples
         .filter((t) => t.objectType === 'blankNode')
-        .map((t) => triplesToNestedObject(t.object, triples));
+        .map((t) => triplesToNestedObject(t.object, triples, nestedNamespaceOf(jsonKey)));
       record[jsonKey] = nodes.length === 1 ? nodes[0] : nodes;
       continue;
     }
@@ -1206,7 +1294,7 @@ function triplesToRecord<T extends CascadeEntity>(
     ) {
       record[jsonKey] = predTriples
         .filter((t) => t.objectType === 'blankNode')
-        .map((t) => triplesToNestedObject(t.object, triples));
+        .map((t) => triplesToNestedObject(t.object, triples, nestedNamespaceOf(jsonKey)));
       continue;
     }
 

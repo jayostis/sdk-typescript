@@ -1,6 +1,7 @@
 import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
 import { allTerms, termFor } from '../terms/index.js';
+import { ruleFor, undeclaredChildKeys } from '../terms/term.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -420,6 +421,17 @@ function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
     if (value === undefined || value === null) continue;
     const members = Array.isArray(value) ? value : [value];
 
+    // The severity this term's rules carry ON THIS RECORD TYPE, from the shape
+    // that governs it. Read once and applied to every rule below, because
+    // `sh:severity` belongs to the property shape rather than to any one
+    // constraint inside it: a shape at sh:Warning reports its datatype, its
+    // maxCount and its value set alike at Warning.
+    //
+    // The undeclared-child check above is NOT given it. That rule comes from
+    // the term's `children` map and not from a shape at all, so there is no
+    // `sh:severity` to read; an undeclared child is an error everywhere.
+    const severity = ownEntry(term.severityByType, record.type) ?? 'error';
+
     // An absent maxCount is UNCONSTRAINED, not unknown — `cascade:PatientProfileShape`
     // declares none for `cascade:emergencyContact`, so a profile may name several
     // people to call. Reading it as 1 would reject a conformant record.
@@ -429,6 +441,35 @@ function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
         message:
           `${field} carries ${members.length} values; the vocabulary permits ` +
           `at most ${term.maxCount}`,
+        severity,
+      });
+    }
+
+    // A CHILD OF A BLANK NODE that the term declares no rule for.
+    //
+    // The writer emits it — `childrenOf` writes every present key — so the
+    // triple is in the graph under `cascade:<key>`, a predicate no `sh:path`
+    // declares. This is the only place that is reportable. Nothing in
+    // `tests/shapes/` is `sh:closed`, so SHACL returns `conforms: true` on such
+    // a graph, indistinguishable from one that satisfied every constraint; and
+    // the shapes are a devDependency besides, so a consumer's only judge is
+    // this function. `spec` issue jayostis/spec#2 asks for the shape to close,
+    // which would make the corpus able to see it too — this check is what
+    // covers the installed package either way.
+    //
+    // Read off the term, exactly as `maxCount` and `values` above are: the
+    // declared children ARE the legal set, which is why `address` declares
+    // `cascade:AddressShape`'s five simplified aliases even though the `Address`
+    // model does not. A term whose `children` map is short of its shape turns
+    // this into a false rejection, and `tests/terms/children-complete.test.ts`
+    // is what stops that being discovered by a caller.
+    const rule = ruleFor(term, record.type);
+    for (const child of undeclaredChildKeys(rule, value)) {
+      errors.push({
+        field: `${field}.${child}`,
+        message:
+          `${field} carries a nested "${child}", which no vocabulary declares; ` +
+          `${rule.nestedPrefix ?? 'cascade'}:${child} is written under no domain, range or shape`,
         severity: 'error',
       });
     }
@@ -442,7 +483,7 @@ function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
         errors.push({
           field,
           message: `${field} "${member}" is not one of the ${term.values.length} values the vocabulary admits`,
-          severity: 'error',
+          severity,
         });
       }
     }
@@ -485,8 +526,17 @@ export function validate(record: CascadeEntity): ValidationResult {
   const termErrors = validateAgainstTerms(record);
   const warningErrors = validateWarnings(record);
 
-  const allErrors = [...baseErrors, ...typeErrors, ...termErrors];
-  const allWarnings = warningErrors;
+  // SEVERITY DECIDES THE BUCKET, not which function produced the finding.
+  //
+  // These four used to be positional: whatever `validateWarnings` returned was
+  // a warning and everything else was an error, so `severity` was a label on a
+  // decision already made. A term reading `sh:severity` off its shape breaks
+  // that — `interpretation` on a vital sign is a warning raised by the same
+  // walk that raises errors — and `valid` counts errors alone, so misfiling one
+  // would reject a record spec accepts with a warning.
+  const found = [...baseErrors, ...typeErrors, ...termErrors, ...warningErrors];
+  const allErrors = found.filter((e) => e.severity !== 'warning');
+  const allWarnings = found.filter((e) => e.severity === 'warning');
 
   return {
     valid: allErrors.length === 0,

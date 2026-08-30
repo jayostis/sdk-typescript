@@ -147,6 +147,36 @@ export type TermSpec = {
    */
   values?: readonly string[];
   /**
+   * recordType -> the severity this term's rules are reported at, defaulting
+   * to `'error'` for every type not named.
+   *
+   * `sh:severity`, which is not a decoration on a message. A shape declaring
+   * `sh:severity sh:Warning` is saying the value is REPORTED and not rejected,
+   * and `validate()` computes `valid` from `errors` alone — so a rule reported
+   * at the wrong severity does not merely mislabel a finding, it flips the
+   * verdict on the record.
+   *
+   * PER RECORD TYPE, exactly like {@link TermSpec.predicateByType} beside it
+   * and for the same reason: a constraint lives inside one node shape.
+   * `clinical:LabResultShape` and `health:LabResultRecordShape` bind
+   * `interpretation`'s 74 codes with no `sh:severity` — sh:Violation, SHACL's
+   * default — and `clinical:VitalSignShape` binds the byte-identical list at
+   * `sh:Warning`, because emitted vital data carries "elevated" and core v3.5's
+   * ratchet reports such a value rather than rejecting it until a later
+   * clinical version raises it. One list, two verdicts, decided by the class.
+   *
+   * NOT PER RULE, which is the granularity SHACL does not have.
+   * `clinical.shapes.ttl:43`: "sh:severity is a property of the shape a
+   * constraint belongs to and cannot be applied to one nested result." So one
+   * `sh:property` block's `sh:datatype`, `sh:maxCount` and `sh:in` all report
+   * at that block's severity — measured on a vital sign breaking all three at
+   * once, every result comes back Warning — and this field governs every rule
+   * the term declares for the type, not just its value set. A shape wanting two
+   * severities on one path has to split into two property shapes, and a term
+   * that had to mirror that would need two entries, not a per-rule map.
+   */
+  severityByType?: Record<string, 'error' | 'warning'>;
+  /**
    * recordType -> `sh:minCount`. Per type, and it has to be: a shape's
    * `sh:minCount` sits inside one node shape, so `cascade:dateOfBirth` is
    * required of a `cascade:PatientProfile` and means nothing on a lab result.
@@ -178,7 +208,7 @@ export type Term = TermSpec & {
 };
 
 /** The prefix a blank node's nested fields are written under by default. */
-const DEFAULT_NESTED_PREFIX = 'cascade';
+export const DEFAULT_NESTED_PREFIX = 'cascade';
 
 /** `prefix:localName`, the only shape a term may spell a predicate in. */
 const PREFIXED_NAME = /^([A-Za-z][\w-]*):([\w-]+)$/;
@@ -349,12 +379,22 @@ function nestedOutputs(predicate: string, value: unknown): Output[] {
 /**
  * The children of a blank node.
  *
- * With `rule.children` declared, an undeclared key is NOT written — which is
- * the guard that stops the next `cascade:contactEmail`: a spelling no ontology
- * declares, read in through the reverse map and emitted straight back out by
- * the writer under no domain, no range and no shape.
+ * EVERY present key is written. A declared child gets its rule's form; an
+ * undeclared one is written by runtime type, exactly as a term with no
+ * `children` map writes all of them.
  *
- * Without it, every present key is written by runtime type, as before.
+ * `rule.children` used to be a filter as well as a declaration — an undeclared
+ * key was dropped here, to stop the next `cascade:contactEmail` being emitted
+ * under no domain, no range and no shape. It stopped the triple and not the
+ * defect: the caller's value vanished with no error, and the record reached
+ * `validate()` with nothing left to violate. Two of the five children this term
+ * was missing hid behind exactly that silence until someone counted them
+ * against the shape.
+ *
+ * The refusal now happens where it can be seen. `undeclaredChildKeys` reports
+ * the same keys to `validate()`, which is the only judge that ships, and the
+ * writer stays faithful — which is the whole position of this SDK: a shape can
+ * judge only what reached the graph.
  */
 function childrenOf(value: unknown, rule: FieldRule): Output[] {
   if (!isNestedObject(value)) return [];
@@ -365,12 +405,85 @@ function childrenOf(value: unknown, rule: FieldRule): Output[] {
     .filter(([nestedKey, nested]) => !NESTED_SKIP.has(nestedKey) && present(nested))
     .flatMap(([nestedKey, nested]) => {
       const childRule = ownEntry(declared, nestedKey);
-      if (declared && !childRule) return [];
-      const predicate = `${prefix}:${nestedKey}`;
+      const predicate = childPredicateFor(nestedKey, prefix);
       return childRule
         ? members(nested).flatMap((m) => outputsForMember(m, nestedKey, predicate, childRule))
         : nestedOutputs(predicate, nested);
     });
+}
+
+/**
+ * A nested key discriminated as an absolute IRI rather than a JSON name.
+ *
+ * `://` is the whole test, and it is reliable in both directions: no field name
+ * in any Cascade model contains it, and every predicate IRI the parser can hand
+ * back does. A scheme-prefix test would be worse, not better — it matches
+ * `cascade:contactName`, which is exactly the case that must NOT be treated
+ * this way.
+ */
+const isAbsoluteIri = (key: string): boolean => key.includes('://');
+
+/**
+ * The predicate a nested key is written under.
+ *
+ * Normally the abbreviation, `prefix:key`. An ABSOLUTE IRI key is written as
+ * itself, in angle brackets, and that is not an edge case dressed up — it is
+ * the only faithful spelling available for two kinds of child the reader can
+ * legitimately return:
+ *
+ *   A predicate from ANOTHER NAMESPACE. `<https://other.example.org/ns#wardCount>`
+ *   abbreviated under this node's prefix becomes `cascade:wardCount`, a
+ *   different predicate. Turtle can say the original perfectly well; only the
+ *   abbreviation cannot.
+ *
+ *   A local name PN_LOCAL does not admit. `cascade:odd(name)` does not parse,
+ *   while `<https://ns.cascadeprotocol.org/core/v1#odd(name)>` is valid Turtle
+ *   saying the same thing. The limit was this writer's spelling, never the
+ *   format's.
+ *
+ * Which is the general shape of the rule: an abbreviation is a convenience, and
+ * where it cannot express what the document said, the long form is used rather
+ * than the value dropped. JSON-LD reads an absolute-IRI key the same way, so
+ * the JSON stays as faithful as the Turtle.
+ */
+function childPredicateFor(nestedKey: string, prefix: string): string {
+  return isAbsoluteIri(nestedKey) ? `<${nestedKey}>` : `${prefix}:${nestedKey}`;
+}
+
+/**
+ * The keys of a nested object that the rule declares no child for.
+ *
+ * The writer's counterpart, and deliberately the same walk: `NESTED_SKIP`,
+ * `present` and `ownEntry` are applied here exactly as `childrenOf` applies
+ * them, so the two cannot disagree about which keys are in play. A key this
+ * returns is one that WAS written, under a predicate no `sh:path` declares.
+ *
+ * EMPTY for a rule with no `children` map. An undeclared-children term has not
+ * said what its children are, so nothing about the object contradicts it —
+ * `wellnessSummary` is not judged for carrying what `clinicalSummary` is judged
+ * for, because only one of the two has made a declaration to violate.
+ *
+ * Every member of an array, not just the first: a profile may name several
+ * emergency contacts and the second one's spelling is as wrong as the first's.
+ */
+export function undeclaredChildKeys(rule: FieldRule, value: unknown): string[] {
+  if (!rule.children) return [];
+
+  const seen = new Set<string>();
+  for (const member of members(value)) {
+    if (!isNestedObject(member)) continue;
+    for (const [nestedKey, nested] of Object.entries(member)) {
+      if (NESTED_SKIP.has(nestedKey) || !present(nested)) continue;
+      if (ownEntry(rule.children, nestedKey)) continue;
+      seen.add(nestedKey);
+    }
+  }
+  return [...seen];
+}
+
+/** The rule a term applies to a record of this type, resolving `ruleByType`. */
+export function ruleFor(spec: TermSpec, recordType: string | undefined): FieldRule {
+  return ownEntry(spec.ruleByType, recordType) ?? spec.rule;
 }
 
 /**
@@ -523,7 +636,7 @@ function outputsForMember(
  * its own module down at load time rather than writing bad Turtle at runtime.
  */
 export function defineTerm(spec: TermSpec): Term {
-  const { key, predicateByType, rule, ruleByType } = spec;
+  const { key, predicateByType } = spec;
 
   // Not a duplicate of the caller's `requirePredicate(key)` in the common case:
   // `predicate` is a plain string, so a term can be declared with one written
@@ -543,7 +656,7 @@ export function defineTerm(spec: TermSpec): Term {
 
       const recordType = typeof record.type === 'string' ? record.type : undefined;
       const activePredicate = predicateFor(spec, recordType);
-      const activeRule = ownEntry(ruleByType, recordType) ?? rule;
+      const activeRule = ruleFor(spec, recordType);
 
       if (activeRule.form === 'iriList') {
         // The prefix applies here exactly as it does to `prefixedEnum`:

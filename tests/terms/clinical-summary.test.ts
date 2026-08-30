@@ -122,10 +122,20 @@ describe('clinicalSummary', () => {
     ]);
   });
 
-  it('drops a child the term does not declare', () => {
-    // `cascade:RecordSummaryShape` gives this node a fixed set of counts. A key
-    // outside it is a spelling nothing in spec declares, and `childrenOf` would
-    // have written it back out of the writer under no domain and no shape.
+  it('writes a child the term does not declare, leaving that to the validator', () => {
+    // `cascade:RecordSummaryShape` gives this node a fixed set of counts, and
+    // `wardCount` is a spelling nothing in spec declares. It is WRITTEN anyway,
+    // by runtime type, and `validate()` reports it: a writer that dropped it
+    // would hand the validator a summary with nothing left to violate and earn
+    // a clean verdict on data the caller did not get.
+    //
+    // The bare `3` is the point of the declared/undeclared split, not an
+    // oversight. A declared count carries `xsd:integer` because its rule says
+    // so; an undeclared key has no rule, so `nestedOutputs` dispatches on the
+    // runtime type and writes the bare token — which is what makes the two
+    // distinguishable in the graph as well as in the verdict.
+    //
+    // @see tests/rules/undeclared-child.test.ts  the refusal this leaves to
     expect(
       termFor('clinicalSummary')?.outputsFor({
         ...MANIFEST,
@@ -136,7 +146,10 @@ describe('clinicalSummary', () => {
         kind: 'blankNode',
         predicate: 'cascade:clinicalSummary',
         rdfType: 'cascade:RecordSummary',
-        children: [{ kind: 'literal', predicate: 'cascade:domain', value: 'clinical' }],
+        children: [
+          { kind: 'literal', predicate: 'cascade:domain', value: 'clinical' },
+          { kind: 'number', predicate: 'cascade:wardCount', value: 3 },
+        ],
       },
     ]);
   });

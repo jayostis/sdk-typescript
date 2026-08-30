@@ -35,6 +35,19 @@ export const interpretation = defineTerm({
   key: 'interpretation',
   predicate: requirePredicate('interpretation'),
   predicateByType: { VitalSign: 'clinical:interpretation' },
+  // `clinical:VitalSignShape` binds this list at `sh:severity sh:Warning`
+  // (clinical.shapes.ttl:1581) where the two LAB shapes leave it at SHACL's
+  // sh:Violation default. Deliberate, and the shape says why: emitted vital
+  // data uses "elevated", which is in neither ratified set, so a Violation
+  // would reject records that already exist. core v3.5's ratchet is that such
+  // a value is reported and raised to Violation in a later clinical version
+  // only after a release in which the warning is observably absent.
+  //
+  // Without this the SDK rejects a vital sign spec accepts-with-a-warning —
+  // `valid` is computed from `errors` alone, so the severity IS the verdict.
+  // The migration the shape asks for is `interpretation: 'H'` plus
+  // `interpretationSourceCode: 'elevated'`, not a different word.
+  severityByType: { VitalSign: 'warning' },
   values: [
     'EX', 'HM', 'OBX', 'CAR', 'Carrier', 'B', 'D', 'U', 'W', '<', '>', 'AC', 'IE', 'QCF', 'TOX',
     'A', 'N', 'I', 'MS', 'NCL', 'NS', 'R', 'S', 'VS', 'AA', 'H', 'L', 'HH', 'LL', 'HX', 'LX',

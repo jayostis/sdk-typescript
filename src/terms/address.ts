@@ -47,9 +47,31 @@ export const address = defineTerm({
       addressCountry: { form: 'literal' },
       addressUse: { form: 'literal' },
       // `cascade:AddressShape` declares this one beside the six, with an
-      // `sh:in ( "postal" "physical" "both" )`. Undeclared here it was DROPPED
-      // rather than written, since a declared `children` writes nothing else.
+      // `sh:in ( "postal" "physical" "both" )`.
       addressType: { form: 'literal' },
+
+      // THE SIMPLIFIED ALIASES, and they are spec's own word for them:
+      // `cascade:AddressShape`'s rdfs:comment reads "Accepts both simplified
+      // aliases (city, state) and FHIR-aligned properties (addressCity,
+      // addressState)", and the shape declares an `sh:path` for all five.
+      //
+      // Declared here because the term is what `validate()` reads to decide
+      // whether a child is undeclared, and a conformant address carrying `city`
+      // would otherwise be REJECTED — the shape permitting exactly what the SDK
+      // refused, which is the failure this SDK is least entitled to. They are
+      // also already in `spec/contexts/v1/cascade.jsonld` (lines 126–130), so
+      // declaring them brings the generated context into agreement with the
+      // published one rather than away from it.
+      //
+      // The `Address` model does not declare them and nothing here proposes it
+      // should. Whether this SDK should WRITE the alias spelling is a separate
+      // question from whether it may judge one; the shape has answered the
+      // second, and only the second is being answered here.
+      streetAddress: { form: 'literal' },
+      city: { form: 'literal' },
+      state: { form: 'literal' },
+      postalCode: { form: 'literal' },
+      country: { form: 'literal' },
     },
   },
 });

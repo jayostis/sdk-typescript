@@ -66,6 +66,22 @@ export const clinicalSummary = defineTerm({
       bloodPressureDays: count,
       activityDays: count,
       sleepDays: count,
+
+      // `cascade:RecordSummaryShape` declares this beside the counts
+      // (core.shapes.ttl:1085, `sh:maxCount 1`), and `RecordSummary` reaches it
+      // through `CascadeEntity`, so a caller building a summary off the model
+      // has it to hand. Undeclared it was dropped: a legal value, set by the
+      // caller, gone with no error.
+      //
+      // `prefixedEnum` rather than `literal`, which is the form the TOP-LEVEL
+      // writer uses for this same field (`turtle-serializer.ts:578`,
+      // `sub.uri(pred, 'cascade:' + value)`). The shape constrains neither — no
+      // `sh:in`, no `sh:datatype`, no `sh:nodeKind` — so both conform and the
+      // tie is broken on consistency: one document carrying provenance as an
+      // IRI at the top and a quoted string inside a blank node is a reader's
+      // problem that no validator would report. The pre-term nested path wrote
+      // the literal, so this is a change of form, not only of presence.
+      dataProvenance: { form: 'prefixedEnum', prefix: 'cascade' },
     },
   },
 });
