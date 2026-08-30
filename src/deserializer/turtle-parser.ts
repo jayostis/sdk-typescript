@@ -26,7 +26,9 @@ import {
   buildReversePredicateMap,
 } from '../vocabularies/namespaces.js';
 import { blankNodeTermKeys, termFor, termSpellings } from '../terms/index.js';
-import { DEFAULT_NESTED_PREFIX } from '../terms/term.js';
+import { DEFAULT_NESTED_PREFIX, childPredicateFor } from '../terms/term.js';
+import type { FieldRule } from '../terms/term.js';
+import { BLANK_NODE_PREDICATE_PREFIXES } from '../serializer/turtle-serializer.js';
 import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
@@ -1047,62 +1049,115 @@ const NESTED_BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
 
 /** Rebuild an inline blank node's predicates into a plain nested object. */
 /**
- * The child key an unmapped predicate is returned under.
+ * What a nested node's children are written under: the prefix that abbreviates
+ * them, and the rules for the ones its term declares.
  *
- * NOTHING IS DROPPED. The key is the short local name where the writer would
- * put that exact predicate back from it, and the full IRI otherwise — which
- * `childPredicateFor` writes in angle brackets, so the round trip is exact
- * either way. The test is never "can a name be extracted"; it is "does the
- * abbreviation mean the same thing", and there are two ways it does not:
+ * BOTH HALVES ARE NEEDED to answer whether a key round-trips, and each covers a
+ * case the other does not. The prefix answers the ordinary child. The rules
+ * answer a declared child carrying its own `predicate` — `sourceRecordId` on a
+ * `RecordSummary` is `health:sourceRecordId`, deliberately outside the node's
+ * own namespace, and a prefix-only test would refuse it.
  *
- *   THE NAMESPACE DIFFERS from the one this node's children are written under.
- *   `childrenOf` abbreviates a child as `nestedPrefix:key`, so a bare
- *   `wardCount` recovered from `<https://other.example.org/ns#wardCount>` would
- *   be written back as `cascade:wardCount` — a DIFFERENT predicate. A triple
- *   silently reassigned to a vocabulary that never declared it is worse than
- *   one dropped, and this is what stops it.
- *
- *   THE LOCAL NAME IS NOT A PN_LOCAL. `cascade:odd(name)` does not parse, while
- *   `<https://ns.cascadeprotocol.org/core/v1#odd(name)>` is valid Turtle saying
- *   the same thing. The abbreviation is what fails there, not the format.
- *
- * Both fall back to the IRI rather than to silence, because Turtle can express
- * any predicate that could have reached this reader — a document carrying one
- * it could not express would not have parsed on the way in.
+ * AN UNTERMED FIELD STILL GETS A REAL PREFIX, from the same table the writer
+ * uses. It used to get none, which switched the check off rather than merely
+ * bypassing it, so `wellnessSummary` and `hasParticipant` kept the defect that
+ * the termed path had fixed. `hasParticipant`'s children are `clinical:`, so
+ * defaulting to `cascade:` here would be the corruption rather than a guess at
+ * it.
  */
-function recoverableChildKey(predicate: string, expectedNs: string | undefined): string {
-  if (!expectedNs || !predicate.startsWith(expectedNs)) return predicate;
-  const local = predicate.slice(expectedNs.length);
-  return PN_LOCAL_SAFE.test(local) ? local : predicate;
+interface NestedContext {
+  prefix: string;
+  children?: Record<string, FieldRule>;
 }
 
-/**
- * The local part of a prefixed name, as `term.ts`'s `PREFIXED_NAME` spells it.
- *
- * Deliberately the same character class and not a fuller `PN_LOCAL`: the test
- * that matters is what the WRITER will accept, so a name this admits and the
- * writer refuses would be a round trip that throws instead of one that parses.
- */
-const PN_LOCAL_SAFE = /^[\w-]+$/;
-
-/**
- * The namespace a field's nested children are written under, if it has a term.
- *
- * `undefined` for an untermed nested field — `wellnessSummary`, and whatever
- * else has not been migrated — and the fallback is then off entirely rather
- * than guessing `cascade:`. Guessing is how the corruption above happens:
- * `hasParticipant`'s children are `clinical:`, so a default would rewrite them.
- */
-function nestedNamespaceOf(jsonKey: string): string | undefined {
+function nestedContextOf(jsonKey: string): NestedContext {
   const rule = termFor(jsonKey)?.rule;
-  if (!rule || rule.form !== 'blankNode') return undefined;
-  return (NAMESPACES as Record<string, string>)[rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX];
+  if (rule?.form === 'blankNode') {
+    return { prefix: rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX, children: rule.children };
+  }
+  return { prefix: BLANK_NODE_PREDICATE_PREFIXES[jsonKey] ?? DEFAULT_NESTED_PREFIX };
 }
+
+/**
+ * The key a nested child comes back under.
+ *
+ * ONE RULE: a short key is usable only if the WRITER, asked what it would emit
+ * for that key on this node, gives back the predicate that was read. Otherwise
+ * the key is the full IRI, which `childPredicateFor` writes in angle brackets —
+ * so nothing is dropped either way, and the round trip is exact.
+ *
+ * THE CHECK APPLIES TO THE MAP'S ANSWER TOO, which is the whole correction.
+ * `REVERSE_PREDICATE_MAP` resolves a predicate SPELLING to a JSON key across
+ * the whole SDK, and consulting it first meant any predicate it recognised
+ * skipped the test: `health:notes` inside a `cascade:emergencyContact` node
+ * came back as `notes` and went out as `cascade:notes` — a different property,
+ * under a vocabulary that never declared it, with `@prefix health:` dropped
+ * from the header because nothing referenced it any more. The guard was written
+ * for exactly that and ran only on the branch that did not need it.
+ *
+ * The map is CHECKED, never bypassed. Deleting the lookup also fixes the
+ * corruption and costs far more: an untermed node has no declared children at
+ * all, so the map is the only thing resolving `cascade:domain` to `domain`, and
+ * without it every child of `wellnessSummary` comes back keyed by a full IRI.
+ * `tests/rules/nested-namespace.test.ts` holds both ends of that.
+ *
+ * WRITABILITY IS SEPARATE FROM FIDELITY and both are required. `cascade:odd(name)`
+ * expands to the very predicate it was read from and still does not parse —
+ * `PN_LOCAL` admits far less than an IRI does — so a spelling that round-trips
+ * in principle is rejected unless the writer can actually emit it.
+ */
+function childKeyFor(predicate: string, ctx: NestedContext): string {
+  const candidate = REVERSE_PREDICATE_MAP.get(predicate) ?? localNameOf(predicate);
+  if (!candidate) return predicate;
+
+  const declared = Object.prototype.hasOwnProperty.call(ctx.children ?? {}, candidate)
+    ? ctx.children?.[candidate]
+    : undefined;
+  const spelling = childPredicateFor(candidate, ctx.prefix, declared);
+
+  return isWritable(spelling) && expandSpelling(spelling) === predicate ? candidate : predicate;
+}
+
+/** The local name of a predicate IRI: everything after the last `#` or `/`. */
+function localNameOf(predicate: string): string {
+  return predicate.slice(Math.max(predicate.lastIndexOf('#'), predicate.lastIndexOf('/')) + 1);
+}
+
+/**
+ * A spelling the writer produced, expanded back to the IRI it denotes.
+ *
+ * `undefined` for a prefix no `NAMESPACES` entry covers, which fails the
+ * comparison and sends the key to its full IRI — the safe direction.
+ */
+function expandSpelling(spelling: string): string | undefined {
+  if (spelling.startsWith('<') && spelling.endsWith('>')) return spelling.slice(1, -1);
+  const colon = spelling.indexOf(':');
+  if (colon < 0) return undefined;
+  const ns = (NAMESPACES as Record<string, string>)[spelling.slice(0, colon)];
+  return ns === undefined ? undefined : `${ns}${spelling.slice(colon + 1)}`;
+}
+
+/**
+ * Whether a spelling is one the writer can actually emit as Turtle.
+ *
+ * An angle-bracketed IRI always is. A prefixed name is only as good as its
+ * local part, tested against the same character class `term.ts`'s
+ * `PREFIXED_NAME` uses — the question is what the WRITER accepts, so a name
+ * this admits and the writer refuses would be a round trip that throws instead
+ * of one that parses.
+ */
+function isWritable(spelling: string): boolean {
+  if (spelling.startsWith('<')) return true;
+  const colon = spelling.indexOf(':');
+  return colon > 0 && PN_LOCAL_SAFE.test(spelling.slice(colon + 1));
+}
+
+const PN_LOCAL_SAFE = /^[\w-]+$/;
 
 function triplesToNestedObject(
   bnodeId: string,
   triples: ParsedTriple[],
-  expectedNs?: string,
+  ctx: NestedContext,
 ): Record<string, unknown> {
   // Every child triple, collected per key and converted the same way a
   // top-level one is. Identical to `triplesToRecord`'s loop on purpose: a
@@ -1145,8 +1200,7 @@ function triplesToNestedObject(
     // name in that namespace, so falling back there would turn any vocabulary
     // this SDK has not implemented into invented model fields. Here the scope
     // is one blank node whose children the writer just produced.
-    const key =
-      REVERSE_PREDICATE_MAP.get(t.predicate) ?? recoverableChildKey(t.predicate, expectedNs);
+    const key = childKeyFor(t.predicate, ctx);
     if (!key) continue;
 
     const values = collected.get(key);
@@ -1278,7 +1332,7 @@ function triplesToRecord<T extends CascadeEntity>(
     ) {
       const nodes = predTriples
         .filter((t) => t.objectType === 'blankNode')
-        .map((t) => triplesToNestedObject(t.object, triples, nestedNamespaceOf(jsonKey)));
+        .map((t) => triplesToNestedObject(t.object, triples, nestedContextOf(jsonKey)));
       record[jsonKey] = nodes.length === 1 ? nodes[0] : nodes;
       continue;
     }
@@ -1294,7 +1348,7 @@ function triplesToRecord<T extends CascadeEntity>(
     ) {
       record[jsonKey] = predTriples
         .filter((t) => t.objectType === 'blankNode')
-        .map((t) => triplesToNestedObject(t.object, triples, nestedNamespaceOf(jsonKey)));
+        .map((t) => triplesToNestedObject(t.object, triples, nestedContextOf(jsonKey)));
       continue;
     }
 

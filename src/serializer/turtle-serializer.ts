@@ -324,7 +324,7 @@ const BLANK_NODE_TYPES: Record<string, string> = {
  * `name` is `foaf:name`. A blanket lookup would silently rewrite output that
  * has been stable since those sub-structures were introduced.
  */
-const BLANK_NODE_PREDICATE_PREFIXES: Record<string, string> = {
+export const BLANK_NODE_PREDICATE_PREFIXES: Record<string, string> = {
   hasParticipant: 'clinical',
 };
 
