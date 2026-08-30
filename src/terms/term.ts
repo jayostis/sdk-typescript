@@ -83,6 +83,29 @@ export type FieldRule = {
    * the two can be migrated one term at a time.
    */
   children?: Record<string, FieldRule>;
+  /**
+   * `blankNode` only: the rule for a member that is NOT a nested object.
+   *
+   * Absent — the usual case — a scalar under a node rule THROWS, because it has
+   * no faithful output: see the `blankNode` case of {@link outputsForMember}.
+   * That is right for `cascade:address`, whose model declares an `Address`
+   * object and for which core.ttl offers `cascade:addressText` as the separate
+   * flat predicate.
+   *
+   * It is wrong for an object property that ALSO has a legitimate flat form.
+   * `ExportManifest.clinicalSummary` is typed `string` and documented as "IRI
+   * of the RecordSummary", and the serializer's `URI_FIELDS` has written it as
+   * `cascade:clinicalSummary <urn:uuid:...>` since core v3.4. The node rule must
+   * not turn a type-correct call into an error, so the term declares the other
+   * form rather than the rule guessing at it: an IRI reference and an inline
+   * node are both faithful readings of `cascade:clinicalSummary`, and which one
+   * a caller meant is legible from the value they passed.
+   *
+   * Declared per term, never derived, so a field that has only the nested form
+   * keeps the throw. An ARRAY member is still an error whatever this says —
+   * that case is a nesting mistake, not a flat spelling.
+   */
+  scalarRule?: FieldRule;
 };
 
 /** The declaration a term module exports. */
@@ -307,6 +330,11 @@ const NESTED_SKIP = new Set(['type', 'id']);
  * again matching `serializeBlankNode`, whose chain covers `string` / `boolean`
  * / `number` and leaves a child object unwritten rather than stamping
  * `[object Object]` into the graph.
+ *
+ * This is the UNDECLARED path only. A child with a rule goes through
+ * {@link outputsForMember}, which THROWS on an object instead of skipping —
+ * a declaration is something an object can contradict, and a rule names the
+ * field it belongs to.
  */
 function nestedOutputs(predicate: string, value: unknown): Output[] {
   if (Array.isArray(value)) {
@@ -377,6 +405,33 @@ function outputsForMember(
   predicate: string,
   rule: FieldRule,
 ): Output[] {
+  // An OBJECT under any rule but `blankNode` has no faithful output, so it is
+  // an ERROR rather than the two wrong graphs on either side of it.
+  //
+  // This is the guard {@link nestedOutputs} still has and the declared-child
+  // path had lost: that function returns [] for a child object, and its comment
+  // says why — "leaves a child object unwritten rather than stamping
+  // [object Object] into the graph". A child with a DECLARED rule never reaches
+  // it, and `literal`'s `String(member)` wrote `cascade:addressLine
+  // "[object Object]"`: a literal that reads as data, is not, and that no shape
+  // can tell from a real one.
+  //
+  // It THROWS where `nestedOutputs` skips, and the difference is the rule. A
+  // declared child says what form the value takes, so an object contradicts a
+  // declaration and the term can name the field; an undeclared one dispatches on
+  // the runtime type with nothing to contradict. Skipping here would be the
+  // silent half-write instead — the node written, one child gone, nothing
+  // reported. This is the same position the `blankNode` case below takes on the
+  // mirror-image value, for the same reason.
+  if (rule.form !== 'blankNode' && isNestedObject(member)) {
+    throw new Error(
+      `Field '${key}' (predicate ${predicate}) is declared as a ${rule.form}, ` +
+        `but was given an object. A scalar rule has no faithful form for one: ` +
+        `String(value) writes "[object Object]" into the graph. Pass a value of ` +
+        `the declared form, or declare the field as a blank node with children.`,
+    );
+  }
+
   switch (rule.form) {
     case 'iri':
       return [{ kind: 'uri', predicate, value: String(member) }];
@@ -420,6 +475,14 @@ function outputsForMember(
       // object members and discarding the scalar ones. A partial list is the
       // hardest form of this to see: what comes back is well-formed.
       if (!isNestedObject(member)) {
+        // Unless the term declared the flat form. An IRI reference and an
+        // inline node are both faithful readings of an object property, and
+        // `scalarRule` is where a term says its field has both — see the field
+        // on {@link FieldRule}. Never for an ARRAY member: that is a nesting
+        // mistake rather than a flat spelling, and it keeps the throw.
+        if (rule.scalarRule && !Array.isArray(member)) {
+          return outputsForMember(member, key, predicate, rule.scalarRule);
+        }
         throw new Error(
           `Field '${key}' (predicate ${predicate}) is declared as a blank node, ` +
             `but was given ${Array.isArray(member) ? 'an array' : `a ${typeof member}`}. ` +

@@ -60,6 +60,68 @@ describe('clinicalSummary', () => {
     ]);
   });
 
+  it('writes every count `RecordSummary` declares, not the subset it started with', () => {
+    // A blank node's children used to be DERIVED from the object handed in, so
+    // an undeclared key was written anyway. Declaring them made the term
+    // authoritative — and the guard that drops an undeclared key drops a
+    // MISSING one just as quietly. `supplementCount`, `heartRateDays`,
+    // `bloodPressureDays`, `activityDays` and `sleepDays` are declared on
+    // `RecordSummary` (`src/models/export-manifest.ts`), registered in
+    // `PROPERTY_PREDICATES`, and carry an `sh:property` on
+    // `cascade:RecordSummaryShape` — so a manifest read in with `sleepDays` and
+    // re-serialized lost it, with nothing reported.
+    //
+    // Asserted as the PREDICATE LIST rather than as five absences: the claim is
+    // the count, and a term that declared the five while losing one of the
+    // eight would pass a per-field assertion.
+    const summary = {
+      domain: 'clinical',
+      conditionCount: 5,
+      medicationCount: 4,
+      allergyCount: 3,
+      labResultCount: 2,
+      immunizationCount: 1,
+      coverageCount: 1,
+      supplementCount: 2,
+      vitalSignDays: 90,
+      heartRateDays: 7,
+      bloodPressureDays: 14,
+      activityDays: 21,
+      sleepDays: 30,
+    };
+
+    const outputs = termFor('clinicalSummary')?.outputsFor({
+      ...MANIFEST,
+      clinicalSummary: summary,
+    });
+    const node = outputs?.[0] as { children: { predicate: string }[] };
+
+    expect(node.children.map((child) => child.predicate)).toEqual(
+      Object.keys(summary).map((key) => `cascade:${key}`),
+    );
+  });
+
+  it('writes the flat IRI form the model declares as a resource reference', () => {
+    // `ExportManifest.clinicalSummary` is typed `string`, documented as "IRI of
+    // the RecordSummary", and listed in the serializer's `URI_FIELDS` — so
+    // `cascade:clinicalSummary <urn:uuid:...>` is what a type-correct caller has
+    // always got. The blank-node rule must not turn that into a throw: the model
+    // is a shipped contract, and `wellnessSummary` beside it still takes the
+    // flat form, so the two would otherwise behave oppositely on the same input.
+    expect(
+      termFor('clinicalSummary')?.outputsFor({
+        ...MANIFEST,
+        clinicalSummary: 'urn:uuid:8f14e45f-ceea-467a-9a1e-1f2b3c4d5e6f',
+      }),
+    ).toEqual([
+      {
+        kind: 'uri',
+        predicate: 'cascade:clinicalSummary',
+        value: 'urn:uuid:8f14e45f-ceea-467a-9a1e-1f2b3c4d5e6f',
+      },
+    ]);
+  });
+
   it('drops a child the term does not declare', () => {
     // `cascade:RecordSummaryShape` gives this node a fixed set of counts. A key
     // outside it is a spelling nothing in spec declares, and `childrenOf` would

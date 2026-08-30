@@ -360,3 +360,19 @@ pots=1.4
 #     from that declaration.
 #     Nothing new is registered and nothing previously claimed is withdrawn, so
 #     bumping a row would claim support this package did not just gain.
+
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/models/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     Two core v2.2 fields the models did not describe accurately.
+#     cascade:addressType joins the Address interface: cascade:AddressShape has
+#     always declared it with an sh:in ( "postal" "physical" "both" ) and
+#     spec/contexts/v1/cascade.jsonld has always defined the term, but neither
+#     the model nor src/terms/address.ts carried it, so a declared `children`
+#     DROPPED the key rather than writing it.
+#     PatientProfile.emergencyContact widens to MultiValue<EmergencyContact>.
+#     cascade:PatientProfileShape declares NO sh:maxCount for that predicate
+#     where cascade:address and cascade:preferredPharmacy beside it are both
+#     capped at one, and the writer has always written one blank node per member
+#     of an array — the type was narrower than the data this SDK produces.
+#     Nothing new is registered and nothing previously claimed is withdrawn, so
+#     bumping a row would claim support this package did not just gain.

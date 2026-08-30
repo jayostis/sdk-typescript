@@ -1165,13 +1165,33 @@ function triplesToRecord<T extends CascadeEntity>(
     // per-domain cascade:RecordSummary inline). Reconstructed rather than
     // reported as the bare blank-node identifier, which would silently drop
     // every count the manifest exists to carry.
+    //
+    // EVERY node, not the first. This read used to take `predTriples[0]`, and
+    // `cascade:emergencyContact` is the field where that showed: the shape
+    // declares no `sh:maxCount` for it — a profile may name more than one
+    // person to call — and the writer honours that, so a document this SDK
+    // wrote from two contacts came back as one. What is lost that way cannot be
+    // caught downstream either: `validate()` judges what reached the record, so
+    // a truncated read returns a clean verdict on incomplete data.
+    //
+    // The arity is the graph's, so ONE node stays a bare object rather than
+    // becoming a one-element array. RDF has no "list of one" for a repeated
+    // predicate, and always wrapping would invent structure the document does
+    // not carry — the same reading {@link MultiValue} takes for a 0..* literal,
+    // and what `triplesToNestedObject` already does with a repeated child.
+    // A capped field is not special-cased here: the reader is faithful and
+    // `validate()` is the judge, so two `cascade:address` nodes come back as
+    // two and are REPORTED rather than quietly halved.
     const firstTriple = predTriples[0];
     if (
       NESTED_BLANK_NODE_FIELDS.has(jsonKey) &&
       firstTriple &&
       firstTriple.objectType === 'blankNode'
     ) {
-      record[jsonKey] = triplesToNestedObject(firstTriple.object, triples);
+      const nodes = predTriples
+        .filter((t) => t.objectType === 'blankNode')
+        .map((t) => triplesToNestedObject(t.object, triples));
+      record[jsonKey] = nodes.length === 1 ? nodes[0] : nodes;
       continue;
     }
 

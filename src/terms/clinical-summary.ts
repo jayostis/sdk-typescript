@@ -17,6 +17,13 @@
  * that gap, and it is the whole reason a child carries a rule rather than just a
  * name.
  *
+ * THIRTEEN children, which is `RecordSummary`'s whole declared surface and not
+ * a subset of it. Declaring `children` made the term authoritative, and the
+ * guard that drops an UNDECLARED key drops a MISSING one just as quietly: a
+ * manifest read in with `sleepDays` and re-serialized lost it, with nothing
+ * reported. The count is the claim, and `tests/terms/clinical-summary.test.ts`
+ * asserts the predicate list rather than any one field.
+ *
  * @see spec/ontologies/core/v1/core.ttl  cascade:RecordSummary
  */
 
@@ -33,6 +40,13 @@ export const clinicalSummary = defineTerm({
   rule: {
     form: 'blankNode',
     rdfType: 'cascade:RecordSummary',
+    // The flat form, which this field has always had: `ExportManifest` types
+    // `clinicalSummary` as a `string` documented "IRI of the RecordSummary",
+    // and `URI_FIELDS` wrote it as `cascade:clinicalSummary <urn:uuid:...>`.
+    // Without this the node rule turns a type-correct call into an error, and
+    // `wellnessSummary` beside it — typed identically and not yet termed —
+    // goes on accepting the same input.
+    scalarRule: { form: 'iri' },
     children: {
       domain: { form: 'literal' },
       conditionCount: count,
@@ -40,8 +54,18 @@ export const clinicalSummary = defineTerm({
       allergyCount: count,
       labResultCount: count,
       immunizationCount: count,
-      vitalSignDays: count,
       coverageCount: count,
+      supplementCount: count,
+      // The DAY counts. `cascade:RecordSummaryShape` bounds each above as well
+      // as below — "a days-covered figure larger than a decade of daily
+      // readings is a unit error, not a long history" — so they are as much
+      // declared vocabulary as the counts above, and `RecordSummary` declares
+      // all five on the model.
+      vitalSignDays: count,
+      heartRateDays: count,
+      bloodPressureDays: count,
+      activityDays: count,
+      sleepDays: count,
     },
   },
 });

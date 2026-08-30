@@ -38,6 +38,58 @@
   for it. It now throws, naming the field and the predicate. Thrown per member,
   so a mixed array fails rather than serializing its object members and
   discarding its scalar ones.
+- **A declared blank-node child no longer stringifies an object into the
+  graph.** `nestedOutputs` returns `[]` for a child object rather than stamping
+  `[object Object]` into a literal, and a child with a DECLARED rule never
+  reached it: `{ form: 'literal' }` did `String(member)`, so
+  `address: { addressLine: { street: 'x' } }` wrote
+  `cascade:addressLine "[object Object]"` — a literal that reads as data, is
+  not, and that no shape can tell from a real one. An object under a scalar rule
+  now throws, naming the field and the predicate: it is the mirror of the
+  scalar-under-a-node case above and gets the same answer, per member, so a
+  mixed array fails rather than half-writing.
+- **The reader rebuilds every inline blank node, not the first.**
+  `triplesToRecord` took `predTriples[0]`, so a document carrying two
+  `cascade:emergencyContact` nodes came back with one. That field is the one
+  `cascade:PatientProfileShape` declares UNCAPPED — a patient may name more than
+  one person to call — and the writer already wrote both, so a pod this SDK
+  produced could not be read back whole. What is lost that way cannot be caught
+  downstream either: `validate()` judges what reached the record, so a truncated
+  read returns `valid: true` on incomplete data. The arity stays the graph's —
+  one node is still a bare object, N are an N-element array — and a capped field
+  is not special-cased: two `cascade:address` nodes now come back as two and are
+  REPORTED rather than quietly halved.
+- **`clinicalSummary` writes all thirteen counts `RecordSummary` declares, not
+  eight.** Declaring `children` made the term authoritative over the node, and
+  the guard that drops an UNDECLARED key dropped a MISSING one just as quietly:
+  `supplementCount`, `heartRateDays`, `bloodPressureDays`, `activityDays` and
+  `sleepDays` are on the `RecordSummary` model, in `PROPERTY_PREDICATES`, in
+  `INTEGER_FIELDS` and on `cascade:RecordSummaryShape`, and were dropped with no
+  error. A manifest read in with `sleepDays` and re-serialized lost it.
+- **The flat IRI form of `clinicalSummary` works again.**
+  `ExportManifest.clinicalSummary` is typed `string` and documented "IRI of the
+  `RecordSummary`", and `URI_FIELDS` has written
+  `cascade:clinicalSummary <urn:uuid:...>` since core v3.4. The blank-node rule
+  turned that type-correct call into a throw, while `wellnessSummary` beside it —
+  typed identically — went on accepting it. A rule may now declare a
+  `scalarRule` for the flat form of an object property; a field that has only
+  the nested form keeps the throw.
+- **`cascade:addressType` is written.** `cascade:AddressShape` declares it
+  beside the six, with `sh:in ( "postal" "physical" "both" )`, and
+  `spec/contexts/v1/cascade.jsonld` has always defined it. Undeclared as a child
+  it was DROPPED rather than written, since a declared `children` writes nothing
+  else. Added to the term, to the `Address` model, and — by derivation from the
+  term — to the generated JSON-LD context and the deserializer's reverse map.
+
+### Changed
+
+- `PatientProfile.emergencyContact` widens from `EmergencyContact` to
+  `MultiValue<EmergencyContact>`. **The type now describes what the SDK
+  produces.** `cascade:PatientProfileShape` declares no `sh:maxCount` for this
+  field where `address` and `preferredPharmacy` beside it are both capped at
+  one, the writer has always written one node per member of an array, and the
+  reader now returns every one. A profile carrying a single contact still reads
+  back as a bare object, so nothing that handles one contact changes shape.
 
 ### Removed
 

@@ -11,10 +11,16 @@
  * `cascade:AddressShape` targets the class, so an untyped node is valid Turtle
  * that no shape reaches and no query for an address finds.
  *
- * NO `nestedPrefix`. `childrenOf` defaults to `cascade`, and this node's six
- * children — `cascade:addressLine` through `cascade:addressUse` — are exactly
- * what `profile-002` expects, because the fixture's child keys are already
+ * NO `nestedPrefix`. `childrenOf` defaults to `cascade`, and this node's
+ * children — `cascade:addressLine` through `cascade:addressType` — are what
+ * `profile-002` expects, because the fixture's child keys are already
  * disambiguated in the JSON.
+ *
+ * The list is `cascade:AddressShape`'s, not the fixture's. What it deliberately
+ * omits is the shape's five READ-SIDE aliases — `city`, `state`,
+ * `streetAddress`, `postalCode`, `country` — which a reader accepts and this
+ * writer must never emit: writing both spellings of one fact is how a consumer
+ * ends up with two cities to reconcile.
  *
  * The key is the bare word `address`, and it stays that way: it is what the
  * `PatientProfile` model declares and what every fixture writes. No other model
@@ -40,6 +46,10 @@ export const address = defineTerm({
       addressPostalCode: { form: 'literal' },
       addressCountry: { form: 'literal' },
       addressUse: { form: 'literal' },
+      // `cascade:AddressShape` declares this one beside the six, with an
+      // `sh:in ( "postal" "physical" "both" )`. Undeclared here it was DROPPED
+      // rather than written, since a declared `children` writes nothing else.
+      addressType: { form: 'literal' },
     },
   },
 });

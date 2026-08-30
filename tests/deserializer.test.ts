@@ -261,6 +261,79 @@ describe('Turtle Deserializer', () => {
     }
   });
 
+  describe('a repeated inline blank node', () => {
+    // `cascade:emergencyContact` has NO `sh:maxCount` on
+    // `cascade:PatientProfileShape` — a profile may name more than one person
+    // to call, and `src/terms/emergency-contact.ts` says so in as many words.
+    // The writer honours it: two contacts in produce two blank nodes out.
+    //
+    // The reader took `predTriples[0]` and dropped the rest, so the second
+    // contact was gone and `validate()` returned `valid: true` on what came
+    // back — the reader-kept-the-first-triple defect this branch exists to
+    // remove, surviving on the one field declared uncapped.
+    const twoContacts = `
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+
+<urn:uuid:profile-two-contacts> a cascade:PatientProfile ;
+    cascade:schemaVersion "2.0" ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Maria Rivera" ;
+        cascade:contactPhone "555-0142"
+    ] ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Jose Rivera" ;
+        cascade:contactPhone "555-0188"
+    ] .
+`;
+
+    it('rebuilds every node, not the first', () => {
+      const parsed = deserializeOne<PatientProfile>(twoContacts, 'PatientProfile');
+
+      expect(parsed?.emergencyContact).toEqual([
+        { contactName: 'Maria Rivera', contactPhone: '555-0142' },
+        { contactName: 'Jose Rivera', contactPhone: '555-0188' },
+      ]);
+    });
+
+    it('keeps the bare object form for a single node', () => {
+      // The arity the graph carries, and nothing more. RDF has no "list of one"
+      // for a repeated predicate, so always returning an array would invent
+      // structure — and would change what every profile fixture reads back as.
+      const oneContact = `
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+
+<urn:uuid:profile-two-contacts> a cascade:PatientProfile ;
+    cascade:schemaVersion "2.0" ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Maria Rivera" ;
+        cascade:contactPhone "555-0142"
+    ] .
+`;
+      const parsed = deserializeOne<PatientProfile>(oneContact, 'PatientProfile');
+
+      expect(parsed?.emergencyContact).toEqual({
+        contactName: 'Maria Rivera',
+        contactPhone: '555-0142',
+      });
+    });
+
+    it('round-trips both contacts back out through the writer', () => {
+      // The read is only half of it. The writer already splits an array into
+      // one node per member, so a faithful read makes the whole cycle lossless
+      // — and a reader that truncated made the loss invisible on the way out.
+      const parsed = deserializeOne<PatientProfile>(twoContacts, 'PatientProfile');
+      const names = parseTurtle(serialize(parsed as unknown as CascadeRecord))
+        .namedNode('urn:uuid:profile-two-contacts')
+        .out(cascade.emergencyContact)
+        .out(cascade.contactName).values;
+
+      expect(names.sort()).toEqual(['Jose Rivera', 'Maria Rivera']);
+    });
+  });
+
   describe('a nested predicate no ontology declares', () => {
     // `cascade:contactEmail` is not vocabulary. `grep -rn contactEmail spec/`
     // returns one prose aside in `ontologies/checkup/v1/checkup.ttl`;

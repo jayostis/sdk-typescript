@@ -232,9 +232,14 @@ describe('JSON-LD Conversion', () => {
     // asked.
     //
     // The generated context is answerable to `spec/contexts/v1/cascade.jsonld`,
-    // which defines all twelve of these as plain top-level terms. Predicates
+    // which defines all thirteen of these as plain top-level terms. Predicates
     // are written out by hand here rather than read from any table, so a
     // re-namespaced child fails instead of agreeing with the code.
+    //
+    // `addressType` is the thirteenth, and it is here because the WRITER emits
+    // it: the context has to define every child a term declares, or `toJsonLd`
+    // passes the value through into a node with zero statements and reports
+    // nothing wrong. The published context has carried it all along.
     const profile002 = loadFixturesByPrefix('profile-002')[0]!;
 
     function contextTerms(): Record<string, unknown> {
@@ -253,6 +258,7 @@ describe('JSON-LD Conversion', () => {
         'addressPostalCode',
         'addressCountry',
         'addressUse',
+        'addressType',
         'pharmacyName',
         'pharmacyAddress',
         'pharmacyPhone',
@@ -268,6 +274,7 @@ describe('JSON-LD Conversion', () => {
         addressPostalCode: 'cascade:addressPostalCode',
         addressCountry: 'cascade:addressCountry',
         addressUse: 'cascade:addressUse',
+        addressType: 'cascade:addressType',
         pharmacyName: 'cascade:pharmacyName',
         pharmacyAddress: 'cascade:pharmacyAddress',
         pharmacyPhone: 'cascade:pharmacyPhone',
