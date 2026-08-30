@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { toJsonLd, fromJsonLd, CONTEXT_URI } from '../src/jsonld/index.js';
+import { toJsonLd, fromJsonLd, CONTEXT_URI, getContext } from '../src/jsonld/index.js';
 import type { CascadeRecord } from '../src/models/common.js';
 import type { Medication } from '../src/models/medication.js';
 import type { VitalSign } from '../src/models/vital-sign.js';
@@ -219,6 +219,83 @@ describe('JSON-LD Conversion', () => {
       expect(result['isActive']).toBe(true);
       expect(result['dose']).toBe('81 mg');
       expect(result['frequency']).toBe('once daily');
+    });
+  });
+
+  // ─── Patient-profile sub-structures ──────────────────────────
+
+  describe('Patient-profile sub-structures in the context', () => {
+    // A nested key with no term in the context is not a lossy mapping, it is a
+    // dropped triple: the object expands to a node with zero statements, and
+    // `toJsonLd` reports nothing wrong because it passed the value through
+    // faithfully. The context is where that is visible, so it is where this is
+    // asked.
+    //
+    // The generated context is answerable to `spec/contexts/v1/cascade.jsonld`,
+    // which defines all twelve of these as plain top-level terms. Predicates
+    // are written out by hand here rather than read from any table, so a
+    // re-namespaced child fails instead of agreeing with the code.
+    const profile002 = loadFixturesByPrefix('profile-002')[0]!;
+
+    function contextTerms(): Record<string, unknown> {
+      return (getContext() as { '@context': Record<string, unknown> })['@context'];
+    }
+
+    it('defines each child of the contact, the address and the pharmacy', () => {
+      const ctx = contextTerms();
+      const children = [
+        'contactName',
+        'contactRelationship',
+        'contactPhone',
+        'addressLine',
+        'addressCity',
+        'addressState',
+        'addressPostalCode',
+        'addressCountry',
+        'addressUse',
+        'pharmacyName',
+        'pharmacyAddress',
+        'pharmacyPhone',
+      ];
+
+      expect(Object.fromEntries(children.map((key) => [key, ctx[key]]))).toEqual({
+        contactName: 'cascade:contactName',
+        contactRelationship: 'cascade:contactRelationship',
+        contactPhone: 'cascade:contactPhone',
+        addressLine: 'cascade:addressLine',
+        addressCity: 'cascade:addressCity',
+        addressState: 'cascade:addressState',
+        addressPostalCode: 'cascade:addressPostalCode',
+        addressCountry: 'cascade:addressCountry',
+        addressUse: 'cascade:addressUse',
+        pharmacyName: 'cascade:pharmacyName',
+        pharmacyAddress: 'cascade:pharmacyAddress',
+        pharmacyPhone: 'cascade:pharmacyPhone',
+      });
+    });
+
+    it('leaves no key of what toJsonLd actually writes without one', () => {
+      // The list above is a list, and a list can be right about twelve names
+      // and still miss the thirteenth thing the writer emits. This asks the
+      // writer instead: every key of the document, at both levels, resolves.
+      const ctx = contextTerms();
+      const doc = toJsonLd(profile002.input as unknown as CascadeRecord) as Record<
+        string,
+        unknown
+      >;
+
+      const unresolved: string[] = [];
+      for (const [key, value] of Object.entries(doc)) {
+        if (key.startsWith('@')) continue;
+        if (ctx[key] === undefined) unresolved.push(key);
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          for (const nestedKey of Object.keys(value as Record<string, unknown>)) {
+            if (ctx[nestedKey] === undefined) unresolved.push(`${key}.${nestedKey}`);
+          }
+        }
+      }
+
+      expect(unresolved).toEqual([]);
     });
   });
 

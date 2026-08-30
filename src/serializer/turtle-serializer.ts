@@ -298,9 +298,11 @@ const INTEGER_FIELDS = new Set([
  * `rdf:type` the blank node carries.
  */
 const BLANK_NODE_TYPES: Record<string, string> = {
-  emergencyContact: 'cascade:EmergencyContact',
-  address: 'cascade:Address',
-  preferredPharmacy: 'cascade:PharmacyInfo',
+  // The three patient-profile sub-structures are NOT here. `emergencyContact`,
+  // `address` and `preferredPharmacy` are term modules, and `emitField` returns
+  // before this table for a termed key, so a row would be a second copy of a
+  // fact `src/terms/` owns — and the copy that a reader looking for the
+  // `rdf:type` of a contact would find first (#27).
   // Core v3.4: an export manifest carries its per-domain summaries inline.
   clinicalSummary: 'cascade:RecordSummary',
   wellnessSummary: 'cascade:RecordSummary',
@@ -336,6 +338,35 @@ const BLANK_NODE_PREDICATE_PREFIXES: Record<string, string> = {
  * only answerable if all of them are kept with their roles attached.
  */
 const BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
+
+/**
+ * Every table above that is keyed by JSON FIELD NAME, under its own name.
+ *
+ * The tables are module-private and stay that way; this aggregate exists so one
+ * invariant can be asserted across all of them at once — a name in any of them
+ * is a key of `PROPERTY_PREDICATES`. It is not part of the package's public
+ * surface: `src/serializer/index.ts` and `src/index.ts` both re-export by name,
+ * so nothing outside this repo can reach it.
+ *
+ * A table added above and left out here is unchecked, which is the one way this
+ * can be wrong without anything saying so.
+ *
+ * `TYPE_PREDICATE_OVERRIDES` and `DATETIME_DATE_TYPES` are absent on purpose:
+ * their keys are record types, not field names.
+ */
+export const SERIALIZER_FIELD_TABLES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  URI_FIELDS: [...URI_FIELDS],
+  MULTI_VALUE_FIELDS: [...MULTI_VALUE_FIELDS],
+  ARRAY_FIELDS: [...ARRAY_FIELDS],
+  IRI_ARRAY_FIELDS: [...IRI_ARRAY_FIELDS],
+  IRI_LIST_FIELDS: [...IRI_LIST_FIELDS],
+  PREFIXED_ENUM_FIELDS: Object.keys(PREFIXED_ENUM_FIELDS),
+  EXPLICIT_DATETIME_FIELDS: [...EXPLICIT_DATETIME_FIELDS],
+  INTEGER_FIELDS: [...INTEGER_FIELDS],
+  BLANK_NODE_TYPES: Object.keys(BLANK_NODE_TYPES),
+  BLANK_NODE_PREDICATE_PREFIXES: Object.keys(BLANK_NODE_PREDICATE_PREFIXES),
+  BLANK_NODE_ARRAY_FIELDS: [...BLANK_NODE_ARRAY_FIELDS],
+});
 
 /**
  * Fields that are boolean and should be serialized unquoted.

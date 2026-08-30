@@ -391,34 +391,53 @@ describe('outputsFor', () => {
       });
     });
 
-    it('writes nothing for a scalar member instead of an empty anonymous node', () => {
-      // childrenOf has nothing to read off a string, so the node would be
-      // `clinical:hasParticipant [ ]` — asserting nothing, with the IRI gone.
-      // emitField's BLANK_NODE_ARRAY_FIELDS branch skips a non-object member
-      // outright, and writes no triple at all.
-      const participant = defineTerm({
-        key: 'hasParticipant',
-        predicate: requirePredicate('hasParticipant'),
-        rule: { form: 'blankNode', nestedPrefix: 'clinical' },
+    describe('a scalar where the rule declares a node', () => {
+      // Writing the node anyway is not an option: childrenOf has nothing to
+      // read off a string, so it would be `cascade:address [ ]` — a node
+      // asserting nothing, with the string it was built from gone. But
+      // returning no output is the OTHER silent answer, and it is the one that
+      // reaches a caller as a document with the field simply missing.
+      //
+      // The flat form is a real thing a caller writes, not a straw man:
+      // core.ttl declares cascade:addressText and cascade:pharmacyAddress as
+      // single strings, and a JS caller gets no compile-time protection from
+      // passing one where the nested node is declared. The array-valued field
+      // with no rule already throws in emitField on the same reasoning — a
+      // caller is owed an error naming the field, not a graph that quietly
+      // disagrees with what they passed.
+      const addressTerm = defineTerm({
+        key: 'address',
+        predicate: requirePredicate('address'),
+        rule: { form: 'blankNode', rdfType: 'cascade:Address' },
       });
 
-      expect(
-        participant.outputsFor({ type: 'Encounter', hasParticipant: ['urn:uuid:p1'] }),
-      ).toEqual([]);
-      expect(
-        participant.outputsFor({
-          type: 'Encounter',
-          hasParticipant: ['urn:uuid:p1', { participantName: 'Dr Reyes' }],
-        }),
-      ).toEqual([
-        {
-          kind: 'blankNode',
-          predicate: 'clinical:hasParticipant',
-          children: [
-            { kind: 'literal', predicate: 'clinical:participantName', value: 'Dr Reyes' },
-          ],
-        },
-      ]);
+      it('throws, naming the field and the predicate rather than writing nowhere', () => {
+        expect(() =>
+          addressTerm.outputsFor({
+            type: 'PatientProfile',
+            address: '742 Evergreen Terrace',
+          }),
+        ).toThrow(/'address'.*cascade:address/s);
+      });
+
+      it('throws on a scalar MEMBER too, rather than serializing the rest of the array', () => {
+        // The partial case is the worse one. A mixed array that dropped its
+        // scalar member and kept its object member returns a perfectly
+        // well-formed output list, and nothing downstream can tell it apart
+        // from an array that only ever had the one member.
+        const participant = defineTerm({
+          key: 'hasParticipant',
+          predicate: requirePredicate('hasParticipant'),
+          rule: { form: 'blankNode', nestedPrefix: 'clinical' },
+        });
+
+        expect(() =>
+          participant.outputsFor({
+            type: 'Encounter',
+            hasParticipant: ['urn:uuid:p1', { participantName: 'Dr Reyes' }],
+          }),
+        ).toThrow(/'hasParticipant'/);
+      });
     });
   });
 

@@ -1,5 +1,70 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **A patient profile's emergency contact, address and preferred pharmacy are
+  written.** They never were. The three keys had a blank-node rule
+  (`BLANK_NODE_TYPES` named them) and no entry in `PROPERTY_PREDICATES`, so
+  `getPredicateForField` returned `undefined` and `emitField` exited at
+  `if (!pred) return;` before any rule was consulted. Eighteen predicates and
+  three nested nodes were absent from every profile this SDK has ever
+  serialized — no error, no warning, no partial output. Everything else in
+  `profile-002` serialized correctly, which is what kept it quiet. (#27)
+- **They are read back as nested objects.** `emergencyContact`, `address` and
+  `preferredPharmacy` join `NESTED_BLANK_NODE_FIELDS`, and their twelve child
+  predicates join the deserializer's reverse mappings. Both halves in one
+  change: three fields without the child spellings would have rebuilt each
+  structure as `{}`, every child dropped in silence.
+- **The JSON-LD path no longer empties the three structures.** `getContext()`
+  is built from `PROPERTY_PREDICATES`, which deliberately holds no entry for a
+  blank node's children, so the generated context defined `emergencyContact` /
+  `address` / `preferredPharmacy` and none of their twelve children. Before
+  this change `toJsonLd` hit `if (!pred) continue` and omitted the three
+  fields; with them registered it emitted
+  `"emergencyContact": { "contactName": "Maria Rivera", ... }` — a document
+  that expands to `cascade:emergencyContact` pointing at a node with zero
+  triples. The TTL path carried the data and the JSON-LD path lost it in
+  silence. The twelve children are now defined in the context as top-level
+  terms, matching `spec/contexts/v1/cascade.jsonld` exactly. (#27)
+- **A scalar where a blank node is declared is an error rather than a silent
+  drop.** `outputsForMember`'s `blankNode` case returned `[]` for anything
+  that was not a nested object, so
+  `serialize({ type: 'PatientProfile', address: '742 Evergreen Terrace' })`
+  returned a document with no address triple — no error, no partial output. The
+  flat form is a shape spec describes (`cascade:addressText`,
+  `cascade:pharmacyAddress`) and TypeScript does not stop a JS caller reaching
+  for it. It now throws, naming the field and the predicate. Thrown per member,
+  so a mixed array fails rather than serializing its object members and
+  discarding its scalar ones.
+
+### Removed
+
+- `contactPhone: 'vcard:hasTelephone'` and `contactEmail: 'vcard:hasEmail'` from
+  `PROPERTY_PREDICATES`. **Not a behaviour change: neither row has ever been
+  reachable.** Both are nested-only keys, and a blank node's children are built
+  from the node's prefix and the JSON key rather than looked up in that table —
+  no fixture, no serializer path and no record type has ever written either. A
+  contact's phone is `cascade:contactPhone`, which is what `profile-002` expects
+  and what `src/models/patient-profile.ts` documents. `cascade:contactEmail` is
+  not resolved on read either: no ontology in `spec/` declares it — core.ttl
+  gives `cascade:EmergencyContact` three properties and an email is not among
+  them — and because `childrenOf` writes every key of a rebuilt object back
+  out, reading one would make this SDK a WRITER of a predicate with no domain,
+  no range and no shape. The `vcard` namespace declaration stays.
+- The three now-dead `BLANK_NODE_TYPES` entries. `emitField` returns before that
+  table for a field a term module owns, so the `rdf:type` of each node is stated
+  once, in `src/terms/`.
+
+### Internal
+
+- `emergencyContact`, `address` and `preferredPharmacy` are declared as term
+  modules — the first use of `{ form: 'blankNode' }`, and the first terms whose
+  outputs nest. None declares a `nestedPrefix`: `childrenOf` defaults to
+  `cascade` and this fixture family's child keys are already disambiguated in
+  the JSON.
+
 ## [3.1.0] - 2026-08-28
 
 Vocabulary sync: core 3.6 to 3.7, health 2.7 to 2.8, clinical 1.15 to 1.16,

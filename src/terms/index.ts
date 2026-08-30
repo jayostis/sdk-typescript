@@ -15,8 +15,11 @@
 export * from './term.js';
 
 import type { Term } from './term.js';
+import { address } from './address.js';
 import { dataAbsentReason } from './data-absent-reason.js';
+import { emergencyContact } from './emergency-contact.js';
 import { interpretationSourceCode } from './interpretation-source-code.js';
+import { preferredPharmacy } from './preferred-pharmacy.js';
 
 /**
  * Every term module, one line each. Add the import above and the name here in
@@ -32,7 +35,13 @@ import { interpretationSourceCode } from './interpretation-source-code.js';
  * so a term left out of it is dead code whose field goes on taking the
  * serializer's type-driven default.
  */
-const TERMS: readonly Term[] = Object.freeze([dataAbsentReason, interpretationSourceCode]);
+const TERMS: readonly Term[] = Object.freeze([
+  address,
+  dataAbsentReason,
+  emergencyContact,
+  interpretationSourceCode,
+  preferredPharmacy,
+]);
 
 /**
  * Built with an explicit loop rather than `new Map(TERMS.map(...))`, which
