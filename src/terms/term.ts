@@ -12,6 +12,18 @@
 
 import { NAMESPACES, PROPERTY_PREDICATES } from '../vocabularies/namespaces.js';
 
+/**
+ * The three grades a finding can carry, matching SHACL's own: `sh:Violation`,
+ * `sh:Warning`, `sh:Info`.
+ *
+ * Two was not enough. `cascade:AddressShape` grades a second address `sh:Info`
+ * — "A postal address is helpful for care coordination and correspondence" —
+ * and with nowhere to put that, `validate()` reported it as an error and
+ * rejected a record spec merely comments on. `sh:Info` appears 59 times across
+ * the vendored shapes, so this is a level the vocabulary uses, not a corner.
+ */
+export type Severity = 'error' | 'warning' | 'info';
+
 /** How a field's value becomes RDF. */
 export type FieldRule = {
   /**
@@ -193,7 +205,7 @@ export type TermSpec = {
    * severities on one path has to split into two property shapes, and a term
    * that had to mirror that would need two entries, not a per-rule map.
    */
-  severityByType?: Record<string, 'error' | 'warning'>;
+  severityByType?: Record<string, Severity>;
   /**
    * recordType -> `sh:minCount`. Per type, and it has to be: a shape's
    * `sh:minCount` sits inside one node shape, so `cascade:dateOfBirth` is
@@ -613,7 +625,7 @@ export function childPredicatesIn(rule: FieldRule, value: unknown): string[] {
 export function severityFor(
   spec: TermSpec,
   recordType: string | undefined,
-): 'error' | 'warning' {
+): Severity {
   return ownEntry(spec.severityByType, recordType) ?? 'error';
 }
 
@@ -635,15 +647,39 @@ export function ruleFor(spec: TermSpec, recordType: string | undefined): FieldRu
  * in the first place.
  */
 export function childPredicatesOf(spec: TermSpec): Record<string, string> {
-  const { rule } = spec;
-  if (rule.form !== 'blankNode' || !rule.children) return {};
-  const prefix = rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX;
-  return Object.fromEntries(
-    Object.entries(rule.children).map(([childKey, childRule]) => [
-      childKey,
-      childPredicateFor(childKey, prefix, childRule),
-    ]),
-  );
+  const merged: Record<string, string> = {};
+  for (const rule of rulesOf(spec)) {
+    if (rule.form !== 'blankNode' || !rule.children) continue;
+    const prefix = rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX;
+    for (const [childKey, childRule] of Object.entries(rule.children)) {
+      merged[childKey] = childPredicateFor(childKey, prefix, childRule);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Every rule a term can apply: its base rule, and each `ruleByType` override.
+ *
+ * A TERM MAY WRITE A BLANK NODE THROUGH `ruleByType` ALONE, and `defineTerm`
+ * accepts that — it validates children across both. Reading `spec.rule` by
+ * itself made two derivations disagree with the writer, which resolves the
+ * ACTIVE rule per record: `childPredicatesOf` feeds the deserializer's reverse
+ * map and the JSON-LD context, and `blankNodeTermKeys` feeds
+ * `NESTED_BLANK_NODE_FIELDS`. A node written correctly and reachable from
+ * neither comes back as the bare identifier `"_:b0"` with every child lost,
+ * which is the failure #27 documented for the three profile sub-structures.
+ *
+ * Latent when written — no term declares a `ruleByType` — and closed here
+ * rather than left for whoever declares the first one to debug.
+ */
+function rulesOf(spec: TermSpec): FieldRule[] {
+  return [spec.rule, ...Object.values(spec.ruleByType ?? {})];
+}
+
+/** Whether a term writes an inline blank node for ANY record type. */
+export function writesBlankNode(spec: TermSpec): boolean {
+  return rulesOf(spec).some((rule) => rule.form === 'blankNode');
 }
 
 /**

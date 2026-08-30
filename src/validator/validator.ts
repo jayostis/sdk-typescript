@@ -2,19 +2,37 @@ import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
 import { allTerms, termFor } from '../terms/index.js';
 import { childPredicateFor, ruleFor, severityFor, undeclaredChildKeys } from '../terms/term.js';
+import type { Severity } from '../terms/term.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
 export interface ValidationError {
   readonly field: string;
   readonly message: string;
-  readonly severity: 'error' | 'warning';
+  readonly severity: Severity;
 }
 
 export interface ValidationResult {
   readonly valid: boolean;
   readonly errors: readonly ValidationError[];
   readonly warnings: readonly ValidationError[];
+  /**
+   * Findings the vocabulary grades `sh:Info` — worth saying, never a defect.
+   *
+   * ITS OWN ARRAY rather than an `'info'` severity filed under `warnings`,
+   * because the array is how a caller reads a verdict: everything in `errors`
+   * says `'error'` and everything in `warnings` says `'warning'`, so a third
+   * grade folded into the second would be reachable only by filtering an array
+   * named for something else. Nobody reads a type union to discover that.
+   *
+   * A pod importer blocks on `errors`; a migration tool watches `warnings` to
+   * see a ratchet step go quiet; a linting UI shows all three.
+   *
+   * ADDITIVE. Code reading `errors` and `warnings` is unaffected, except that an
+   * Info-graded finding stops arriving in `errors` — which is the defect this
+   * fixes rather than a change of contract.
+   */
+  readonly info: readonly ValidationError[];
 }
 
 // ─── Internal Constants ─────────────────────────────────────────────────────
@@ -601,14 +619,30 @@ export function validate(record: CascadeEntity): ValidationResult {
   // that — `interpretation` on a vital sign is a warning raised by the same
   // walk that raises errors — and `valid` counts errors alone, so misfiling one
   // would reject a record spec accepts with a warning.
+  // EACH GRADE NAMES ITS OWN BUCKET, and none is the default. An earlier form
+  // of this read `severity !== 'warning'` for the errors, which is fail-CLOSED
+  // in the worst direction: adding `'info'` would have filed every suggestion as
+  // a defect and rejected the record, defeating the level it was added for. A
+  // grade this does not know now reaches no bucket at all and is caught by the
+  // total below rather than silently rejecting a record.
   const found = [...baseErrors, ...typeErrors, ...termErrors, ...warningErrors];
-  const allErrors = found.filter((e) => e.severity !== 'warning');
+  const allErrors = found.filter((e) => e.severity === 'error');
   const allWarnings = found.filter((e) => e.severity === 'warning');
+  const allInfo = found.filter((e) => e.severity === 'info');
+
+  if (allErrors.length + allWarnings.length + allInfo.length !== found.length) {
+    throw new Error(
+      `validate() produced ${found.length} findings and filed ` +
+        `${allErrors.length + allWarnings.length + allInfo.length}: a severity with no bucket. ` +
+        'Every member of `Severity` needs a home here, or a finding disappears from the verdict.',
+    );
+  }
 
   return {
     valid: allErrors.length === 0,
     errors: allErrors,
     warnings: allWarnings,
+    info: allInfo,
   };
 }
 
@@ -616,16 +650,19 @@ export function validate(record: CascadeEntity): ValidationResult {
 export function validateAll(records: CascadeEntity[]): ValidationResult {
   const allErrors: ValidationError[] = [];
   const allWarnings: ValidationError[] = [];
+  const allInfo: ValidationError[] = [];
 
   for (const record of records) {
     const result = validate(record);
     allErrors.push(...result.errors);
     allWarnings.push(...result.warnings);
+    allInfo.push(...result.info);
   }
 
   return {
     valid: allErrors.length === 0,
     errors: allErrors,
     warnings: allWarnings,
+    info: allInfo,
   };
 }

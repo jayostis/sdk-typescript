@@ -120,6 +120,39 @@
   rejecting it. `validate()` emitted `error` for all three, and `valid` counts
   errors alone, so a vital sign spec accepts-with-a-warning came back
   `valid: false`. (#37)
+- **A nested child keeps the namespace it was read in.** `health:notes` inside a
+  `cascade:emergencyContact` node came back as `notes` and went out as
+  `cascade:notes` — a different property, under a vocabulary that never declared
+  it, with `@prefix health:` dropped from the header. `recoverableChildKey` was
+  written to prevent exactly that and ran only on the branch that did not need
+  it: `REVERSE_PREDICATE_MAP` was consulted first, so any predicate it
+  recognised skipped the check. A short key is now usable only if the writer,
+  asked what it would emit for that key on this node, returns the predicate that
+  was read. (#37)
+- **`sh:Info` is no longer reported as an error.** `cascade:address` and
+  `cascade:preferredPharmacy` are `sh:maxCount 1` at `sh:severity sh:Info`
+  (`core.shapes.ttl:136`, `:146`) — *"A postal address is helpful for care
+  coordination"* — and `validate()` rejected a profile carrying two. Both terms
+  now declare the grade their shape gives them.
+- **A blank node reachable only through `ruleByType` is readable.**
+  `childPredicatesOf` and `blankNodeTermKeys` read `spec.rule` alone while
+  `defineTerm` validates children across both, so such a node would have been
+  written correctly and come back as the bare identifier `"_:b0"` with every
+  child lost. Latent — no term declares a `ruleByType` — and closed before the
+  first one does.
+
+### Added
+
+- **`ValidationResult.info`** — findings the vocabulary grades `sh:Info`, in
+  their own array rather than folded into `warnings`. The array is how a caller
+  reads a verdict: everything in `errors` says `'error'` and everything in
+  `warnings` says `'warning'`, so a third grade inside the second would be
+  reachable only by filtering an array named for something else. `valid` is
+  unchanged and still means "no errors"; code reading the two existing arrays is
+  unaffected, except that an Info-graded finding stops arriving in `errors`.
+- **`Severity`** — `'error' | 'warning' | 'info'`, matching SHACL's three, and
+  the type of both `ValidationError.severity` and `TermSpec.severityByType`.
+  `sh:Info` appears 59 times across the vendored shapes.
 
 ### Changed
 

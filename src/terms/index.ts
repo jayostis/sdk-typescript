@@ -15,7 +15,7 @@
 export * from './term.js';
 
 import type { Term } from './term.js';
-import { childPredicatesOf } from './term.js';
+import { childPredicatesOf, writesBlankNode } from './term.js';
 import { address } from './address.js';
 import { biologicalSex } from './biological-sex.js';
 import { clinicalSummary } from './clinical-summary.js';
@@ -138,9 +138,18 @@ export function allTerms(): readonly Term[] {
   return TERMS;
 }
 
-/** The JSON keys of every term whose rule writes an inline blank node. */
+/**
+ * The JSON keys of every term that writes an inline blank node for ANY record
+ * type — its base rule, or a `ruleByType` override.
+ *
+ * Reading `t.rule` alone left a term whose node is reachable only through
+ * `ruleByType` out of `NESTED_BLANK_NODE_FIELDS`, so the reader returned the
+ * bare blank-node identifier and dropped every child. See
+ * {@link writesBlankNode}, which `childPredicatesOf` shares so the two cannot
+ * disagree about which terms nest.
+ */
 export function blankNodeTermKeys(): string[] {
-  return TERMS.filter((t) => t.rule.form === 'blankNode').map((t) => t.key);
+  return TERMS.filter(writesBlankNode).map((t) => t.key);
 }
 
 /**

@@ -36,6 +36,12 @@ export const address = defineTerm({
   predicate: requirePredicate('address'),
   // cascade:PatientProfileShape
   maxCount: 1,
+  // The cap is graded sh:Info on that shape (core.shapes.ttl:136), not the
+  // sh:Violation a bare maxCount is read as. Spec's own message says why: "A
+  // postal address is helpful for care coordination and correspondence" — a
+  // suggestion, so a profile carrying two is REPORTED and stays valid. Without
+  // this the SDK rejects a record the vocabulary only comments on.
+  severityByType: { PatientProfile: 'info' },
   rule: {
     form: 'blankNode',
     rdfType: 'cascade:Address',

@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { validate, validateAll } from '../src/validator/validator.js';
 import type { CascadeRecord } from '../src/models/common.js';
+import { CURRENT_SCHEMA_VERSION } from '../src/vocabularies/namespaces.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -766,5 +767,116 @@ describe('a base field carrying more values than it can hold', () => {
     expect(errorFields(result)).toEqual(
       expect.arrayContaining(['schemaVersion', 'dataProvenance']),
     );
+  });
+});
+
+/**
+ * Which bucket a finding lands in, and how a caller reads a verdict.
+ *
+ * THE ARRAY IS THE ANSWER. Everything in `errors` says `'error'` and everything
+ * in `warnings` says `'warning'`, so `severity` has been redundant with the
+ * array it sits in. `sh:Info` breaks that: the vocabulary grades three levels
+ * and this SDK shipped two, so an Info-graded finding had nowhere to go and was
+ * reported as an error — `validate()` REJECTING a record spec grades a
+ * suggestion. `cascade:AddressShape` says as much in its own message: "A postal
+ * address is helpful for care coordination and correspondence."
+ *
+ * A third ARRAY rather than a third severity folded into `warnings`, because
+ * the alternative is `result.warnings.filter(w => w.severity === 'info')` — a
+ * distinction reachable only by filtering an array named for something else,
+ * which nobody discovers without reading the type union.
+ *
+ * `valid` is unchanged and means what it always meant: no errors.
+ */
+describe('the three buckets a finding can land in', () => {
+  const profile = (extra: Record<string, unknown> = {}) => ({
+    id: 'urn:uuid:bucket-0001-aaaa-bbbb-ccccddddeeee',
+    type: 'PatientProfile',
+    givenName: 'Jane',
+    familyName: 'Doe',
+    dateOfBirth: '1985-03-12',
+    biologicalSex: 'female',
+    dataProvenance: 'SelfReported',
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    ...extra,
+  }) as unknown as CascadeRecord;
+
+  const fields = (found: readonly { field: string }[]) => found.map((f) => f.field);
+
+  it('puts a Violation-graded finding in errors, and only there', () => {
+    // `cascade:biologicalSex` is `sh:minCount 1` on `cascade:PatientProfileShape`
+    // at `sh:severity sh:Violation` (core.shapes.ttl:51). Absent is a defect, the
+    // record is invalid, and nothing about it belongs in the other two buckets.
+    //
+    // A MISSING field rather than a duplicated one: `sh:maxCount 1` is also on
+    // that shape and the term does not carry it (#39), so a two-value case would
+    // be red for a defect this file is not about.
+    const result = validate({ ...profile(), biologicalSex: undefined } as never);
+
+    expect(fields(result.errors)).toContain('biologicalSex');
+    expect(fields(result.warnings)).not.toContain('biologicalSex');
+    expect(fields(result.info)).not.toContain('biologicalSex');
+    expect(result.valid).toBe(false);
+  });
+
+  it('puts a Warning-graded finding in warnings, and only there', () => {
+    // A schemaVersion behind the current one. Reported, never rejected.
+    const result = validate(profile({ schemaVersion: '1.2' }));
+
+    expect(fields(result.warnings)).toContain('schemaVersion');
+    expect(fields(result.errors)).not.toContain('schemaVersion');
+    expect(fields(result.info)).not.toContain('schemaVersion');
+    expect(result.valid).toBe(true);
+  });
+
+  it('puts an Info-graded finding in info, and only there', () => {
+    // `cascade:address` is `sh:maxCount 1` at `sh:severity sh:Info`
+    // (core.shapes.ttl:136). Two addresses is worth saying and is not a defect,
+    // so the record stays valid — this is the one that was reported as an error.
+    const result = validate(profile({
+      address: [{ addressCity: 'Portland' }, { addressCity: 'Seattle' }],
+    }));
+
+    expect(fields(result.info)).toContain('address');
+    expect(fields(result.errors)).not.toContain('address');
+    expect(fields(result.warnings)).not.toContain('address');
+    expect(result.valid).toBe(true);
+  });
+
+  it('sorts all three at once, with nothing crossing buckets', () => {
+    // THE ASSERTION THAT MATTERS. Each of the three above alone would pass on a
+    // partition that routed by which function produced the finding rather than
+    // by its severity; only a record carrying all three at once shows that each
+    // array holds what its name says.
+    const result = validate({ ...profile({
+      schemaVersion: '1.2',
+      address: [{ addressCity: 'Portland' }, { addressCity: 'Seattle' }],
+    }), biologicalSex: undefined } as never);
+
+    expect(fields(result.errors)).toContain('biologicalSex');
+    expect(fields(result.warnings)).toContain('schemaVersion');
+    expect(fields(result.info)).toContain('address');
+
+    // Every finding's severity agrees with the array holding it. Asserted over
+    // the whole result rather than per field, so a fourth severity added later
+    // cannot be quietly filed into an existing bucket.
+    expect(result.errors.every((e) => e.severity === 'error')).toBe(true);
+    expect(result.warnings.every((e) => e.severity === 'warning')).toBe(true);
+    expect(result.info.every((e) => e.severity === 'info')).toBe(true);
+
+    expect(result.valid).toBe(false);
+  });
+
+  it('carries all three through validateAll', () => {
+    const result = validateAll([
+      { ...profile(), biologicalSex: undefined } as never,
+      profile({ schemaVersion: '1.2' }),
+      profile({ address: [{ addressCity: 'Portland' }, { addressCity: 'Seattle' }] }),
+    ]);
+
+    expect(fields(result.errors)).toContain('biologicalSex');
+    expect(fields(result.warnings)).toContain('schemaVersion');
+    expect(fields(result.info)).toContain('address');
+    expect(result.valid).toBe(false);
   });
 });
