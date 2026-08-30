@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 
 import { termFor } from '../../src/terms/index.js';
 import { requirePredicate } from '../../src/terms/term.js';
+import { validate } from '../../src/validator/index.js';
 
 const MANIFEST = { id: 'urn:uuid:pod002-aaaa-bbbb-cccc-ddddeeeeffff', type: 'ExportManifest' };
 
@@ -156,5 +157,81 @@ describe('clinicalSummary', () => {
 
   it('writes nothing for a manifest carrying no clinical summary', () => {
     expect(termFor('clinicalSummary')?.outputsFor(MANIFEST)).toEqual([]);
+  });
+});
+
+/**
+ * The half of `RecordSummary`'s surface that comes from `CascadeEntity`.
+ *
+ * `tests/terms/children-complete.test.ts` cannot reach these. It walks
+ * `cascade:RecordSummaryShape`'s `sh:path` set, and the shape declares none of
+ * the six — the term was short of its MODEL, not of its shape, and the two are
+ * different obligations. A caller builds a summary off the TypeScript
+ * interface, so what the interface offers is what the term has to answer for.
+ *
+ * Every one of these was reported by `validate()` as "a nested X, which no
+ * vocabulary declares" — of `cascade:schemaVersion`, which is registered
+ * vocabulary. The false rejection the `children` comment in
+ * `src/terms/clinical-summary.ts` warns a short map produces, arrived.
+ */
+describe('clinicalSummary — the children RecordSummary inherits', () => {
+  /** Every `CascadeEntity` field a nested summary can carry, and its predicate. */
+  const INHERITED: ReadonlyArray<readonly [string, unknown, string]> = [
+    ['schemaVersion', '3.4', 'cascade:schemaVersion'],
+    ['sourceIdentity', 'org:meridian', 'cascade:sourceIdentity'],
+    // NOT `cascade:`. Registered under another namespace, re-prefixed nowhere
+    // per type, and written under the node prefix until the child declared one.
+    ['sourceRecordId', 'MRN-88213', 'health:sourceRecordId'],
+    ['businessIdentifier', 'ACC-4471', 'clinical:businessIdentifier'],
+    // `cascade:notes`, though `notes` is REGISTERED `health:notes`: the
+    // serializer's `TYPE_PREDICATE_OVERRIDES` forks it for RecordSummary. The
+    // case that makes a child predicate a declaration rather than a lookup.
+    ['notes', 'Partial export', 'cascade:notes'],
+    ['hasAttachment', 'urn:uuid:att-0001', 'cascade:hasAttachment'],
+  ];
+
+  it.each(INHERITED)('declares %s, so validate() does not refuse it', (child) => {
+    const result = validate({
+      id: 'urn:uuid:manifest-0001-aaaa-bbbb-ccccddddeeee',
+      type: 'ExportManifest',
+      title: 'Cascade export',
+      created: '2026-08-29T00:00:00Z',
+      schemaVersion: '3.4',
+      clinicalSummary: {
+        type: 'RecordSummary',
+        domain: 'clinical',
+        [child]: INHERITED.find(([k]) => k === child)?.[1],
+      },
+    } as never);
+
+    expect(
+      result.errors.map((e) => e.field),
+      `a summary may carry ${child}: RecordSummary extends CascadeEntity, the model declares it, ` +
+        'and the vocabulary registers a predicate for it',
+    ).not.toContain(`clinicalSummary.${child}`);
+  });
+
+  it.each(INHERITED)('writes %s under the predicate the vocabulary registers', (child, value, predicate) => {
+    const outputs = termFor('clinicalSummary')?.outputsFor({
+      ...MANIFEST,
+      clinicalSummary: { domain: 'clinical', [child]: value },
+    }) as ReadonlyArray<{ children: ReadonlyArray<{ predicate: string }> }>;
+
+    expect(
+      outputs[0].children.map((c) => c.predicate),
+      `${child} inside the node and ${child} at the top level are ONE field: the node's ` +
+        'cascade: prefix wrote a predicate no ontology declares beside a top level spelling ' +
+        'the same value correctly',
+    ).toEqual(['cascade:domain', predicate]);
+  });
+
+  it('declares the whole model surface, so a new inherited field is caught here', () => {
+    // The count is the claim, exactly as it is for the thirteen. `id` and
+    // `type` are absent because `NESTED_SKIP` drops both before any rule is
+    // consulted: a blank node has no subject IRI and its class is `rdfType`.
+    const declared = Object.keys(termFor('clinicalSummary')?.rule.children ?? {});
+
+    expect(INHERITED.map(([k]) => k).filter((k) => !declared.includes(k))).toEqual([]);
+    expect(declared).toHaveLength(14 + INHERITED.length);
   });
 });

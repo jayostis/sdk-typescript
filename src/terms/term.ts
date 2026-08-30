@@ -106,6 +106,24 @@ export type FieldRule = {
    * that case is a nesting mistake, not a flat spelling.
    */
   scalarRule?: FieldRule;
+  /**
+   * A CHILD rule only: the predicate this child is written under, where the
+   * node's {@link nestedPrefix} is not it.
+   *
+   * `nestedPrefix` is one prefix for a whole blank node, which holds while every
+   * child is a property of the node's own class. An INHERITED property breaks
+   * it: `cascade:RecordSummary` extends `CascadeEntity`, so a summary carries
+   * `sourceRecordId` and `businessIdentifier`, registered `health:` and
+   * `clinical:` respectively, and the node prefix wrote both under `cascade:` —
+   * predicates nothing declares, beside a top level spelling the same two
+   * fields correctly in the same document.
+   *
+   * Re-prefixes, never authors: {@link defineTerm} checks the local name against
+   * the one `PROPERTY_PREDICATES` registers for the child key, exactly as
+   * `predicateByType` is checked. A child that needs a name the vocabulary does
+   * not have needs a vocabulary change first.
+   */
+  predicate?: string;
 };
 
 /** The declaration a term module exports. */
@@ -296,15 +314,47 @@ export function requirePredicate(key: string): string {
  * registered under.
  */
 function requireOverridePredicate(key: string, recordType: string, value: string): string {
+  return requireReprefixed(
+    key,
+    value,
+    (registered, why) =>
+      `predicateByType['${recordType}'] for field '${key}' is '${value}': ${why}. ` +
+      `A per-type override re-prefixes the registered predicate ` +
+      `('${registered}'); it never declares a new one.`,
+  );
+}
+
+/**
+ * The same rule for a CHILD's {@link FieldRule.predicate}.
+ *
+ * A child predicate is a re-prefixing for the identical reason a per-type
+ * override is — `sourceRecordId` moves from the node's `cascade:` to the
+ * `health:` the vocabulary registers — and both halves are silent when wrong in
+ * the identical way. Sharing the check rather than restating it is what keeps
+ * the two from drifting into different notions of what a term may declare.
+ */
+function requireChildPredicate(termKey: string, childKey: string, value: string): string {
+  return requireReprefixed(
+    childKey,
+    value,
+    (registered, why) =>
+      `children['${childKey}'].predicate on term '${termKey}' is '${value}': ${why}. ` +
+      `A child predicate re-prefixes the registered predicate ` +
+      `('${registered}'); it never declares a new one.`,
+  );
+}
+
+/** The shared body of both re-prefixing checks; `describe` names the caller's field. */
+function requireReprefixed(
+  key: string,
+  value: string,
+  describe: (registered: string, why: string) => string,
+): string {
   const registered = requirePredicate(key);
   const expected = PREFIXED_NAME.exec(registered)?.[2];
 
   const reject = (why: string): never => {
-    throw new Error(
-      `predicateByType['${recordType}'] for field '${key}' is '${value}': ${why}. ` +
-        `A per-type override re-prefixes the registered predicate ` +
-        `('${registered}'); it never declares a new one.`,
-    );
+    throw new Error(describe(registered, why));
   };
 
   const parsed = PREFIXED_NAME.exec(value);
@@ -405,7 +455,7 @@ function childrenOf(value: unknown, rule: FieldRule): Output[] {
     .filter(([nestedKey, nested]) => !NESTED_SKIP.has(nestedKey) && present(nested))
     .flatMap(([nestedKey, nested]) => {
       const childRule = ownEntry(declared, nestedKey);
-      const predicate = childPredicateFor(nestedKey, prefix);
+      const predicate = childPredicateFor(nestedKey, prefix, childRule);
       return childRule
         ? members(nested).flatMap((m) => outputsForMember(m, nestedKey, predicate, childRule))
         : nestedOutputs(predicate, nested);
@@ -445,8 +495,38 @@ const isAbsoluteIri = (key: string): boolean => key.includes('://');
  * where it cannot express what the document said, the long form is used rather
  * than the value dropped. JSON-LD reads an absolute-IRI key the same way, so
  * the JSON stays as faithful as the Turtle.
+ *
+ * A declared child's own {@link FieldRule.predicate} overrides both, and is the
+ * only way a node's children can span namespaces. `nestedPrefix` is one prefix
+ * for the whole node, which is right while every child is the node class's own
+ * property and wrong the moment it INHERITS one: a `cascade:RecordSummary`
+ * reaches `sourceRecordId` through `CascadeEntity`, registered
+ * `health:sourceRecordId`, and the node prefix wrote `cascade:sourceRecordId` —
+ * a predicate no ontology declares, for a value the top level spells correctly
+ * in the same document.
+ *
+ * Not derived from `PROPERTY_PREDICATES`, though it looks like it could be. A
+ * `RecordSummary`'s `notes` is `cascade:notes` and the registered spelling is
+ * `health:notes` — the serializer's `TYPE_PREDICATE_OVERRIDES` already carries
+ * that fork — so a lookup by key alone would be right for `sourceRecordId` and
+ * wrong for `notes`, silently. Declared per term, like `scalarRule`, and
+ * checked at {@link defineTerm} against the registered local name so a term can
+ * re-prefix vocabulary and never author it.
+ *
+ * Exported because the WRITER is not its only caller. `serializeBlankNode`
+ * writes the nested fields no term claims yet, and `validate()` names the
+ * predicate it is refusing — three callers that have to agree on one spelling,
+ * where a second implementation is how they drift. `serializeBlankNode` had
+ * `${nsPrefix}:${k}` inline and emitted `cascade:https://other.example.org/ns#wardCount`
+ * for a foreign child the faithful reader now keeps: not a wrong triple, an
+ * unparseable document.
  */
-function childPredicateFor(nestedKey: string, prefix: string): string {
+export function childPredicateFor(
+  nestedKey: string,
+  prefix: string,
+  childRule?: FieldRule,
+): string {
+  if (childRule?.predicate) return childRule.predicate;
   return isAbsoluteIri(nestedKey) ? `<${nestedKey}>` : `${prefix}:${nestedKey}`;
 }
 
@@ -481,6 +561,62 @@ export function undeclaredChildKeys(rule: FieldRule, value: unknown): string[] {
   return [...seen];
 }
 
+/**
+ * The child predicates a blank-node rule will actually WRITE for `value`.
+ *
+ * For `collectPrefixes`, which decides the `@prefix` lines the header declares
+ * while `childrenOf` decides what the subject block writes — the same two
+ * halves of one document `predicateFor` exists to keep in agreement, one level
+ * down. Every child took the node's `nestedPrefix` until a child could
+ * re-prefix, and a node written under `cascade:` now carries
+ * `health:sourceRecordId`: a prefix the header never declared is not a wrong
+ * triple, it is a document that does not parse.
+ *
+ * The keys PRESENT in the value, not the declared ones. An `@prefix` line for a
+ * child nobody set is an unused declaration, and `pod-002` is asserted
+ * byte-for-byte.
+ *
+ * Deliberately the same walk as {@link undeclaredChildKeys} — `NESTED_SKIP`,
+ * `present`, `members`, `childPredicateFor` — so the header, the writer and the
+ * validator cannot disagree about which children are in play.
+ */
+export function childPredicatesIn(rule: FieldRule, value: unknown): string[] {
+  if (rule.form !== 'blankNode') return [];
+  const prefix = rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX;
+
+  const seen = new Set<string>();
+  for (const member of members(value)) {
+    if (!isNestedObject(member)) continue;
+    for (const [nestedKey, nested] of Object.entries(member)) {
+      if (NESTED_SKIP.has(nestedKey) || !present(nested)) continue;
+      seen.add(childPredicateFor(nestedKey, prefix, ownEntry(rule.children, nestedKey)));
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * The severity every rule this term declares reports at, for this record type.
+ *
+ * `error` is the default because SHACL's is `sh:Violation`: a shape that says
+ * nothing about severity is rejecting, not reporting.
+ *
+ * One function rather than the expression written out at each call site, and
+ * that is what the finding was. `maxCount` and `values` resolved it and the
+ * `minCountByType` loop hardcoded `'error'` beside them — latent only because
+ * no term declares both `severityByType` and `minCountByType` today. The day
+ * one does, a shape saying "reported, not rejected" would have REJECTED, and
+ * since `valid` is computed from `errors` alone that is a conformant record
+ * refused. A default spelled once cannot be honoured in two places and not a
+ * third.
+ */
+export function severityFor(
+  spec: TermSpec,
+  recordType: string | undefined,
+): 'error' | 'warning' {
+  return ownEntry(spec.severityByType, recordType) ?? 'error';
+}
+
 /** The rule a term applies to a record of this type, resolving `ruleByType`. */
 export function ruleFor(spec: TermSpec, recordType: string | undefined): FieldRule {
   return ownEntry(spec.ruleByType, recordType) ?? spec.rule;
@@ -492,13 +628,21 @@ export function ruleFor(spec: TermSpec, recordType: string | undefined): FieldRu
  * The one place these are written down, and what the deserializer's reverse map
  * and the JSON-LD context are both built from. Empty for a term that has not
  * declared its children, so the two schemes coexist during migration.
+ *
+ * Through {@link childPredicateFor} rather than interpolating the prefix here,
+ * so the reader is built from the spelling the writer actually emits. A second
+ * copy of that decision is how the reverse map came to disagree with the writer
+ * in the first place.
  */
 export function childPredicatesOf(spec: TermSpec): Record<string, string> {
   const { rule } = spec;
   if (rule.form !== 'blankNode' || !rule.children) return {};
   const prefix = rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX;
   return Object.fromEntries(
-    Object.keys(rule.children).map((childKey) => [childKey, `${prefix}:${childKey}`]),
+    Object.entries(rule.children).map(([childKey, childRule]) => [
+      childKey,
+      childPredicateFor(childKey, prefix, childRule),
+    ]),
   );
 }
 
@@ -646,6 +790,17 @@ export function defineTerm(spec: TermSpec): Term {
 
   for (const [recordType, override] of Object.entries(predicateByType ?? {})) {
     requireOverridePredicate(key, recordType, override);
+  }
+
+  // Every rule the term can apply, not just `spec.rule`: a `ruleByType` entry
+  // declares children of its own and an unchecked one is the same free-form
+  // string the `predicateByType` check exists to refuse.
+  for (const rule of [spec.rule, ...Object.values(spec.ruleByType ?? {})]) {
+    for (const [childKey, childRule] of Object.entries(rule.children ?? {})) {
+      if (childRule.predicate !== undefined) {
+        requireChildPredicate(key, childKey, childRule.predicate);
+      }
+    }
   }
 
   return {

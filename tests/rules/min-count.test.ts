@@ -20,7 +20,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { validate } from '../../src/validator/index.js';
-import { termFor } from '../../src/terms/index.js';
+import { allTerms, termFor } from '../../src/terms/index.js';
+import { severityFor } from '../../src/terms/term.js';
 import { errorFields, labResult, patientProfile, record } from './records.js';
 
 describe('sh:minCount', () => {
@@ -73,5 +74,67 @@ describe('sh:minCount', () => {
 
       expect(errorFields(result)).toContain('dateOfBirth');
     });
+  });
+});
+
+/**
+ * The severity a missing required field is reported at.
+ *
+ * `severityByType` is documented on `TermSpec` as governing EVERY rule the term
+ * declares for the type, and it has to be: `sh:severity` belongs to the
+ * property shape rather than to any one constraint inside it, so one
+ * `sh:property` block's `sh:minCount`, `sh:maxCount` and `sh:in` all report at
+ * that block's severity. `maxCount` and `values` read it; this loop hardcoded
+ * `'error'`.
+ *
+ * NOT REACHABLE END TO END, and the last test here is what says so. No term
+ * declares both `severityByType` and `minCountByType`, so no record `validate()`
+ * can be handed today takes the path — which is exactly why it survived. The
+ * resolution is asserted where it lives instead, on the function both call sites
+ * now share.
+ */
+describe('sh:severity on a missing required field', () => {
+  it('resolves the term severity a shape declares for the type', () => {
+    // `clinical:VitalSignShape` binds `health:interpretation`'s value set at
+    // sh:Warning; `health:LabResultRecordShape` binds the byte-identical list
+    // at SHACL's default. One list, two verdicts, decided by the class.
+    const interpretation = termFor('interpretation') as never;
+
+    expect(severityFor(interpretation, 'VitalSign')).toBe('warning');
+    expect(severityFor(interpretation, 'LabResultRecord')).toBe('error');
+  });
+
+  it('defaults to error, because SHACL defaults to sh:Violation', () => {
+    // A shape that says nothing about severity is REJECTING, not reporting.
+    expect(severityFor(termFor('dateOfBirth') as never, 'PatientProfile')).toBe('error');
+    expect(severityFor(termFor('dateOfBirth') as never, undefined)).toBe('error');
+  });
+
+  it('reads an own property only, never one off Object.prototype', () => {
+    // `record.type` is DATA. A record typed 'constructor' would otherwise
+    // resolve a prototype member and be reported at whatever that stringifies
+    // to. `minCountByType` is guarded the same way, one loop up.
+    expect(severityFor(termFor('interpretation') as never, 'constructor')).toBe('error');
+  });
+
+  it('reports a missing required field at that severity, not a hardcoded one', () => {
+    // Today every term with a minCount declares no severity, so this asserts
+    // the default arrives through `severityFor` rather than that the override
+    // does. The next test is what makes the gap visible rather than silent.
+    const missing = validate(patientProfile({ dateOfBirth: undefined })).errors
+      .find((e) => e.field === 'dateOfBirth');
+
+    expect(missing?.severity).toBe(severityFor(termFor('dateOfBirth') as never, 'PatientProfile'));
+  });
+
+  it('has no term declaring both, which is why the flip was never observed', () => {
+    // A PRECONDITION, not a preference. The day a term declares both, this goes
+    // red and the end-to-end case above it becomes writable — a warning-severity
+    // minCount must land in `warnings`, because `valid` is computed from
+    // `errors` alone and a shape saying "reported, not rejected" would
+    // otherwise refuse a conformant record.
+    const both = allTerms().filter((t) => t.severityByType && t.minCountByType);
+
+    expect(both.map((t) => t.key)).toEqual([]);
   });
 });

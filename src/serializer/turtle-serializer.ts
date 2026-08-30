@@ -20,6 +20,7 @@
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
 import { predicateFor, termFor } from '../terms/index.js';
+import { childPredicateFor, childPredicatesIn, ruleFor } from '../terms/term.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
@@ -419,10 +420,18 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
     // whole record rather than on the field.
     const term = termFor(key);
     const pred = term ? predicateFor(term, record.type) : getPredicateForField(key, record.type);
-    if (pred) {
-      const nsPrefix = pred.split(':')[0];
-      if (nsPrefix && nsPrefix in NAMESPACES) {
-        prefixes.set(nsPrefix, NAMESPACES[nsPrefix as keyof typeof NAMESPACES]);
+    if (pred) addPrefixForPredicate(pred, prefixes);
+
+    // A blank node's CHILD predicates, which can now leave the node's own
+    // namespace: a `cascade:RecordSummary` inherits `sourceRecordId` from
+    // `CascadeEntity` and writes it `health:sourceRecordId` inside a node
+    // written under `cascade:`. The loop above sees only the top-level field,
+    // and the same reasoning that put `predicateFor` here applies one level
+    // down — the header is decided here and the triple is written by
+    // `childrenOf`, so both have to be asked the same question.
+    if (term) {
+      for (const childPred of childPredicatesIn(ruleFor(term, record.type), value)) {
+        addPrefixForPredicate(childPred, prefixes);
       }
     }
 
@@ -444,6 +453,21 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
   }
 
   return prefixes;
+}
+
+/**
+ * Declare the namespace of a `prefix:localName` predicate.
+ *
+ * A no-op for an absolute-IRI predicate — `<https://other.example.org/ns#wardCount>`
+ * carries its own namespace and needs no `@prefix` line — and for a prefix
+ * `NAMESPACES` does not declare, which is unwritable rather than undeclared and
+ * is refused where it is written, not here.
+ */
+function addPrefixForPredicate(predicate: string, prefixes: Map<string, string>): void {
+  const nsPrefix = predicate.split(':')[0];
+  if (nsPrefix && nsPrefix in NAMESPACES) {
+    prefixes.set(nsPrefix, NAMESPACES[nsPrefix as keyof typeof NAMESPACES]);
+  }
 }
 
 function addPrefixForUri(uri: string, prefixes: Map<string, string>): void {
@@ -764,7 +788,15 @@ function serializeBlankNode(
       if (v === undefined || v === null) continue;
       // Nested fields are `type`-free sub-structures under one vocabulary.
       if (k === 'type' || k === 'id') continue;
-      const nestedPred = `${nsPrefix}:${k}`;
+      // Through the term module's spelling, not `${nsPrefix}:${k}` inline. This
+      // is the UNTERMED nested path — `wellnessSummary`, `hasParticipant` —
+      // and it takes children from the same faithful reader the termed path
+      // does, including the absolute-IRI keys `recoverableChildKey` returns for
+      // a predicate from another namespace. Abbreviated under this node's
+      // prefix those produced `cascade:https://other.example.org/ns#wardCount`,
+      // which is not a document a parser will take back. Undeclared, because
+      // an untermed node has vouched for no child.
+      const nestedPred = childPredicateFor(k, nsPrefix);
 
       // 0..* nested properties (clinical v1.16 participantRoleCode). One
       // repeated-predicate triple per value, arity preserved, matching how the

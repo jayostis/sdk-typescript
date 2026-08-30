@@ -89,19 +89,6 @@ export function termFor(key: string): Term | undefined {
 }
 
 /**
- * Every declared blank-node child predicate, `childKey -> prefix:localName`.
- *
- * The deserializer's reverse map and the JSON-LD context are both built from
- * this, so the twelve exist as data in exactly one place — the term that writes
- * them. A term that has not declared its children contributes nothing, which is
- * what lets the old hand-written entries be retired one term at a time.
- *
- * Two terms declaring the same child key under the same prefix is not a
- * conflict — `contactPhone` means one predicate wherever it appears. Two terms
- * declaring it under DIFFERENT prefixes is, and throws here rather than letting
- * barrel order decide which spelling the reader accepts.
- */
-/**
  * Every predicate spelling a term can WRITE, mapped back to the JSON key that
  * produced it: `prefix:localName -> jsonKey`.
  *
@@ -156,6 +143,19 @@ export function blankNodeTermKeys(): string[] {
   return TERMS.filter((t) => t.rule.form === 'blankNode').map((t) => t.key);
 }
 
+/**
+ * Every declared blank-node child predicate, `childKey -> prefix:localName`.
+ *
+ * The deserializer's reverse map and the JSON-LD context are both built from
+ * this, so the twelve exist as data in exactly one place — the term that writes
+ * them. A term that has not declared its children contributes nothing, which is
+ * what lets the old hand-written entries be retired one term at a time.
+ *
+ * Two terms declaring the same child key under the same prefix is not a
+ * conflict — `contactPhone` means one predicate wherever it appears. Two terms
+ * declaring it under DIFFERENT prefixes is, and throws here rather than letting
+ * barrel order decide which spelling the reader accepts.
+ */
 export function childPredicates(): Record<string, string> {
   const merged: Record<string, string> = {};
   for (const term of TERMS) {

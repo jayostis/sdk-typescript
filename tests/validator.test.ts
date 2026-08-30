@@ -684,3 +684,87 @@ describe('Validator', () => {
     });
   });
 });
+
+/**
+ * A base field the FAITHFUL READER hands back as an array.
+ *
+ * `deserialize()` returns every triple it finds, whatever the field's declared
+ * cardinality, so a document with two `cascade:schemaVersion` triples comes
+ * back as `schemaVersion: ["1.3", "1.4"]`. `CascadeEntity` types the field
+ * `string`, which describes the conforming document and not the input.
+ *
+ * The whole position of this SDK is that the writer and the reader move data
+ * and `validate()` judges it. A judge that THROWS on the input its own
+ * faithfulness produces is worse than one that judges wrongly: `TypeError:
+ * record.schemaVersion.trim is not a function` came out of `validate()` itself,
+ * so the caller learned nothing about the duplicate and nothing about anything
+ * else wrong with the record either. Before the reader stopped skipping, the
+ * first triple was kept and this was unreachable.
+ */
+describe('a base field carrying more values than it can hold', () => {
+  it('reports a duplicated schemaVersion instead of throwing', () => {
+    const result = validate(makeRecord('PatientProfile', {
+      schemaVersion: ['1.3', '1.4'],
+      givenName: 'Jane',
+      familyName: 'Doe',
+      dateOfBirth: '1985-03-12',
+      biologicalSex: 'female',
+    }));
+
+    expect(result.valid).toBe(false);
+    expect(errorFields(result)).toContain('schemaVersion');
+  });
+
+  it('reports a duplicated id instead of throwing', () => {
+    const result = validate(makeRecord('MedicationRecord', {
+      id: ['urn:uuid:a', 'urn:uuid:b'],
+      medicationName: 'Metoprolol',
+      isActive: true,
+    }));
+
+    expect(result.valid).toBe(false);
+    expect(errorFields(result)).toContain('id');
+  });
+
+  it('says the field carries too many values, not that it is missing', () => {
+    // A message naming the wrong defect sends the caller looking for a field
+    // they supplied twice. It IS present; that is the problem with it.
+    const result = validate(makeRecord('MedicationRecord', {
+      schemaVersion: ['1.3', '1.4'],
+      medicationName: 'Metoprolol',
+      isActive: true,
+    }));
+
+    expect(result.errors.find((e) => e.field === 'schemaVersion')?.message).toBe(
+      'schemaVersion carries 2 values; it must be a single non-empty string',
+    );
+  });
+
+  it('still says "must be present" when the field is genuinely absent', () => {
+    // The other half. Widening the guard must not relabel the absent case.
+    const result = validate(makeRecord('MedicationRecord', {
+      schemaVersion: undefined,
+      medicationName: 'Metoprolol',
+      isActive: true,
+    }));
+
+    expect(result.errors.find((e) => e.field === 'schemaVersion')?.message).toBe(
+      'schemaVersion must be present',
+    );
+  });
+
+  it('goes on judging everything else about the record', () => {
+    // The point of not throwing. A record with a duplicated schemaVersion AND a
+    // bad provenance earns both findings; the throw reported neither.
+    const result = validate(makeRecord('MedicationRecord', {
+      schemaVersion: ['1.3', '1.4'],
+      dataProvenance: 'NotAProvenanceType',
+      medicationName: 'Metoprolol',
+      isActive: true,
+    }));
+
+    expect(errorFields(result)).toEqual(
+      expect.arrayContaining(['schemaVersion', 'dataProvenance']),
+    );
+  });
+});

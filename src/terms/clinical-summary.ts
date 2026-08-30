@@ -17,12 +17,20 @@
  * that gap, and it is the whole reason a child carries a rule rather than just a
  * name.
  *
- * THIRTEEN children, which is `RecordSummary`'s whole declared surface and not
- * a subset of it. Declaring `children` made the term authoritative, and the
- * guard that drops an UNDECLARED key drops a MISSING one just as quietly: a
- * manifest read in with `sleepDays` and re-serialized lost it, with nothing
- * reported. The count is the claim, and `tests/terms/clinical-summary.test.ts`
- * asserts the predicate list rather than any one field.
+ * `RecordSummary`'s WHOLE surface and not a subset of it, which is two counts
+ * and not one: the thirteen the class declares itself, and the six it reaches
+ * through `CascadeEntity`. Declaring `children` made the term authoritative,
+ * and a short map is wrong in both directions at once — the thirteen were the
+ * writer's silence (a manifest read in with `sleepDays` and re-serialized lost
+ * it, with nothing reported), the six are `validate()`'s false rejection of
+ * registered vocabulary the model declares. The count is the claim, and
+ * `tests/terms/clinical-summary.test.ts` asserts the predicate list rather than
+ * any one field.
+ *
+ * `tests/terms/children-complete.test.ts` cannot catch the inherited half: it
+ * walks `cascade:RecordSummaryShape`'s `sh:path` set, and the shape declares
+ * none of the six. Shape-ahead-of-term is the direction that file guards;
+ * model-ahead-of-term is this one, and the test beside it is what holds it.
  *
  * @see spec/ontologies/core/v1/core.ttl  cascade:RecordSummary
  */
@@ -82,6 +90,45 @@ export const clinicalSummary = defineTerm({
       // problem that no validator would report. The pre-term nested path wrote
       // the literal, so this is a change of form, not only of presence.
       dataProvenance: { form: 'prefixedEnum', prefix: 'cascade' },
+
+      // THE INHERITED HALF. `RecordSummary extends CascadeEntity`, so a caller
+      // building a summary off the model has these six to hand exactly as they
+      // have `dataProvenance` above, and every one was reported by `validate()`
+      // as carrying "a nested X, which no vocabulary declares" — of
+      // `cascade:schemaVersion`, which is registered vocabulary the model
+      // declares the field for. That is the false rejection this file's own
+      // comment on `children` warns a short map produces, and it arrived the
+      // moment the map was made authoritative.
+      //
+      // `id` and `type` are not here: `NESTED_SKIP` drops both before any rule
+      // is consulted, because a blank node has no subject IRI to carry and its
+      // class is written by `rdfType`.
+      schemaVersion: { form: 'literal' },
+      sourceIdentity: { form: 'literal' },
+
+      // `health:sourceRecordId` and `clinical:businessIdentifier` — the two
+      // that do NOT take this node's `cascade:` prefix. Both are registered
+      // under another namespace and nothing re-prefixes them per type, so the
+      // node prefix wrote `cascade:sourceRecordId` for a value the top level of
+      // the same document writes `health:sourceRecordId`. One field, two
+      // spellings, and only one of them declared anywhere.
+      sourceRecordId: { form: 'literal', predicate: 'health:sourceRecordId' },
+      businessIdentifier: { form: 'literal', predicate: 'clinical:businessIdentifier' },
+
+      // `cascade:notes` and NOT `health:notes`, which is what `notes` is
+      // registered as. The serializer's `TYPE_PREDICATE_OVERRIDES` already
+      // declares that fork for `RecordSummary`, so the node prefix is right
+      // here and a `predicate` naming the registered spelling would be the
+      // wrong triple — the reason these are declared per child rather than
+      // looked up by key.
+      notes: { form: 'literal' },
+
+      // `iri`, matching the top level: `hasAttachment` is in `URI_FIELDS` and
+      // `IRI_ARRAY_FIELDS`, and `cascade:HasAttachmentEdgeShape` declares
+      // `sh:nodeKind sh:IRI` so a record and its attachment can live in
+      // different files. A quoted literal here is a different node kind for the
+      // same edge.
+      hasAttachment: { form: 'iri' },
     },
   },
 });

@@ -361,3 +361,54 @@ describe('a child the term does not declare', () => {
     });
   });
 });
+
+/**
+ * The message has to name the predicate the WRITER emits.
+ *
+ * That is this rule's entire product. Nothing in `tests/shapes/` is `sh:closed`
+ * and the shapes are a devDependency besides, so a consumer's only account of
+ * an undeclared child is this string — and a string naming a predicate nothing
+ * writes is worse than silence, because it sends them grepping their export for
+ * a spelling that is not in it.
+ *
+ * `${prefix}:${child}` was right for every child key that is a JSON name, and
+ * wrong for the one kind that is not. A predicate from another namespace comes
+ * back from `recoverableChildKey` as a full IRI, the writer emits
+ * `<https://other.example.org/ns#wardCount>`, and the message said
+ * `cascade:https://other.example.org/ns#wardCount`.
+ */
+describe('the predicate an undeclared-child message names', () => {
+  const withChild = (key: string, value: unknown) =>
+    manifest({ clinicalSummary: summary({ [key]: value }) });
+
+  it('is the CURIE for a child key that is a JSON name', () => {
+    // Unchanged, and asserted so the IRI case below is a widening rather than a
+    // swap: the ordinary child still gets the node's prefix.
+    expect(messageFor(validate(withChild('wardCount', 3)), 'clinicalSummary.wardCount')).toContain(
+      'cascade:wardCount is written under no domain, range or shape',
+    );
+  });
+
+  it('is the angle-bracketed IRI for a child key that is a predicate', () => {
+    const iri = 'https://other.example.org/ns#wardCount';
+    const message = messageFor(validate(withChild(iri, 9)), `clinicalSummary.${iri}`);
+
+    expect(message).toContain(`<${iri}> is written under no domain, range or shape`);
+    expect(message).not.toContain('cascade:https://');
+  });
+
+  it('names the predicate that is actually in the document', () => {
+    // The assertion that ties the two halves together, and the only one that
+    // would have caught this: the message is read against the export, so it is
+    // checked against the export.
+    const iri = 'https://other.example.org/ns#wardCount';
+    const record = withChild(iri, 9);
+    const turtle = serialize(record);
+
+    const named = messageFor(validate(record), `clinicalSummary.${iri}`)
+      ?.match(/; (.+) is written under no domain/)?.[1];
+
+    expect(named).toBeDefined();
+    expect(turtle).toContain(named as string);
+  });
+});

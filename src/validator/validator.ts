@@ -1,7 +1,7 @@
 import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
 import { allTerms, termFor } from '../terms/index.js';
-import { ruleFor, undeclaredChildKeys } from '../terms/term.js';
+import { childPredicateFor, ruleFor, severityFor, undeclaredChildKeys } from '../terms/term.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -144,13 +144,47 @@ function hasNumber(rec: RecordFields, field: string): boolean {
 
 // ─── Validation Logic ───────────────────────────────────────────────────────
 
+/**
+ * The error a base field earns when it is not one non-empty string.
+ *
+ * `CascadeEntity` types `id` and `schemaVersion` as `string`, which describes
+ * the CONFORMING case and not the input. The reader is faithful — every triple
+ * it finds, whatever the field's declared cardinality — so a document with two
+ * `cascade:schemaVersion` triples comes back carrying `["1.3", "1.4"]`, and
+ * `.trim()` on that threw `TypeError` out of `validate()` itself.
+ *
+ * That is the worst available failure for this branch specifically. The whole
+ * position is that the writer and reader move data and `validate()` judges it;
+ * a judge that dies on exactly the input its own faithfulness produces reports
+ * nothing about the document at all — not the duplicate, not the eight other
+ * things wrong with it. `hasNonEmptyString` has guarded with `typeof` all
+ * along; these two are the ones that did not.
+ *
+ * An ARRAY is reported as what it is rather than as "must be present". It IS
+ * present, and a message naming the wrong defect sends the caller looking for a
+ * missing field they supplied twice.
+ */
+function singleStringError(
+  value: unknown,
+  field: string,
+  absent: string,
+): ValidationError | undefined {
+  if (typeof value === 'string' && value.trim().length > 0) return undefined;
+  return {
+    field,
+    message: Array.isArray(value)
+      ? `${field} carries ${value.length} values; it must be a single non-empty string`
+      : absent,
+    severity: 'error',
+  };
+}
+
 function validateBase(record: CascadeEntity): ValidationError[] {
   const errors: ValidationError[] = [];
 
   // 1. id must be present and non-empty
-  if (!record.id || record.id.trim().length === 0) {
-    errors.push({ field: 'id', message: 'id must be present and non-empty', severity: 'error' });
-  }
+  const idError = singleStringError(record.id, 'id', 'id must be present and non-empty');
+  if (idError) errors.push(idError);
 
   // 2. type must be a recognized DataType
   if (!record.type || !RECOGNIZED_DATA_TYPES.has(record.type)) {
@@ -174,13 +208,12 @@ function validateBase(record: CascadeEntity): ValidationError[] {
   }
 
   // 3. schemaVersion must be present
-  if (!record.schemaVersion || record.schemaVersion.trim().length === 0) {
-    errors.push({
-      field: 'schemaVersion',
-      message: 'schemaVersion must be present',
-      severity: 'error',
-    });
-  }
+  const schemaVersionError = singleStringError(
+    record.schemaVersion,
+    'schemaVersion',
+    'schemaVersion must be present',
+  );
+  if (schemaVersionError) errors.push(schemaVersionError);
 
   // 4. dataProvenance must be a valid ProvenanceType
   if (!record.dataProvenance || !VALID_PROVENANCE_TYPES.has(record.dataProvenance)) {
@@ -388,7 +421,6 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-/** Validate a single CascadeRecord for structural correctness. */
 /**
  * Too many values for a field whose vocabulary caps them.
  *
@@ -430,7 +462,7 @@ function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
     // The undeclared-child check above is NOT given it. That rule comes from
     // the term's `children` map and not from a shape at all, so there is no
     // `sh:severity` to read; an undeclared child is an error everywhere.
-    const severity = ownEntry(term.severityByType, record.type) ?? 'error';
+    const severity = severityFor(term, record.type);
 
     // An absent maxCount is UNCONSTRAINED, not unknown — `cascade:PatientProfileShape`
     // declares none for `cascade:emergencyContact`, so a profile may name several
@@ -469,7 +501,17 @@ function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
         field: `${field}.${child}`,
         message:
           `${field} carries a nested "${child}", which no vocabulary declares; ` +
-          `${rule.nestedPrefix ?? 'cascade'}:${child} is written under no domain, range or shape`,
+          // THE SPELLING THE WRITER USES, from the writer's own function.
+          // Interpolating `${prefix}:${child}` here was right for every child
+          // whose key is a JSON name and wrong for the one kind that is not: a
+          // predicate from another namespace comes back from
+          // `recoverableChildKey` as a full IRI, the writer emits
+          // `<https://other.example.org/ns#wardCount>`, and this named
+          // `cascade:https://other.example.org/ns#wardCount` — a predicate
+          // nothing writes, in a message whose whole job is to name the one
+          // that is written.
+          `${childPredicateFor(child, rule.nestedPrefix ?? 'cascade')} is written ` +
+          `under no domain, range or shape`,
         severity: 'error',
       });
     }
@@ -500,7 +542,17 @@ function validateAgainstTerms(record: CascadeEntity): ValidationError[] {
     errors.push({
       field: term.key,
       message: `${term.key} is required for ${record.type}`,
-      severity: 'error',
+      // Off the shape, exactly as `maxCount` and `values` above are.
+      // `severityByType` is documented on `TermSpec` as governing every rule
+      // the term declares for the type, and `sh:severity` belongs to the
+      // property shape rather than to any one constraint inside it — a shape at
+      // sh:Warning reports its minCount at Warning too. Hardcoded 'error' here
+      // was latent only because no term declares both today; the day one does,
+      // a shape saying "reported, not rejected" would REJECT, because `valid`
+      // is computed from `errors` alone. That is the verdict flip the severity
+      // plumbing was added to prevent, and it would have shipped as a
+      // conformant record refused.
+      severity: severityFor(term, record.type),
     });
   }
 
@@ -520,6 +572,21 @@ function ownEntry<T>(table: Record<string, T> | undefined, key: string | undefin
   return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 }
 
+/**
+ * Validate a single CascadeRecord for structural correctness.
+ *
+ * THE ONLY JUDGE THAT SHIPS. `rdf-validate-shacl` is a devDependency and
+ * `tests/shapes/` is not in `package.json`'s `files`, so nothing a consumer
+ * installs can reach SHACL: anything the shapes should catch in production has
+ * to be reachable from here.
+ *
+ * Three layers, and they answer different questions. `validateBase` and the
+ * per-type checks are hand-transcribed from the shapes and drift in both
+ * directions; `validateAgainstTerms` reads its rules off the term, so one
+ * declaration answers the writer and the validator both; `validateWarnings`
+ * reports what is legal and probably unintended. Errors decide `valid`,
+ * warnings never do.
+ */
 export function validate(record: CascadeEntity): ValidationResult {
   const baseErrors = validateBase(record);
   const typeErrors = validateTypeSpecific(record);

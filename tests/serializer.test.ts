@@ -11,7 +11,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { serialize } from '../src/serializer/turtle-serializer.js';
 import type { CascadeRecord } from '../src/models/common.js';
-import { triples } from './support/graph.js';
+import { parseTurtle, triples } from './support/graph.js';
 
 // ─── Fixture Loading ────────────────────────────────────────────────────────
 
@@ -441,5 +441,58 @@ describe('Turtle Serializer', () => {
         }),
       ).toThrow('Unknown record type');
     });
+  });
+});
+
+/**
+ * A nested child whose predicate is not in this node's namespace.
+ *
+ * The faithful reader keeps it. `recoverableChildKey` returns the FULL IRI as
+ * the child key when the predicate's namespace is not the one the node's
+ * children are written under, because abbreviating
+ * `<https://other.example.org/ns#wardCount>` as `cascade:wardCount` would
+ * silently reassign the triple to a vocabulary that never declared it. The
+ * writer has to be able to put back what the reader hands it.
+ *
+ * The TERMED path could — `childPredicateFor` writes an absolute-IRI key in
+ * angle brackets. `serializeBlankNode`, which writes every nested field no term
+ * claims yet, had `${nsPrefix}:${k}` inline and produced
+ * `cascade:https://other.example.org/ns#wardCount`. That is not a wrong triple:
+ * it is a document no parser will take back, and it fails on the whole record
+ * rather than on the one field. Before the reader stopped skipping, the triple
+ * was dropped on the way in and the writer never saw it.
+ */
+describe('a blank-node child from another namespace', () => {
+  const manifest = (summaryKey: string) => ({
+    id: 'urn:uuid:manifest-0001-aaaa-bbbb-ccccddddeeee',
+    type: 'ExportManifest',
+    title: 'Cascade export',
+    created: '2026-08-29T00:00:00Z',
+    schemaVersion: '3.4',
+    [summaryKey]: {
+      type: 'RecordSummary',
+      domain: 'wellness',
+      'https://other.example.org/ns#wardCount': 3,
+    },
+  }) as never;
+
+  // `wellnessSummary` is the UNTERMED writer, `clinicalSummary` the termed one.
+  // Both take their children from the same reader, so both have to spell this
+  // the same way — the finding was that only one of them did.
+  it.each(['wellnessSummary', 'clinicalSummary'])(
+    '%s writes the full IRI in angle brackets, not under the node prefix',
+    (key) => {
+      const turtle = serialize(manifest(key));
+
+      expect(turtle).toContain('<https://other.example.org/ns#wardCount> 3');
+      expect(turtle).not.toContain('cascade:https://');
+    },
+  );
+
+  it.each(['wellnessSummary', 'clinicalSummary'])('%s emits a document that parses', (key) => {
+    // The assertion that names the real cost. A prefixed name whose local part
+    // contains `://` is not valid Turtle, so the failure is not a mis-typed
+    // triple a consumer could query around — it is the whole export.
+    expect(() => parseTurtle(serialize(manifest(key)))).not.toThrow();
   });
 });
