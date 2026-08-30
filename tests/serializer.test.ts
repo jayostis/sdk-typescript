@@ -11,7 +11,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { serialize } from '../src/serializer/turtle-serializer.js';
 import type { CascadeRecord } from '../src/models/common.js';
-import { triples } from './support/graph.js';
+import { parseTurtle, triples } from './support/graph.js';
 
 // ─── Fixture Loading ────────────────────────────────────────────────────────
 
@@ -393,33 +393,37 @@ describe('Turtle Serializer', () => {
       expect(triples(withStray)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
     });
 
-    it('throws on an array it has no rule for rather than writing nothing', () => {
-      // `resultValue` again: registered (health:resultValue), claimed by no
-      // term, and in none of the arity tables. Two values are not a valid
-      // resultValue and nobody should send them — but a caller who does is
-      // owed an error naming the field, not a graph that quietly says the
-      // record had no result at all.
+    it('writes every value of an array, whatever the vocabulary permits', () => {
+      // `specimenType`, and the choice is the whole point of the test:
+      // registered (health:specimenType), claimed by NO term, and in none of
+      // the arity tables. It therefore reaches `emitField`'s member loop, which
+      // is the code under test here.
       //
-      // A constructed record and not a fixture, deliberately: once the terms
-      // land no fixture in the corpus reaches this branch, and one that did
-      // would be a bug to fix rather than a case to test.
-      expect(() =>
-        serialize({ ...base, resultValue: ['4.2', '4.3'] } as unknown as CascadeRecord),
-      ).toThrow(/resultValue/);
+      // This assertion used `resultValue` and silently stopped covering
+      // anything when that field was later termed — a term is forked to above
+      // the type-driven chain, so the loop was never entered and mutating it to
+      // write one member left the whole suite green. Any field named here has
+      // to be checked against `termFor` before it is trusted.
+      //
+      // Two values are written anyway, in the order given, because a shape can
+      // only judge what reached the graph: a writer that dropped one would hand
+      // the validator a record with nothing left to violate.
+      const result = serialize({
+        ...base,
+        specimenType: ['serum', 'plasma'],
+      } as unknown as CascadeRecord);
+
+      expect(triples(result).filter((t) => t.includes('#specimenType'))).toEqual([
+        `${SUBJECT} <https://ns.cascadeprotocol.org/health/v1#specimenType> "serum"^^<http://www.w3.org/2001/XMLSchema#string>`,
+        `${SUBJECT} <https://ns.cascadeprotocol.org/health/v1#specimenType> "plasma"^^<http://www.w3.org/2001/XMLSchema#string>`,
+      ].sort());
     });
 
-    it('writes nothing for an empty array it has no rule for, rather than throwing', () => {
-      // The throw above is for a value that would be LOST. An empty array is
-      // not one: it carries nothing to write, and no triple is the faithful
-      // graph for it. Every arity table that handles an array returns early on
-      // an empty one — IRI_LIST_FIELDS, MULTI_VALUE_FIELDS and ARRAY_FIELDS all
-      // do — so a field with no rule at all must not be STRICTER than a field
-      // with one.
-      //
-      // The case is a caller that normalises an absent optional to `[]`, which
-      // is exactly what `asArray` hands back. `PodBuilder.build` maps
-      // `serialize` over every record it holds, so one such record would take a
-      // whole pod build down over a field carrying no data.
+    it('writes nothing for an empty array, and no empty triple', () => {
+      // One value per member means ZERO triples for zero members, and the
+      // assertion is that nothing else appears either — not a blank literal,
+      // not a predicate with no object. The case is a caller that normalises an
+      // absent optional to `[]`, which is what `asArray` hands back.
       const withEmpty = serialize({ ...base, resultValue: [] } as unknown as CascadeRecord);
 
       expect(triples(withEmpty)).toEqual(triples(serialize(base as unknown as CascadeRecord)));
@@ -437,5 +441,58 @@ describe('Turtle Serializer', () => {
         }),
       ).toThrow('Unknown record type');
     });
+  });
+});
+
+/**
+ * A nested child whose predicate is not in this node's namespace.
+ *
+ * The faithful reader keeps it. `recoverableChildKey` returns the FULL IRI as
+ * the child key when the predicate's namespace is not the one the node's
+ * children are written under, because abbreviating
+ * `<https://other.example.org/ns#wardCount>` as `cascade:wardCount` would
+ * silently reassign the triple to a vocabulary that never declared it. The
+ * writer has to be able to put back what the reader hands it.
+ *
+ * The TERMED path could — `childPredicateFor` writes an absolute-IRI key in
+ * angle brackets. `serializeBlankNode`, which writes every nested field no term
+ * claims yet, had `${nsPrefix}:${k}` inline and produced
+ * `cascade:https://other.example.org/ns#wardCount`. That is not a wrong triple:
+ * it is a document no parser will take back, and it fails on the whole record
+ * rather than on the one field. Before the reader stopped skipping, the triple
+ * was dropped on the way in and the writer never saw it.
+ */
+describe('a blank-node child from another namespace', () => {
+  const manifest = (summaryKey: string) => ({
+    id: 'urn:uuid:manifest-0001-aaaa-bbbb-ccccddddeeee',
+    type: 'ExportManifest',
+    title: 'Cascade export',
+    created: '2026-08-29T00:00:00Z',
+    schemaVersion: '3.4',
+    [summaryKey]: {
+      type: 'RecordSummary',
+      domain: 'wellness',
+      'https://other.example.org/ns#wardCount': 3,
+    },
+  }) as never;
+
+  // `wellnessSummary` is the UNTERMED writer, `clinicalSummary` the termed one.
+  // Both take their children from the same reader, so both have to spell this
+  // the same way — the finding was that only one of them did.
+  it.each(['wellnessSummary', 'clinicalSummary'])(
+    '%s writes the full IRI in angle brackets, not under the node prefix',
+    (key) => {
+      const turtle = serialize(manifest(key));
+
+      expect(turtle).toContain('<https://other.example.org/ns#wardCount> 3');
+      expect(turtle).not.toContain('cascade:https://');
+    },
+  );
+
+  it.each(['wellnessSummary', 'clinicalSummary'])('%s emits a document that parses', (key) => {
+    // The assertion that names the real cost. A prefixed name whose local part
+    // contains `://` is not valid Turtle, so the failure is not a mis-typed
+    // triple a consumer could query around — it is the whole export.
+    expect(() => parseTurtle(serialize(manifest(key)))).not.toThrow();
   });
 });

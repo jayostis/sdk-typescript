@@ -12,6 +12,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { serialize } from '../src/serializer/turtle-serializer.js';
 import { deserialize, deserializeOne } from '../src/deserializer/turtle-parser.js';
+import { validate } from '../src/validator/index.js';
 import type { CascadeRecord } from '../src/models/common.js';
 import type { Medication } from '../src/models/medication.js';
 import type { Condition } from '../src/models/condition.js';
@@ -261,6 +262,79 @@ describe('Turtle Deserializer', () => {
     }
   });
 
+  describe('a repeated inline blank node', () => {
+    // `cascade:emergencyContact` has NO `sh:maxCount` on
+    // `cascade:PatientProfileShape` — a profile may name more than one person
+    // to call, and `src/terms/emergency-contact.ts` says so in as many words.
+    // The writer honours it: two contacts in produce two blank nodes out.
+    //
+    // The reader took `predTriples[0]` and dropped the rest, so the second
+    // contact was gone and `validate()` returned `valid: true` on what came
+    // back — the reader-kept-the-first-triple defect this branch exists to
+    // remove, surviving on the one field declared uncapped.
+    const twoContacts = `
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+
+<urn:uuid:profile-two-contacts> a cascade:PatientProfile ;
+    cascade:schemaVersion "2.0" ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Maria Rivera" ;
+        cascade:contactPhone "555-0142"
+    ] ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Jose Rivera" ;
+        cascade:contactPhone "555-0188"
+    ] .
+`;
+
+    it('rebuilds every node, not the first', () => {
+      const parsed = deserializeOne<PatientProfile>(twoContacts, 'PatientProfile');
+
+      expect(parsed?.emergencyContact).toEqual([
+        { contactName: 'Maria Rivera', contactPhone: '555-0142' },
+        { contactName: 'Jose Rivera', contactPhone: '555-0188' },
+      ]);
+    });
+
+    it('keeps the bare object form for a single node', () => {
+      // The arity the graph carries, and nothing more. RDF has no "list of one"
+      // for a repeated predicate, so always returning an array would invent
+      // structure — and would change what every profile fixture reads back as.
+      const oneContact = `
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+
+<urn:uuid:profile-two-contacts> a cascade:PatientProfile ;
+    cascade:schemaVersion "2.0" ;
+    cascade:emergencyContact [
+        a cascade:EmergencyContact ;
+        cascade:contactName "Maria Rivera" ;
+        cascade:contactPhone "555-0142"
+    ] .
+`;
+      const parsed = deserializeOne<PatientProfile>(oneContact, 'PatientProfile');
+
+      expect(parsed?.emergencyContact).toEqual({
+        contactName: 'Maria Rivera',
+        contactPhone: '555-0142',
+      });
+    });
+
+    it('round-trips both contacts back out through the writer', () => {
+      // The read is only half of it. The writer already splits an array into
+      // one node per member, so a faithful read makes the whole cycle lossless
+      // — and a reader that truncated made the loss invisible on the way out.
+      const parsed = deserializeOne<PatientProfile>(twoContacts, 'PatientProfile');
+      const names = parseTurtle(serialize(parsed as unknown as CascadeRecord))
+        .namedNode('urn:uuid:profile-two-contacts')
+        .out(cascade.emergencyContact)
+        .out(cascade.contactName).values;
+
+      expect(names.sort()).toEqual(['Jose Rivera', 'Maria Rivera']);
+    });
+  });
+
   describe('a nested predicate no ontology declares', () => {
     // `cascade:contactEmail` is not vocabulary. `grep -rn contactEmail spec/`
     // returns one prose aside in `ontologies/checkup/v1/checkup.ttl`;
@@ -270,11 +344,25 @@ describe('Turtle Deserializer', () => {
     // has no `sh:path` for an email, and no context in `spec/contexts/`
     // defines the term.
     //
-    // Resolving one on read is not a harmless kindness, which is why this is
-    // asserted rather than left to the reverse map: `childrenOf` writes every
-    // key of the rebuilt object straight back out, so a pod carrying the
-    // non-standard triple would round-trip into a document where THIS SDK
-    // emits a predicate with no domain, no range and no shape.
+    // THIS USED TO BE DROPPED ON READ, and the reasoning was that resolving one
+    // is not a harmless kindness: `childrenOf` writes every key of the rebuilt
+    // object straight back out, so a pod carrying the non-standard triple would
+    // round-trip into a document where THIS SDK emits a predicate with no
+    // domain, no range and no shape.
+    //
+    // The emission is still true and is asserted below. What changed is the
+    // clause that went unstated — that nothing would report it. `validate()`
+    // now refuses an undeclared child by name, so the round trip preserves the
+    // triple AND objects to it, where dropping it deleted a triple from
+    // somebody else's document and told no one. Between a graph that says
+    // something unvocabularied and a graph that quietly says less than the one
+    // it was read from, this SDK's position is that only the first is
+    // reportable, and `deserialize()` does not refuse on validity grounds.
+    //
+    // The drop was never confined to the spellings that deserve it, either. It
+    // was every predicate the reverse map lacked an entry for, so a legitimate
+    // child of a term that had not declared it went the same way — silently,
+    // which is how `clinical-summary` came to be missing five.
     const profileWithContactEmail = `
 @prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
 
@@ -289,27 +377,38 @@ describe('Turtle Deserializer', () => {
     ] .
 `;
 
-    it('is dropped rather than rebuilt as a key of the nested object', () => {
+    it('is rebuilt as a key of the nested object, under its local name', () => {
       const parsed = deserializeOne<PatientProfile>(profileWithContactEmail, 'PatientProfile');
 
-      // The whole object, not just the absent key: the three declared children
-      // have to survive the drop, or this would pass just as well on a reader
-      // that lost the contact altogether.
+      // The whole object, not just the present key: the three declared children
+      // have to survive alongside it, or this would pass just as well on a
+      // reader that returned the email and lost the contact.
       expect(parsed?.emergencyContact).toEqual({
         contactName: 'Maria Rivera',
         contactRelationship: 'spouse',
         contactPhone: '555-0142',
+        contactEmail: 'maria.rivera@example.org',
       });
     });
 
-    it('is not written back out when the record it was read into is serialized', () => {
+    it('is written back out when the record it was read into is serialized', () => {
       const parsed = deserializeOne<PatientProfile>(profileWithContactEmail, 'PatientProfile');
       const contact = parseTurtle(serialize(parsed as unknown as CascadeRecord))
         .namedNode('urn:uuid:profile-contact-email')
         .out(cascade.emergencyContact);
 
-      expect(contact.out(cascade.contactEmail).values).toEqual([]);
+      expect(contact.out(cascade.contactEmail).values).toEqual(['maria.rivera@example.org']);
       expect(contact.out(cascade.contactPhone).values).toEqual(['555-0142']);
+    });
+
+    it('is refused by the validator, which is what makes writing it acceptable', () => {
+      // The clause the old drop was standing in for. Emitting an unvocabularied
+      // predicate would be indefensible if nothing said so; this is the
+      // assertion that says so, and it is what the two above depend on.
+      const parsed = deserializeOne<PatientProfile>(profileWithContactEmail, 'PatientProfile');
+
+      expect(validate(parsed as unknown as CascadeRecord).errors.map((e) => e.field))
+        .toContain('emergencyContact.contactEmail');
     });
   });
 

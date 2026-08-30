@@ -5,7 +5,8 @@ Where a new test file goes.
 | Directory | Holds | A test belongs here when |
 | --- | --- | --- |
 | `tests/` | One file per feature area — `serializer.test.ts`, `deserializer.test.ts`, `jsonld.test.ts`, `validator.test.ts`, one per vocabulary wave — or per public module, like `turtle-builder.test.ts`. | It exercises the SDK's public surface: a record in and Turtle or JSON-LD out, or one exported class on its own. |
-| `tests/terms/` | The term modules: rule forms, and the registry invariants over them. | It is about what a term *declares* — a rule form's outputs, a predicate override, or a registry-wide invariant. Term logic is pure, so these need no serializer. |
+| `tests/terms/` | The term modules: rule forms, and the registry invariants over them. | It is about how a term SERIALIZES a field — a rule form's outputs, a predicate override, or a registry-wide invariant. Term logic is pure, so these need no serializer. |
+| `tests/rules/` | One file per SHACL constraint component — `max-count.test.ts`, `value-set.test.ts`, `min-count.test.ts`. | It is about a rule the vocabulary states, and it belongs here because a rule spans three layers: what a term declares, what the writer does with it (usually nothing, on purpose), and what `validate()` reports. Split across `tests/terms/`, `tests/serializer.test.ts` and `tests/validator.test.ts`, each third can only *claim* the other two exist. Constructed records; `tests/rules/records.ts` builds them. |
 | `tests/conformance/` | One file per fixture family, named for the prefix: `absent-001..003` → `absent.test.ts`, `lab-*` → `lab.test.ts`. | It drives a real fixture through `serialize()` and asserts on the resulting graph or its SHACL verdict. One family per file, so a family's fixtures are read together and a new one has an obvious home. |
 | `tests/shapes/` | Vendored `.shapes.ttl` from `spec`, and nothing else. | Never. Re-sync it from `spec`; do not hand-edit. |
 | `tests/support/` | Fixture loaders and other helpers shared between test files. | It is a helper, not a test. Files here carry no `.test.ts` suffix and vitest does not collect them. |
@@ -14,6 +15,22 @@ Conventions that hold everywhere. **An issue may name what to assert; how a test
 is written is decided here**, so read this before writing one rather than
 copying the shape of whatever file you opened first.
 
+- **A test may only claim what it can assert.** A name or a comment that
+  describes what happens somewhere else is a promise nothing keeps: a pure term
+  test cannot see `validate()`, so `leaving the cap to the validator` said
+  something no assertion in that file backed, and the validator half turned out
+  not to exist. Where a reference is genuinely needed, NAME THE TEST that covers
+  it — `tests/rules/max-count.test.ts > names the field, the count and the cap`
+  — so the reference breaks when the thing does. This is also why
+  `tests/rules/` is keyed on the rule rather than the module: with all three
+  layers in one file, the promise and the assertion cannot drift apart.
+- **A test can stop covering its subject without going red.** `writes every
+  value of an array` used `resultValue`, which was termed three commits later —
+  a termed field forks above the type-driven chain, so the loop under test was
+  never entered again and the assertion passed on a path it no longer reached.
+  When a test depends on a field having NO rule, say so at the call site and
+  check `termFor` before trusting it. Mutation is what finds these: break the
+  line the test is for, and if the suite stays green the test is not testing it.
 - **A detector is proven by making it speak.** Pointing a check only at a
   directory where it should stay silent proves nothing about the check, so hand
   it input where it must name something first, and point it at ourselves second.

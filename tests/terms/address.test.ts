@@ -67,6 +67,31 @@ describe('address', () => {
     ]);
   });
 
+  it('writes addressType, which cascade:AddressShape declares beside the six', () => {
+    // The seventh child. `cascade:AddressShape` gives `cascade:addressType` an
+    // `sh:in ( "postal" "physical" "both" )`, so it is constrained vocabulary
+    // rather than a spelling nobody declares — and now that `children` is
+    // declared, an undeclared key is DROPPED rather than written. A caller
+    // passing it got a node with the type silently missing.
+    expect(
+      termFor('address')?.outputsFor({
+        id: PROFILE_ID,
+        type: 'PatientProfile',
+        address: { addressLine: '742 Evergreen Terrace', addressType: 'postal' },
+      }),
+    ).toEqual([
+      {
+        kind: 'blankNode',
+        predicate: 'cascade:address',
+        rdfType: 'cascade:Address',
+        children: [
+          { kind: 'literal', predicate: 'cascade:addressLine', value: '742 Evergreen Terrace' },
+          { kind: 'literal', predicate: 'cascade:addressType', value: 'postal' },
+        ],
+      },
+    ]);
+  });
+
   it('writes only the fields a partial address actually carries', () => {
     // Every field of `Address` is optional in the model, and a profile
     // imported from a source that holds only a city and a state is ordinary.

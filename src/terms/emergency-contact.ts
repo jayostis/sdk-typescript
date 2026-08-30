@@ -34,5 +34,19 @@ import { defineTerm, requirePredicate } from './term.js';
 export const emergencyContact = defineTerm({
   key: 'emergencyContact',
   predicate: requirePredicate('emergencyContact'),
-  rule: { form: 'blankNode', rdfType: 'cascade:EmergencyContact' },
+  // NO maxCount: cascade:PatientProfileShape declares none for this one, where
+  // cascade:address and cascade:preferredPharmacy beside it are both capped at
+  // one. A profile may name more than one person to call.
+  rule: {
+    form: 'blankNode',
+    rdfType: 'cascade:EmergencyContact',
+    // The three properties core.ttl gives cascade:EmergencyContact, and the
+    // list stops there. This is now the ONLY place they are written down: the
+    // deserializer's reverse map and the JSON-LD context are generated from it.
+    children: {
+      contactName: { form: 'literal' },
+      contactRelationship: { form: 'literal' },
+      contactPhone: { form: 'literal' },
+    },
+  },
 });

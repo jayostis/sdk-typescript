@@ -26,5 +26,20 @@ import { defineTerm, requirePredicate } from './term.js';
 export const preferredPharmacy = defineTerm({
   key: 'preferredPharmacy',
   predicate: requirePredicate('preferredPharmacy'),
-  rule: { form: 'blankNode', rdfType: 'cascade:PharmacyInfo' },
+  // cascade:PatientProfileShape
+  maxCount: 1,
+  // sh:Info on that shape (core.shapes.ttl:146), the same grade and the same
+  // reasoning as cascade:address beside it: "A preferred pharmacy helps
+  // streamline prescription fulfillment" is a suggestion, not a constraint a
+  // record fails.
+  severityByType: { PatientProfile: 'info' },
+  rule: {
+    form: 'blankNode',
+    rdfType: 'cascade:PharmacyInfo',
+    children: {
+      pharmacyName: { form: 'literal' },
+      pharmacyAddress: { form: 'literal' },
+      pharmacyPhone: { form: 'literal' },
+    },
+  },
 });

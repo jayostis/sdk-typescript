@@ -37,6 +37,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { serialize } from '../../src/serializer/turtle-serializer.js';
+import { validate } from '../../src/validator/index.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
 import { cascade, parseTurtle, triples } from '../support/graph.js';
@@ -72,29 +73,22 @@ describe('absent-001 — Happy path: lab result with no value, carrying a ratifi
     expect(node.out(cascade.dataAbsentReason).values).toEqual(['not-performed']);
   });
 
-  // NO EARNS QUESTION, and it is the shapes rather than the SDK that cannot
-  // answer it. `serialize()` writes this fixture's LOINC code as
-  // `clinical:loincCode`, and tests/shapes/ vendors core and health only —
-  // health.shapes.ttl constrains `health:testCode` on LabResultRecordShape and
-  // `cascade:loincCode` on DailyVitalReadingShape, so no vendored shape has an
-  // sh:path this triple matches.
-  //
-  // `expect(report.results).toEqual([])` therefore used to assert the absence
-  // of violations no shape in the graph could have raised — a pass that was
-  // three-way for three of the four data triples and silent about the fourth,
-  // which is exactly the vacuous verdict this file's EARNS question exists to
-  // be the opposite of. `assertCovered` now refuses the graph outright; the
-  // refusal is pinned in tests/support/shacl.test.ts.
-  //
-  // What it also hid is worth recording: absent-001.json's expectedOutput.turtle
-  // declares `health:loincCode`, the SDK writes `clinical:loincCode`, and
-  // spec/ontologies/clinical/v1/clinical.shapes.ttl is the only ontology that
-  // declares an sh:path for either spelling — `clinical:loincCode`. Nothing in
-  // this repo can settle which side changes.
-  //
-  // Restoring the question needs one of: clinical.shapes.ttl added to
-  // tests/shapes/vendored.json, or the fixture and the SDK agreeing on a
-  // predicate the vendored shapes already constrain.
+  it('earns the clean verdict the fixture declares', async () => {
+    // The HARD half of a three-way agreement, and the half that is easy to fake.
+    // A violation names itself; conformance is the absence of one, and absence
+    // is what a shapes graph holding nothing for this record also produces.
+    // `assertCovered` is what separates them — it refuses a graph no loaded
+    // shape constrains rather than returning the vacuous `conforms: true` that
+    // silence gives — so reaching a verdict at all is part of what this asserts.
+    //
+    // `results` is asserted empty as well as `conforms`, because the two can
+    // disagree: a report carrying only `sh:Warning` or `sh:Info` results still
+    // conforms, and this fixture should raise nothing at any severity.
+    const report = await shaclCheck(absent001.input);
+
+    expect(report.conforms).toBe(absent001.shouldAccept);
+    expect(report.results).toEqual([]);
+  });
 });
 
 describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight into cascade:dataAbsentReason', () => {
@@ -123,6 +117,15 @@ describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight i
     expect(violation?.sourceConstraintComponent.value).toBe(sh.InConstraintComponent?.value);
     expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
     expect(violation?.value.value).toBe('UNK');
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // The verdict above is TEST-TIME only: `rdf-validate-shacl` is a
+    // devDependency and tests/shapes/ is not in package.json's `files`, so a
+    // consumer installing this package can reach none of it. `validate()` is
+    // the whole of what ships, and "UNK" is exactly the input a real caller
+    // sends — a raw HL7 v3 NullFlavor pasted through from a source system.
+    expect(validate(absent002.input).errors.map((e) => e.field)).toContain('dataAbsentReason');
   });
 });
 
@@ -170,6 +173,13 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
     const [violation] = report.results;
     expect(violation?.sourceConstraintComponent.value).toBe(sh.MaxCountConstraintComponent?.value);
     expect(violation?.path.value).toBe(cascade.dataAbsentReason?.value);
+  });
+
+  it('reports the same violation through the SHIPPED validator', () => {
+    // Green because `dataAbsentReason` is a term and `validateCardinality`
+    // reads `maxCount` off it — the same rule the shape applies, reached from
+    // the declaration rather than transcribed a second time.
+    expect(validate(absent003.input).errors.map((e) => e.field)).toContain('dataAbsentReason');
   });
 
   it('serializes to the graph the fixture expects', () => {

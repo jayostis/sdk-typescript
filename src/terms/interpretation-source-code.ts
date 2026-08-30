@@ -39,5 +39,7 @@ export const interpretationSourceCode = defineTerm({
   key: 'interpretationSourceCode',
   predicate: requirePredicate('interpretationSourceCode'),
   predicateByType: { VitalSign: 'clinical:interpretationSourceCode' },
+  // health:LabResultRecordShape, and clinical:VitalSignShape says the same.
+  maxCount: 1,
   rule: { form: 'literal' },
 });

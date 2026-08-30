@@ -19,16 +19,27 @@ describe('shaclCheck never certifies what it did not check', () => {
     await expect(shaclCheck(loadCascadeRecordFixture('med-001').input)).rejects.toThrow(/clinical/);
   });
 
-  it('refuses a record whose type we can judge but whose data we cannot', async () => {
-    // The case a type check alone cannot see, and it is live. absent-001 is a
-    // health:LabResultRecord — a type the vendored shapes do target — but
-    // serialize() writes its LOINC code as clinical:loincCode, which no vendored
-    // shape declares an sh:path for.
+  it('refuses a record whose type we can judge but whose data we cannot', () => {
+    // The case a type check alone cannot see: a record whose CLASS a vendored
+    // shape targets, carrying a predicate no loaded shape declares an sh:path
+    // for. Without this, the type check passes, the shapes graph constrains
+    // nothing on that predicate, and the verdict is a vacuous conforms:true.
     //
-    // This test retires itself: it goes red the day clinical shapes are vendored
-    // or the day the predicate is settled (#8). Red here is a signal, not a bug.
-    await expect(shaclCheck(loadCascadeRecordFixture('absent-001').input))
-      .rejects.toThrow(/clinical:loincCode/);
+    // Constructed rather than taken from the corpus, and that is the change
+    // this test went through. It used to point at absent-001, whose
+    // clinical:loincCode no vendored shape reached — and it carried a note
+    // saying it would retire itself the day clinical shapes were vendored.
+    // That day came. What retired was the FIXTURE, not the guard: the rule
+    // still holds for any predicate outside every loaded shapes file, and a
+    // constructed graph states it without waiting on which vocabularies happen
+    // to be vendored this month.
+    const record = { id: 'urn:uuid:constructed', type: 'LabResultRecord' };
+    const graph = parseDataset(
+      `<urn:uuid:constructed> a <${NAMESPACES.health}LabResultRecord> ;\n`
+      + `  <http://example.org/ns#notAShapedPredicate> "value" .`,
+    );
+
+    expect(() => assertCovered(graph, record)).toThrow(/notAShapedPredicate/);
   });
 
   it('refuses a predicate in a VENDORED vocabulary that no shape declares a path for', async () => {

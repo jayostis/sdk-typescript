@@ -347,6 +347,50 @@ describe('outputsFor', () => {
       });
     });
 
+    describe('a declared child handed an object', () => {
+      // The mirror of the scalar-under-a-node case below, and it lost the guard
+      // `nestedOutputs` still has: that function returns [] for a child object
+      // rather than stamping `[object Object]` into the graph, but a child with
+      // a DECLARED rule never reaches it — `{ form: 'literal' }` does
+      // `String(member)`, so a malformed nested value became corrupt data
+      // asserted about the node instead of an omission or an error.
+      //
+      // It throws rather than skipping. An object has no faithful literal form,
+      // and this module already takes that position one case over; a skip is
+      // the silent half-write CLAUDE.md names as the failure mode this SDK is
+      // least able to detect.
+      const addressTerm = defineTerm({
+        key: 'address',
+        predicate: requirePredicate('address'),
+        rule: {
+          form: 'blankNode',
+          rdfType: 'cascade:Address',
+          children: { addressLine: { form: 'literal' } },
+        },
+      });
+
+      it('throws, naming the child, rather than writing [object Object]', () => {
+        expect(() =>
+          addressTerm.outputsFor({
+            type: 'PatientProfile',
+            address: { addressLine: { street: '742 Evergreen Terrace' } },
+          }),
+        ).toThrow(/'addressLine'.*cascade:addressLine/s);
+      });
+
+      it('throws on an object MEMBER of an array child too', () => {
+        // The partial case again: dropping the object member and keeping the
+        // string one returns a well-formed output list nothing downstream can
+        // tell from a single-member array.
+        expect(() =>
+          addressTerm.outputsFor({
+            type: 'PatientProfile',
+            address: { addressLine: ['742 Evergreen Terrace', { street: 'x' }] },
+          }),
+        ).toThrow(/'addressLine'/);
+      });
+    });
+
     describe('nestedPrefix', () => {
       // BLANK_NODE_PREDICATE_PREFIXES maps hasParticipant to `clinical`, and
       // clinical v1.16 declares the children of that node as

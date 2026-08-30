@@ -15,11 +15,17 @@
 export * from './term.js';
 
 import type { Term } from './term.js';
+import { childPredicatesOf, writesBlankNode } from './term.js';
 import { address } from './address.js';
+import { biologicalSex } from './biological-sex.js';
+import { clinicalSummary } from './clinical-summary.js';
+import { dateOfBirth } from './date-of-birth.js';
+import { interpretation } from './interpretation.js';
 import { dataAbsentReason } from './data-absent-reason.js';
 import { emergencyContact } from './emergency-contact.js';
 import { interpretationSourceCode } from './interpretation-source-code.js';
 import { preferredPharmacy } from './preferred-pharmacy.js';
+import { resultValue } from './result-value.js';
 
 /**
  * Every term module, one line each. Add the import above and the name here in
@@ -37,10 +43,15 @@ import { preferredPharmacy } from './preferred-pharmacy.js';
  */
 const TERMS: readonly Term[] = Object.freeze([
   address,
+  biologicalSex,
+  clinicalSummary,
+  dateOfBirth,
+  interpretation,
   dataAbsentReason,
   emergencyContact,
   interpretationSourceCode,
   preferredPharmacy,
+  resultValue,
 ]);
 
 /**
@@ -75,4 +86,98 @@ const BY_KEY: ReadonlyMap<string, Term> = (() => {
  */
 export function termFor(key: string): Term | undefined {
   return BY_KEY.get(key);
+}
+
+/**
+ * Every predicate spelling a term can WRITE, mapped back to the JSON key that
+ * produced it: `prefix:localName -> jsonKey`.
+ *
+ * A reader must accept everything the writer can emit, and a term is where the
+ * writer's choices are declared — so this is that obligation computed rather
+ * than transcribed. Three sources, and only the first comes free from inverting
+ * `PROPERTY_PREDICATES`:
+ *
+ * - `predicate`, the registered one;
+ * - every `predicateByType` value, which nothing else inverts — a vital sign's
+ *   `clinical:interpretationSourceCode` was hand-written into the deserializer
+ *   for exactly this reason;
+ * - every declared blank-node child.
+ *
+ * What it deliberately does NOT produce is a spelling this SDK only ever READS:
+ * the classes clinical v1.13 deprecated, and the `cascade:` aliases core v3.4
+ * requires readers to accept. Nothing on the write side knows those exist, so
+ * no derivation can find them and they stay hand-written.
+ */
+export function termSpellings(): Record<string, string> {
+  const spellings: Record<string, string> = {};
+  for (const term of TERMS) {
+    spellings[term.predicate] = term.key;
+    for (const override of Object.values(term.predicateByType ?? {})) {
+      spellings[override] = term.key;
+    }
+    for (const [childKey, predicate] of Object.entries(childPredicatesOf(term))) {
+      spellings[predicate] = childKey;
+    }
+  }
+  return spellings;
+}
+
+/**
+ * Every term, for a check that has to run over fields the record does NOT
+ * carry.
+ *
+ * `termFor` answers "what is declared about this key", which is enough for
+ * every rule about a value that is present. `minCountByType` is about a value
+ * that is absent, and an absent field cannot be reached by walking the record —
+ * so this walks the declarations instead.
+ *
+ * Returns the array itself, which is frozen: a caller can read it and cannot
+ * make the registry disagree with `termFor`.
+ */
+export function allTerms(): readonly Term[] {
+  return TERMS;
+}
+
+/**
+ * The JSON keys of every term that writes an inline blank node for ANY record
+ * type — its base rule, or a `ruleByType` override.
+ *
+ * Reading `t.rule` alone left a term whose node is reachable only through
+ * `ruleByType` out of `NESTED_BLANK_NODE_FIELDS`, so the reader returned the
+ * bare blank-node identifier and dropped every child. See
+ * {@link writesBlankNode}, which `childPredicatesOf` shares so the two cannot
+ * disagree about which terms nest.
+ */
+export function blankNodeTermKeys(): string[] {
+  return TERMS.filter(writesBlankNode).map((t) => t.key);
+}
+
+/**
+ * Every declared blank-node child predicate, `childKey -> prefix:localName`.
+ *
+ * The deserializer's reverse map and the JSON-LD context are both built from
+ * this, so the twelve exist as data in exactly one place — the term that writes
+ * them. A term that has not declared its children contributes nothing, which is
+ * what lets the old hand-written entries be retired one term at a time.
+ *
+ * Two terms declaring the same child key under the same prefix is not a
+ * conflict — `contactPhone` means one predicate wherever it appears. Two terms
+ * declaring it under DIFFERENT prefixes is, and throws here rather than letting
+ * barrel order decide which spelling the reader accepts.
+ */
+export function childPredicates(): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const term of TERMS) {
+    for (const [childKey, predicate] of Object.entries(childPredicatesOf(term))) {
+      const claimed = merged[childKey];
+      if (claimed && claimed !== predicate) {
+        throw new Error(
+          `Child '${childKey}' is declared as both ${claimed} and ${predicate}. ` +
+            `One child key is one predicate; give them different names or one prefix.`,
+        );
+      }
+      merged[childKey] = predicate;
+    }
+  }
+  return merged;
 }

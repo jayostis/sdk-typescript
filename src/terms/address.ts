@@ -11,10 +11,16 @@
  * `cascade:AddressShape` targets the class, so an untyped node is valid Turtle
  * that no shape reaches and no query for an address finds.
  *
- * NO `nestedPrefix`. `childrenOf` defaults to `cascade`, and this node's six
- * children — `cascade:addressLine` through `cascade:addressUse` — are exactly
- * what `profile-002` expects, because the fixture's child keys are already
+ * NO `nestedPrefix`. `childrenOf` defaults to `cascade`, and this node's
+ * children — `cascade:addressLine` through `cascade:addressType` — are what
+ * `profile-002` expects, because the fixture's child keys are already
  * disambiguated in the JSON.
+ *
+ * The list is `cascade:AddressShape`'s, not the fixture's. What it deliberately
+ * omits is the shape's five READ-SIDE aliases — `city`, `state`,
+ * `streetAddress`, `postalCode`, `country` — which a reader accepts and this
+ * writer must never emit: writing both spellings of one fact is how a consumer
+ * ends up with two cities to reconcile.
  *
  * The key is the bare word `address`, and it stays that way: it is what the
  * `PatientProfile` model declares and what every fixture writes. No other model
@@ -28,5 +34,50 @@ import { defineTerm, requirePredicate } from './term.js';
 export const address = defineTerm({
   key: 'address',
   predicate: requirePredicate('address'),
-  rule: { form: 'blankNode', rdfType: 'cascade:Address' },
+  // cascade:PatientProfileShape
+  maxCount: 1,
+  // The cap is graded sh:Info on that shape (core.shapes.ttl:136), not the
+  // sh:Violation a bare maxCount is read as. Spec's own message says why: "A
+  // postal address is helpful for care coordination and correspondence" — a
+  // suggestion, so a profile carrying two is REPORTED and stays valid. Without
+  // this the SDK rejects a record the vocabulary only comments on.
+  severityByType: { PatientProfile: 'info' },
+  rule: {
+    form: 'blankNode',
+    rdfType: 'cascade:Address',
+    children: {
+      addressLine: { form: 'literal' },
+      addressCity: { form: 'literal' },
+      addressState: { form: 'literal' },
+      addressPostalCode: { form: 'literal' },
+      addressCountry: { form: 'literal' },
+      addressUse: { form: 'literal' },
+      // `cascade:AddressShape` declares this one beside the six, with an
+      // `sh:in ( "postal" "physical" "both" )`.
+      addressType: { form: 'literal' },
+
+      // THE SIMPLIFIED ALIASES, and they are spec's own word for them:
+      // `cascade:AddressShape`'s rdfs:comment reads "Accepts both simplified
+      // aliases (city, state) and FHIR-aligned properties (addressCity,
+      // addressState)", and the shape declares an `sh:path` for all five.
+      //
+      // Declared here because the term is what `validate()` reads to decide
+      // whether a child is undeclared, and a conformant address carrying `city`
+      // would otherwise be REJECTED — the shape permitting exactly what the SDK
+      // refused, which is the failure this SDK is least entitled to. They are
+      // also already in `spec/contexts/v1/cascade.jsonld` (lines 126–130), so
+      // declaring them brings the generated context into agreement with the
+      // published one rather than away from it.
+      //
+      // The `Address` model does not declare them and nothing here proposes it
+      // should. Whether this SDK should WRITE the alias spelling is a separate
+      // question from whether it may judge one; the shape has answered the
+      // second, and only the second is being answered here.
+      streetAddress: { form: 'literal' },
+      city: { form: 'literal' },
+      state: { form: 'literal' },
+      postalCode: { form: 'literal' },
+      country: { form: 'literal' },
+    },
+  },
 });

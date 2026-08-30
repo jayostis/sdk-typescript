@@ -80,4 +80,42 @@ describe('emergencyContact', () => {
       termFor('emergencyContact')?.outputsFor({ id: PROFILE_ID, type: 'PatientProfile' }),
     ).toEqual([]);
   });
+
+  it('writes a child the term does not declare, leaving that to the validator', () => {
+    // THE CASE THE DECLARATION EXISTS FOR, and it has a name:
+    // `cascade:contactEmail`. #27 hand-mapped that spelling into the
+    // deserializer on symmetry with `contactPhone`, and it appears nowhere in
+    // spec but one prose aside in checkup.ttl. Read in on one side, it came
+    // straight back out of the WRITER on the other — under no domain, no range
+    // and no shape.
+    //
+    // Declaring the three children is what makes that REPORTABLE. It briefly
+    // made it invisible instead: an undeclared key was dropped here, which
+    // stopped the triple and not the defect — the caller's value vanished with
+    // no error, and the record reached `validate()` with nothing left to
+    // violate. Faithful first, judged second. The writer emits it and
+    // `validate()` refuses it by name; `tests/rules/undeclared-child.test.ts`
+    // is where the refusal is asserted, this file staying pure.
+    //
+    // Asserted as a WHOLE output rather than as one presence, so a change that
+    // wrote the undeclared child by abandoning the declared ones would fail
+    // here rather than pass.
+    const outputs = termFor('emergencyContact')?.outputsFor({
+      id: PROFILE_ID,
+      type: 'PatientProfile',
+      emergencyContact: { contactName: 'Maria Rivera', contactEmail: 'maria@example.com' },
+    });
+
+    expect(outputs).toEqual([
+      {
+        kind: 'blankNode',
+        predicate: 'cascade:emergencyContact',
+        rdfType: 'cascade:EmergencyContact',
+        children: [
+          { kind: 'literal', predicate: 'cascade:contactName', value: 'Maria Rivera' },
+          { kind: 'literal', predicate: 'cascade:contactEmail', value: 'maria@example.com' },
+        ],
+      },
+    ]);
+  });
 });

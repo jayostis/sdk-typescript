@@ -349,3 +349,59 @@ pots=1.4
 #     serialize with their rdf:type and every child, and deserializeOne reads
 #     them back off that document as nested objects rather than as blank-node
 #     identifiers or as {}.
+#
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/jsonld/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     The twelve cascade:EmergencyContact / cascade:Address / cascade:PharmacyInfo
+#     child predicates that #27 hand-listed in context.ts's NESTED_CHILD_PREDICATES
+#     and in the deserializer's ADDITIONAL_REVERSE_MAPPINGS are now GENERATED from
+#     the terms that write them. Same twelve predicates, same core v2.2, one copy
+#     instead of three — a term declares its children and both readers are built
+#     from that declaration.
+#     Nothing new is registered and nothing previously claimed is withdrawn, so
+#     bumping a row would claim support this package did not just gain.
+
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/models/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     Two core v2.2 fields the models did not describe accurately.
+#     cascade:addressType joins the Address interface: cascade:AddressShape has
+#     always declared it with an sh:in ( "postal" "physical" "both" ) and
+#     spec/contexts/v1/cascade.jsonld has always defined the term, but neither
+#     the model nor src/terms/address.ts carried it, so a declared `children`
+#     DROPPED the key rather than writing it.
+#     PatientProfile.emergencyContact widens to MultiValue<EmergencyContact>.
+#     cascade:PatientProfileShape declares NO sh:maxCount for that predicate
+#     where cascade:address and cascade:preferredPharmacy beside it are both
+#     capped at one, and the writer has always written one blank node per member
+#     of an array — the type was narrower than the data this SDK produces.
+#     Nothing new is registered and nothing previously claimed is withdrawn, so
+#     bumping a row would claim support this package did not just gain.
+
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/jsonld/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     A COMMENT CORRECTION AND ONE OPEN DEFECT NAMED. No term is registered,
+#     withdrawn or respelled, and getContext() returns exactly what it did.
+#     The comment beside getContext()'s collision rule read "No such collision
+#     exists today", which stopped being true when NESTED_CHILD_PREDICATES
+#     became generated from the terms: twenty of the twenty-one declared child
+#     keys are ALSO registered top-level fields, so the loop that overwrites
+#     them now fires twenty times per call instead of never.
+#     Twenty of those twenty agree about the predicate and the overwrite is a
+#     no-op. `notes` DISAGREES — cascade:notes as a RecordSummary child (spec's
+#     own spelling, which TYPE_PREDICATE_OVERRIDES forks the writer to) against
+#     health:notes as a health record's registered field — and this is the core
+#     v3.4 collision that entry above already flagged, arriving on the JSON-LD
+#     side.
+#     STILL BROKEN, deliberately not fixed here: a flat context term has one
+#     meaning and this key has two, so whichever way the loop falls, the other
+#     occurrence expands to a predicate the Turtle does not write. It falls to
+#     health:notes, which is right for a document's top level and leaves a
+#     nested notes inside a clinicalSummary / wellnessSummary expanding wrong.
+#     toJsonLd on an ExportManifest has the same split at TOP level, from
+#     TYPE_PREDICATE_OVERRIDES, and predates NESTED_CHILD_PREDICATES entirely.
+#     Closing either means changing the document toJsonLd emits — a local
+#     @context on the nested node object (JSON-LD 1.0 permits one; term-scoped
+#     contexts, which need @version 1.1, do not apply), or 1.1 scoping — which
+#     is a decision about public output rather than a comment fix.
+#     Pinned by tests/rules/context-collision.test.ts, including an assertion
+#     labelled OPEN DEFECT that goes RED when this is fixed.
