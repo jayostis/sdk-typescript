@@ -10,11 +10,13 @@
  * `"1973-08-15"^^xsd:date`. A bare `{ form: 'literal' }` would have written an
  * untyped string and moved the fixture.
  *
- * Its `sh:minCount 1` is a constraint rather than a serialization rule and
- * lives in `tests/rules/min-count.test.ts` with the enforcement it drives.
+ * Its cardinality is a constraint rather than a serialization rule, so both
+ * halves live in `tests/rules/` with the enforcement they drive — the
+ * `sh:minCount 1` and the `sh:maxCount 1` beside it on the same shape.
  *
  * @see spec/ontologies/core/v1/core.shapes.ttl  cascade:PatientProfileShape
  * @see tests/rules/min-count.test.ts            required of a profile, and of nothing else
+ * @see tests/rules/max-count.test.ts            and never twice on one
  */
 
 import { describe, it, expect } from 'vitest';

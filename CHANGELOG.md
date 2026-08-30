@@ -134,6 +134,20 @@
   (`core.shapes.ttl:136`, `:146`) — *"A postal address is helpful for care
   coordination"* — and `validate()` rejected a profile carrying two. Both terms
   now declare the grade their shape gives them.
+- **Three terms carry the `sh:maxCount 1` their shape declares.**
+  `cascade:dateOfBirth` and `cascade:biologicalSex` each declare it in the same
+  `sh:property` block as the `sh:minCount 1` that got them termed
+  (`core.shapes.ttl:42-43`, `:54`), and `health:interpretation` declares it on
+  all three shapes that bind its 74 codes (`health.shapes.ttl:956`,
+  `clinical.shapes.ttl:1087`, `:1561`). Only the minCount and the value set had
+  been carried, so `validate()` reported a profile with NO date of birth and
+  accepted one with two: `hasField` sees the field present, and with no cap
+  nothing counted. The value set does not cover this and cannot —
+  `biologicalSex: ['male', 'female']` and `interpretation: ['H', 'L']` are
+  admitted members throughout, so every member passes the list and the record's
+  only defect is how many there are. That is the vacuous pass this branch exists
+  to close, and it was still open on three fields the branch had just termed.
+  The writer is unchanged and still writes every value. (#37)
 - **A blank node reachable only through `ruleByType` is readable.**
   `childPredicatesOf` and `blankNodeTermKeys` read `spec.rule` alone while
   `defineTerm` validates children across both, so such a node would have been

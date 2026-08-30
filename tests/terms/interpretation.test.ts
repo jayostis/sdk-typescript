@@ -5,13 +5,14 @@
  * Pure. No serializer, no fixture loader, no RDF library.
  *
  * The PREDICATE and its per-type override are what this file asks about. The
- * term's 74-value list is a constraint rather than a serialization rule and
- * lives with the others in `tests/rules/value-set.test.ts` — the declaration
- * and the enforcement of one rule belong in one file, so that neither can claim
- * something the other stopped doing.
+ * term's 74-value list and its `sh:maxCount 1` are constraints rather than
+ * serialization rules and live with the others in `tests/rules/` — the
+ * declaration and the enforcement of one rule belong in one file, so that
+ * neither can claim something the other stopped doing.
  *
  * @see spec/ontologies/health/v1/health.ttl  health:interpretation
  * @see tests/rules/value-set.test.ts         its value set, declared and enforced
+ * @see tests/rules/max-count.test.ts         its cap, which the value set cannot see
  */
 
 import { describe, it, expect } from 'vitest';

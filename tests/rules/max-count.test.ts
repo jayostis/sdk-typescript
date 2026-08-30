@@ -21,7 +21,14 @@ import { describe, it, expect } from 'vitest';
 
 import { validate } from '../../src/validator/index.js';
 import { termFor } from '../../src/terms/index.js';
-import { errorFields, labResult, messageFor, patientProfile } from './records.js';
+import {
+  errorFields,
+  labResult,
+  messageFor,
+  patientProfile,
+  vitalSign,
+  warningFields,
+} from './records.js';
 
 describe('sh:maxCount', () => {
   describe('what a term declares', () => {
@@ -43,6 +50,27 @@ describe('sh:maxCount', () => {
       expect(termFor('emergencyContact')?.maxCount).toBeUndefined();
       expect(termFor('address')?.maxCount).toBe(1);
       expect(termFor('preferredPharmacy')?.maxCount).toBe(1);
+    });
+
+    it('carries the cap beside the minCount, where a shape states both', () => {
+      // `cascade:PatientProfileShape` declares `sh:maxCount 1` on the same
+      // `sh:property` block as the `sh:minCount 1` for both of these
+      // (core.shapes.ttl:42-43 and :54). Terming a field for one half of its
+      // cardinality and stopping there leaves `validate()` reporting the
+      // absence of a date of birth while accepting two of them.
+      expect(termFor('dateOfBirth')?.maxCount).toBe(1);
+      expect(termFor('biologicalSex')?.maxCount).toBe(1);
+    });
+
+    it('carries a flat cap for a field all three of its shapes cap alike', () => {
+      // `health:LabResultRecordShape` (health.shapes.ttl:956),
+      // `clinical:LabResultShape` (clinical.shapes.ttl:1087) and
+      // `clinical:VitalSignShape` (clinical.shapes.ttl:1561) each declare
+      // `sh:maxCount 1` on their interpretation. `maxCount` is flat and can
+      // only be read as every shape's answer, so the three agreeing is what
+      // makes a flat 1 the right declaration rather than an over-constraint on
+      // whichever class the term happened to be written for.
+      expect(termFor('interpretation')?.maxCount).toBe(1);
     });
   });
 
@@ -88,6 +116,48 @@ describe('sh:maxCount', () => {
 
     it('says nothing about a single value of a capped field', () => {
       expect(errorFields(validate(labResult({ resultValue: '412' })))).not.toContain('resultValue');
+    });
+
+    it('reports a second value on a field whose shape caps it beside a minCount', () => {
+      // The vacuous pass this closes: `hasField` sees `dateOfBirth` present so
+      // the minCount check passes, and with no cap declared nothing else looked.
+      // `serialize()` writes both dates — faithfully, as it should — and
+      // `cascade:PatientProfileShape` rejects the graph that reaches it while
+      // `validate()` called the record clean.
+      const dob = validate(patientProfile({ dateOfBirth: ['1973-08-15', '1980-01-01'] }));
+
+      expect(errorFields(dob)).toContain('dateOfBirth');
+      expect(messageFor(dob, 'dateOfBirth')).toContain('at most 1');
+
+      const sex = validate(patientProfile({ biologicalSex: ['male', 'female'] }));
+
+      expect(errorFields(sex)).toContain('biologicalSex');
+      expect(messageFor(sex, 'biologicalSex')).toContain('at most 1');
+    });
+
+    it('reports a second value that is IN the value set, which the value set cannot', () => {
+      // Both members are ratified codes, so the `values` loop passes every one
+      // of them and the record's only defect is how many there are. A field
+      // termed for its value set and not for its cap is exactly this blind
+      // spot: `interpretation: ['H', 'L']` was accepted whole.
+      const result = validate(labResult({ interpretation: ['H', 'L'] }));
+
+      expect(errorFields(result)).toContain('interpretation');
+      expect(messageFor(result, 'interpretation')).toContain('at most 1');
+    });
+
+    it('reports the cap at the severity its shape gives the property, not at error', () => {
+      // `clinical:VitalSignShape` binds interpretation at `sh:severity
+      // sh:Warning`, and sh:severity belongs to the property shape rather than
+      // to any one constraint inside it — so the maxCount in that block reports
+      // at Warning too, where the lab shapes' reports at Violation.
+      //
+      // `valid` is computed from `errors` alone, so this is the difference
+      // between reporting a vital sign and rejecting it.
+      const result = validate(vitalSign({ interpretation: ['H', 'L'] }));
+
+      expect(warningFields(result)).toContain('interpretation');
+      expect(errorFields(result)).not.toContain('interpretation');
     });
   });
 });

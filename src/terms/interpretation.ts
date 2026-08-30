@@ -3,13 +3,19 @@
  * of a result, carried beside the source's own verbatim code on
  * `health:interpretationSourceCode`.
  *
- * Termed for its VALUE SET. `health:LabResultRecordShape`, `health:LabResultShape`
- * and `clinical:VitalSignShape` all bind it to the same 74 entries — the HL7 v3
- * ObservationInterpretation codes, the data-absent-reason codes, and the
- * retained legacy words — and until a term carried that list nothing shipped
- * could see it. `lab-010` carries `'quite high'`, the shapes reject it, and
- * `validate()` returned `valid: true`: a FALSE ACCEPT on a record the corpus
- * declares invalid.
+ * Termed for its VALUE SET and its CAP. `health:LabResultRecordShape`,
+ * `clinical:LabResultShape` and `clinical:VitalSignShape` all bind it to the
+ * same 74 entries — the HL7 v3 ObservationInterpretation codes, the
+ * data-absent-reason codes, and the retained legacy words — at the same
+ * `sh:maxCount 1`, and until a term carried them nothing shipped could see
+ * either.
+ *
+ * The two rules catch different records and neither covers the other's.
+ * `lab-010` carries `'quite high'`, the shapes reject it, and `validate()`
+ * returned `valid: true`: a FALSE ACCEPT on a record the corpus declares
+ * invalid. `['H', 'L']` is the same false accept from the other direction —
+ * two ratified codes, so every member satisfies the list, and only the cap
+ * has anything to say.
  *
  * `predicateByType` because a vital sign writes `clinical:interpretation` where
  * a lab result writes `health:interpretation`. The list is identical on all
@@ -48,6 +54,24 @@ export const interpretation = defineTerm({
   // The migration the shape asks for is `interpretation: 'H'` plus
   // `interpretationSourceCode: 'elevated'`, not a different word.
   severityByType: { VitalSign: 'warning' },
+  // All THREE shapes that bind the value set cap the path beside it:
+  // `health:LabResultRecordShape` (health.shapes.ttl:956),
+  // `clinical:LabResultShape` (clinical.shapes.ttl:1087) and
+  // `clinical:VitalSignShape` (clinical.shapes.ttl:1561). `maxCount` is flat,
+  // so it can only be read as every shape's answer — and they agree, which is
+  // what makes a flat 1 a declaration rather than an over-constraint on
+  // whichever class this term was written for.
+  //
+  // Termed for the value set and left uncapped, this field had the vacuous pass
+  // the branch exists to close still open on it: `interpretation: ['H', 'L']`
+  // is two ratified codes, so the `values` loop passes both, nothing counted
+  // them, and `validate()` returned `valid: true` on a graph the shapes reject.
+  // A value set cannot see cardinality; only the cap can.
+  //
+  // Reported at `severityByType`'s grade like every other rule here: sh:severity
+  // belongs to the property shape, not to one constraint inside it, so the cap
+  // on a vital sign is a Warning exactly as its value set is.
+  maxCount: 1,
   values: [
     'EX', 'HM', 'OBX', 'CAR', 'Carrier', 'B', 'D', 'U', 'W', '<', '>', 'AC', 'IE', 'QCF', 'TOX',
     'A', 'N', 'I', 'MS', 'NCL', 'NS', 'R', 'S', 'VS', 'AA', 'H', 'L', 'HH', 'LL', 'HX', 'LX',

@@ -64,3 +64,42 @@ export function messageFor(
 ): string | undefined {
   return result.errors.find((e) => e.field === field)?.message;
 }
+
+/**
+ * A vital sign carrying the three fields the hardcoded switch demands.
+ *
+ * Here because `clinical:VitalSignShape` is where a rule's SEVERITY differs
+ * from the same rule's severity on a lab result: it binds `interpretation` at
+ * `sh:severity sh:Warning` where the two lab shapes leave it at SHACL's
+ * `sh:Violation` default. A rule test that only ever asked a lab result would
+ * read one verdict and call it the rule's.
+ */
+export function vitalSign(extra: Record<string, unknown> = {}): AnyRecord {
+  return record('VitalSign', {
+    vitalType: 'heartRate',
+    value: 72,
+    unit: 'bpm',
+    ...extra,
+  });
+}
+
+/** The field names of every WARNING in a result — a reported, non-rejecting finding. */
+export function warningFields(result: { warnings: readonly { field: string }[] }): string[] {
+  return result.warnings.map((w) => w.field);
+}
+
+/**
+ * EVERY message on `field`, for a record that breaks more than one rule on it.
+ *
+ * {@link messageFor} returns the first, which is the right read when a test is
+ * about a field's only finding and the wrong one as soon as a second rule
+ * applies to the same path: `interpretation: ['H', 'quite high']` breaks the
+ * value set AND the cap, and asserting on the first message alone makes a test
+ * about one rule fail when the other is added.
+ */
+export function messagesFor(
+  result: { errors: readonly { field: string; message: string }[] },
+  field: string,
+): string[] {
+  return result.errors.filter((e) => e.field === field).map((e) => e.message);
+}

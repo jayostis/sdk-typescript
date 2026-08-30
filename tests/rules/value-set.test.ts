@@ -18,7 +18,14 @@ import { describe, it, expect } from 'vitest';
 
 import { validate } from '../../src/validator/index.js';
 import { termFor } from '../../src/terms/index.js';
-import { errorFields, labResult, messageFor, patientProfile, record } from './records.js';
+import {
+  errorFields,
+  labResult,
+  messageFor,
+  messagesFor,
+  patientProfile,
+  record,
+} from './records.js';
 
 describe('sh:in', () => {
   describe('what a term declares', () => {
@@ -88,9 +95,16 @@ describe('sh:in', () => {
       // The SECOND value is the bad one and the first is legal. A check reading
       // only `members[0]` passes this — the same partial answer the reader used
       // to give when it kept the first triple of a repeated predicate.
+      //
+      // Every message on the field rather than its first: this record breaks
+      // the cap as well as the list — two values where `sh:maxCount 1` permits
+      // one — and both findings land on `interpretation`. Reading only the
+      // first would make this test about which rule happens to run earlier.
       const result = validate(labResult({ interpretation: ['H', 'quite high'] }));
 
-      expect(messageFor(result, 'interpretation')).toContain('quite high');
+      expect(messagesFor(result, 'interpretation')).toContainEqual(
+        expect.stringContaining('quite high'),
+      );
     });
 
     it('says nothing about a value the list admits', () => {
