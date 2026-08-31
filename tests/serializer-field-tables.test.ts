@@ -54,4 +54,47 @@ describe('unregisteredFields', () => {
   it('finds nothing unregistered in the tables the serializer actually ships', () => {
     expect(unregisteredFields(SERIALIZER_FIELD_TABLES)).toEqual([]);
   });
+
+  it('is pointed at every field-keyed table the serializer has', () => {
+    // The check above is only as wide as the aggregate it is handed, and the
+    // aggregate is maintained by hand: a table declared in the serializer and
+    // left out of `SERIALIZER_FIELD_TABLES` is not reported as uncovered, it
+    // is simply never walked. That is the failure mode the aggregate's own doc
+    // comment names — "a table added above and left out here is unchecked,
+    // which is the one way this can be wrong without anything saying so" — and
+    // nothing was asserting it.
+    //
+    // `DATE_ONLY_FIELDS` is what made it concrete: coverage v1.6 added it,
+    // keyed by field name like every table listed here, and it was not listed.
+    // A typo in it (`effectivStart`) matches no field, the key falls through
+    // to the `isDateTimeField` heuristic and is written `^^xsd:dateTime`
+    // against a shape that declares `xsd:date`, and this file stays green.
+    //
+    // Named tables rather than a count: a count says the number changed and
+    // not which table is missing, and it goes stale on every addition whether
+    // or not anything is wrong.
+    expect(Object.keys(SERIALIZER_FIELD_TABLES)).toEqual(
+      expect.arrayContaining([
+        'URI_FIELDS',
+        'MULTI_VALUE_FIELDS',
+        'ARRAY_FIELDS',
+        'IRI_ARRAY_FIELDS',
+        'IRI_LIST_FIELDS',
+        'PREFIXED_ENUM_FIELDS',
+        'EXPLICIT_DATETIME_FIELDS',
+        'DATE_ONLY_FIELDS',
+        'INTEGER_FIELDS',
+        'BLANK_NODE_TYPES',
+        'BLANK_NODE_PREDICATE_PREFIXES',
+        'BLANK_NODE_ARRAY_FIELDS',
+        'TYPE_PREDICATE_OVERRIDES',
+      ]),
+    );
+
+    // And the fields, not just the key: an empty array under the right name
+    // satisfies the assertion above and walks nothing.
+    expect(SERIALIZER_FIELD_TABLES['DATE_ONLY_FIELDS']).toEqual(
+      expect.arrayContaining(['dateOfBirth', 'effectiveStart', 'effectiveEnd']),
+    );
+  });
 });

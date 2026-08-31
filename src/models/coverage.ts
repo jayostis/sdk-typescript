@@ -1,11 +1,14 @@
 /**
  * Coverage / Insurance data model for the Cascade Protocol.
  *
- * Represents an insurance coverage or plan record. Supports both the
- * clinical vocabulary (`clinical:CoverageRecord`) and the dedicated
- * coverage vocabulary (`coverage:InsurancePlan`).
+ * Represents an insurance coverage or plan record.
  *
- * RDF types: `clinical:CoverageRecord` or `coverage:InsurancePlan`
+ * RDF type WRITTEN: `coverage:InsurancePlan`. `clinical:CoverageRecord` has
+ * been deprecated in favour of it since clinical v1.5 (`clinical.ttl:187`) and
+ * is a spelling this SDK READS and never writes — see
+ * `DEPRECATED_TYPE_ALIASES`. Its predicates are read too, so a pod written in
+ * the old form still comes back in full.
+ *
  * Vocabularies:
  * - `https://ns.cascadeprotocol.org/clinical/v1#`
  * - `https://ns.cascadeprotocol.org/coverage/v1#`
@@ -27,14 +30,22 @@ import type {
  * Required fields: `providerName`, `dataProvenance`, `schemaVersion`.
  * All date fields use ISO 8601 string format.
  *
- * Serializes as `clinical:CoverageRecord` or `coverage:InsurancePlan` in Turtle.
+ * Serializes as `coverage:InsurancePlan` in Turtle.
  */
 export interface Coverage extends CascadeRecord {
-  type: 'CoverageRecord' | 'InsurancePlan';
+  /**
+   * `'InsurancePlan'` only. The `'CoverageRecord'` spelling this union used to
+   * admit named a class deprecated since clinical v1.5, and nothing in this SDK
+   * writes it any more; a record still carrying it would serialize as an
+   * InsurancePlan with its predicates left in the clinical vocabulary, which is
+   * the one state `coverage:InsurancePlanShape` reports as three missing
+   * required fields on data that has them.
+   */
+  type: 'InsurancePlan';
 
   /**
    * Name of the insurance provider.
-   * Maps to `clinical:providerName` or `coverage:providerName` in Turtle serialization.
+   * Maps to `coverage:providerName` in Turtle serialization; `clinical:providerName` is read.
    */
   providerName: string;
 
@@ -63,31 +74,31 @@ export interface Coverage extends CascadeRecord {
 
   /**
    * Member identifier for the insured individual.
-   * Maps to `clinical:memberId` or `coverage:memberId` in Turtle serialization.
+   * Maps to `coverage:memberId` in Turtle serialization; `clinical:memberId` is read.
    */
   memberId?: string;
 
   /**
    * Group number for the insurance plan.
-   * Maps to `clinical:groupNumber` or `coverage:groupNumber` in Turtle serialization.
+   * Maps to `coverage:groupNumber` in Turtle serialization; `clinical:groupNumber` is read.
    */
   groupNumber?: string;
 
   /**
    * Name of the insurance plan.
-   * Maps to `clinical:planName` or `coverage:planName` in Turtle serialization.
+   * Maps to `coverage:planName` in Turtle serialization; `clinical:planName` is read.
    */
   planName?: string;
 
   /**
    * Type of insurance plan.
-   * Maps to `clinical:planType` or `coverage:planType` in Turtle serialization.
+   * Maps to `coverage:planType` in Turtle serialization; `clinical:planType` is read.
    */
   planType?: PlanType | string;
 
   /**
    * Coverage designation (primary, secondary, supplemental).
-   * Maps to `clinical:coverageType` or `coverage:coverageType` in Turtle serialization.
+   * Maps to `coverage:coverageType` in Turtle serialization; `clinical:coverageType` is read.
    */
   coverageType?: CoverageType | string;
 
@@ -135,7 +146,7 @@ export interface Coverage extends CascadeRecord {
 
   /**
    * Subscriber identifier for the plan holder.
-   * Maps to `clinical:subscriberId` or `coverage:subscriberId` in Turtle serialization.
+   * Maps to `coverage:subscriberId` in Turtle serialization; `clinical:subscriberId` is read.
    */
   subscriberId?: string;
 

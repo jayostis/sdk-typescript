@@ -219,7 +219,7 @@ describe('Turtle Serializer', () => {
         } else {
           expect(result.length).toBeGreaterThan(0);
           expect(result).toContain('@prefix');
-          expect(result).toContain('clinical:CoverageRecord');
+          expect(result).toContain('coverage:InsurancePlan');
         }
       });
     }
@@ -321,12 +321,26 @@ describe('Turtle Serializer', () => {
       expect(result).toContain('foaf:name "Alex Rivera"');
     });
 
-    it('coverage-001: serializes coverage with effectivePeriodStart as dateTime', () => {
+    it('coverage-001: serializes an insurance plan in the coverage vocabulary', () => {
+      // REWRITTEN, and it was red before it was touched. This asserted
+      // `clinical:effectivePeriodStart "2020-01-01T00:00:00Z"^^xsd:dateTime` on
+      // a fixture that has carried `effectiveStart` for some time and does not
+      // carry `effectivePeriodStart` at all, so it failed on a field that is no
+      // longer in the input rather than on the spelling it meant to pin.
+      //
+      // What it meant to pin is the defect (#26): this SDK writes the
+      // deprecated `clinical:` spelling for a record the corpus says is a
+      // `coverage:InsurancePlan`. `clinical:payorName` stays where it is —
+      // coverage has no payor property distinct from `coverage:providerName`,
+      // which is `sh:maxCount 1`, so it is a legitimate clinical predicate on
+      // a plan and not one of the seven that move.
       const fixture = loadFixture('coverage-001');
       const result = serialize(fixture.input as unknown as CascadeRecord);
 
-      expect(result).toContain('clinical:effectivePeriodStart "2020-01-01T00:00:00Z"^^xsd:dateTime');
-      expect(result).toContain('clinical:providerName "Blue Cross Blue Shield"');
+      expect(result).toContain('a coverage:InsurancePlan');
+      expect(result).toContain('coverage:providerName "Blue Cross Blue Shield"');
+      expect(result).toContain('coverage:effectiveStart "2020-01-01"^^xsd:date');
+      expect(result).toContain('clinical:payorName "Blue Cross Blue Shield of Oregon"');
     });
   });
 

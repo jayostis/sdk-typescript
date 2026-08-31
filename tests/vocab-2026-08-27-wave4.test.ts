@@ -679,15 +679,37 @@ describe('coverage:status (coverage v1.5)', () => {
     expect(turtle).not.toContain('health:status "cancelled"');
   });
 
-  it('leaves a CoverageRecord on health:status', () => {
-    // coverage:status has rdfs:domain coverage:InsurancePlan. Asserting it on a
-    // subject typed clinical:CoverageRecord would entail, to a reasoner, that
-    // the subject is an InsurancePlan, so the override is declared for the plan
-    // type only.
+  it('writes the coverage: spelling under the deprecated type name too', () => {
+    // INVERTED, like the pin below it, and for the same reason: its premise no
+    // longer exists. It read "leaves a CoverageRecord on health:status", and
+    // argued from the domain — `coverage:status` has
+    // `rdfs:domain coverage:InsurancePlan`, so asserting it on a subject typed
+    // `clinical:CoverageRecord` would entail to a reasoner that the subject is
+    // an InsurancePlan, and the override was declared for the plan type only.
+    //
+    // THE DOMAIN ARGUMENT NOW POINTS THE OTHER WAY. There is no subject typed
+    // `clinical:CoverageRecord` left for it to be about: `TYPE_TO_MAPPING_KEY`
+    // maps both spellings to `insurance`, so `type: 'CoverageRecord'` already
+    // writes `a coverage:InsurancePlan`. The entailment the old assertion
+    // avoided is now stated outright by the class triple, and what
+    // `health:status` on that subject produces is not caution, it is a plan
+    // whose status is written under a vocabulary its own shape does not read.
+    //
+    // Which is the whole of the defect, not a corner of it. Declared for one
+    // spelling and not the other, the class moved and the nine predicates did
+    // not, and `coverage:InsurancePlanShape` — targeting the class — matched
+    // and reported `sh:minCount` on `providerName`, `memberId` and
+    // `coverageType` against a record carrying all three.
+    //
+    // The type name is still reachable with `Coverage['type']` narrowed:
+    // `deserialize()` accepts it by name, `RECOGNIZED_DATA_TYPES` lists it,
+    // `validateRecord` has a `case` for it, and JSON off disk carries whatever
+    // it carries.
     const rec = { ...plan(), type: 'CoverageRecord' } as Coverage;
     const turtle = serialize(rec);
-    expect(turtle).toContain('health:status "cancelled"');
-    expect(turtle).not.toContain('coverage:status');
+    expect(turtle).toContain('a coverage:InsurancePlan');
+    expect(turtle).toContain('coverage:status "cancelled"');
+    expect(turtle).not.toContain('health:status');
   });
 
   it('reads coverage:status back into the status field', () => {
@@ -712,21 +734,63 @@ describe('coverage:status (coverage v1.5)', () => {
     expect(bad).toBe('lapsed');
   });
 
-  it('KNOWN GAP: an InsurancePlan is still emitted as clinical:CoverageRecord', () => {
-    // Pinned rather than fixed. TYPE_MAPPING resolves both 'InsurancePlan' and
-    // 'CoverageRecord' to rdfType clinical:CoverageRecord, so this SDK cannot
-    // emit a coverage:InsurancePlan subject at all, and coverage's own shapes —
-    // which target coverage:InsurancePlan — never see these records.
+  it('an InsurancePlan is emitted as coverage:InsurancePlan', () => {
+    // INVERTED, not deleted — this is the regression guard, and the assertion
+    // it used to make is the defect (#26). It pinned `rdfType` at
+    // `clinical:CoverageRecord`, a class clinical v1.5 deprecated in favour of
+    // this one, and recorded the consequence as a one-way trip: the class was
+    // lost on read, so re-serializing what came back wrote `health:status`
+    // where the plan had written `coverage:status`.
     //
-    // The consequence for THIS release is a one-way trip: the class is lost on
-    // read, so re-serializing what comes back writes health:status instead of
-    // coverage:status. Retargeting the class would change what every existing
-    // InsurancePlan record serializes as, which is a migration, not a
-    // vocabulary sync. Tracked in the root backlog.
-    expect(TYPE_MAPPING['insurance']?.rdfType).toBe('clinical:CoverageRecord');
+    // The reasoner half is why it could not stay pinned. `coverage:status` has
+    // `rdfs:domain coverage:InsurancePlan`, and asserting a property entails
+    // its domain — so `a clinical:CoverageRecord ; coverage:status "cancelled"`
+    // entails a class the document never declares. The comment two tests up
+    // states that rule and the type declaration contradicted it.
+    expect(TYPE_MAPPING['insurance']?.rdfType).toBe('coverage:InsurancePlan');
+
     const back = deserialize<Coverage>(serialize(plan()), 'InsurancePlan')[0];
-    expect(back?.type).toBe('CoverageRecord');
-    expect(serialize(back as Coverage)).toContain('health:status "cancelled"');
+    expect(back?.type).toBe('InsurancePlan');
+    expect(serialize(back as Coverage)).toContain('coverage:status "cancelled"');
+  });
+
+  it('reads a pod written in the deprecated spelling, and rewrites it in this one', () => {
+    // The other half of the deprecation, and the half a retype breaks if it is
+    // done carelessly. `clinical:CoverageRecord` has been deprecated since
+    // clinical v1.5 and every release of this SDK since v1.3.0 wrote it, so
+    // real pods are full of it. Refusing to READ those pods would be a
+    // data-loss bug dressed up as standards compliance — the rationale
+    // `turtle-parser.ts` already states for the four clinical v1.13 classes it
+    // reads and does not write.
+    //
+    // The Turtle is hand-written rather than produced by `serialize()`, because
+    // the point is a document this SDK can no longer emit.
+    const oldPod = [
+      '@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .',
+      '@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .',
+      '<urn:uuid:22222222-2222-4222-8222-222222222222> a clinical:CoverageRecord ;',
+      '    clinical:providerName "Meridian Health" ;',
+      '    cascade:dataProvenance cascade:SelfReported ;',
+      '    cascade:schemaVersion "1.3" .',
+      '',
+    ].join('\n');
+
+    const back = deserialize<Coverage>(oldPod, 'InsurancePlan')[0];
+
+    expect(back?.type).toBe('InsurancePlan');
+    expect(back?.providerName).toBe('Meridian Health');
+  });
+
+  it('has no code path that writes clinical:CoverageRecord', () => {
+    // The write side of the same ruling, asked of the whole table rather than
+    // of the one entry above: a second mapping key resolving to the deprecated
+    // class would put it back in this SDK's output while `insurance` looked
+    // correct. This is the shape `DEPRECATED_TYPE_ALIASES` already gives the
+    // four clinical v1.13 classes — read by the parser, absent from
+    // `TYPE_MAPPING`, so nothing here can produce one.
+    const written = Object.values(TYPE_MAPPING).map((entry) => entry.rdfType);
+
+    expect(written).not.toContain('clinical:CoverageRecord');
   });
 });
 

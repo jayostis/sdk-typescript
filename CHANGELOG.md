@@ -4,6 +4,49 @@
 
 ### Fixed
 
+- **An insurance plan is `coverage:InsurancePlan`, written in the coverage
+  vocabulary.** `TYPE_MAPPING` resolved both `InsurancePlan` and
+  `CoverageRecord` to `rdfType: 'clinical:CoverageRecord'`, so this SDK could not
+  emit a `coverage:InsurancePlan` subject at all and had written the deprecated
+  class for every coverage record in every release since v1.3.0.
+  **Eleven defects, not one, and they had to move together.** The class was one.
+  Eight were predicates — `providerName`, `memberId`, `groupNumber`,
+  `planName`, `planType`, `coverageType` and `subscriberId` written
+  `clinical:` where the corpus says `coverage:`, and `sourceRecordId` written
+  `health:`. Two were datatypes: `effectiveStart` and `effectiveEnd` carried
+  `xsd:dateTime` where `coverage.ttl` ranges `xsd:date`, so the time component
+  was a midnight-UTC placeholder. Fixing only the class would have been worse
+  than the bug: `coverage:InsurancePlanShape` declares `sh:minCount 1` at
+  `sh:Violation` on `coverage:providerName`, `coverage:memberId` and
+  `coverage:coverageType`, so retyping the subject while still writing
+  `clinical:` makes the shape see these records for the first time and report
+  three violations plus two datatype violations, on records whose data is
+  correct. All four `coverage-` conformance fixtures now match their
+  `expectedOutput` graph in full. (#26)
+- **Coverage records stop validating vacuously.** `coverage:InsurancePlanShape`
+  is `sh:targetClass coverage:InsurancePlan`, so a subject typed
+  `clinical:CoverageRecord` matched no target and every constraint the shape
+  holds was skipped in silence — the four-value `sh:in` on `coverage:status`
+  included. A plan with `status: "banana"` conformed. The same subject also
+  entailed a class the document never declared: coverage v1.5 gives
+  `coverage:status` `rdfs:domain coverage:InsurancePlan`, and asserting a
+  property asserts its domain. `coverage.shapes.ttl` is vendored into
+  `tests/shapes/` so the verdict is checkable at all. (#26)
+- **The eight `coverage:` spellings are read as well as written.** They join
+  the deserializer’s reverse mappings against the same JSON keys the
+  `clinical:` and `health:` spellings already resolve to, so a plan written by
+  this release reads back in full and `coverage:status` stops being a one-way
+  trip. Without them the writer would have looked innocent while the round trip
+  lost the record’s data at the other end. (#26)
+- **`clinical:payorName` does NOT move, and that is load-bearing.** Coverage
+  has no payor property distinct from `coverage:providerName`, which is
+  `sh:maxCount 1`, so it is a legitimate clinical predicate on a plan.
+  `coverage-001` expects it under `clinical:` on a `coverage:InsurancePlan`
+  subject; a blanket “`clinical:` → `coverage:` on a plan” rewrite passes
+  `coverage-002` and `-003` and breaks it. The eight that DO move are named
+  individually in `TYPE_PREDICATE_OVERRIDES.InsurancePlan` for the same reason
+  `sourceRecordId` could not be remapped globally: 35 fixtures across other
+  record types carry it and keep `health:sourceRecordId`. (#26)
 - **A patient profile's emergency contact, address and preferred pharmacy are
   written.** They never were. The three keys had a blank-node rule
   (`BLANK_NODE_TYPES` named them) and no entry in `PROPERTY_PREDICATES`, so
@@ -170,6 +213,20 @@
 
 ### Changed
 
+- **`Coverage['type']` narrows from `'CoverageRecord' | 'InsurancePlan'` to
+  `'InsurancePlan'`, and `clinical:CoverageRecord` is now READ AND NEVER
+  WRITTEN.** The class has been deprecated in favour of
+  `coverage:InsurancePlan` since clinical v1.5 (`clinical.ttl:187`) and was
+  retained for backward compatibility with existing EHR import data — for
+  READING it. It joins `DEPRECATED_TYPE_ALIASES` beside the four classes
+  clinical v1.13 deprecated, so `deserialize()` accepts a pod typed either way
+  and nothing in `TYPE_MAPPING` can produce the old spelling. The pods that
+  need the read side are the ones this SDK wrote, which is why refusing them
+  was never an option. `'CoverageRecord'` also stays in `TYPE_TO_MAPPING_KEY`
+  so a caller still holding the old JSON spelling can name it to
+  `deserialize()`; it resolves to `coverage:InsurancePlan` like the other.
+  **A caller who typed a record `'CoverageRecord'` gets a type error and a
+  differently-classed document; that is the fix, not a side effect.** (#26)
 - `PatientProfile.emergencyContact` widens from `EmergencyContact` to
   `MultiValue<EmergencyContact>`. **The type now describes what the SDK
   produces.** `cascade:PatientProfileShape` declares no `sh:maxCount` for this

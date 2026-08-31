@@ -13,6 +13,10 @@ import { toJsonLd, fromJsonLd, CONTEXT_URI, getContext } from '../src/jsonld/ind
 import type { CascadeRecord } from '../src/models/common.js';
 import type { Medication } from '../src/models/medication.js';
 import type { VitalSign } from '../src/models/vital-sign.js';
+import { serialize } from '../src/serializer/turtle-serializer.js';
+import { NAMESPACES } from '../src/vocabularies/namespaces.js';
+import { loadCascadeRecordFixture } from './support/fixtures.js';
+import { coverage as coverageNs, parseTurtle } from './support/graph.js';
 
 // ─── Fixture Loading ────────────────────────────────────────────────────────
 
@@ -58,6 +62,7 @@ const SERIALIZABLE_INPUT_TYPES = new Set([
   'ProcedureRecord',
   'FamilyHistoryRecord',
   'CoverageRecord',
+  'InsurancePlan',
   'PatientProfile',
   'ActivitySnapshot',
   'SleepSnapshot',
@@ -307,6 +312,49 @@ describe('JSON-LD Conversion', () => {
   });
 
   // ─── Error Handling ───────────────────────────────────────────────────────
+
+  // ─── The two serializations, typed the same way ─────────────────────────
+
+  describe('Context datatypes agree with what the Turtle writer stamps', () => {
+    // One record has two published serializations, and nothing in the code
+    // makes them answer the datatype question together: the Turtle writer reads
+    // `DATE_ONLY_FIELDS` in `src/serializer/turtle-serializer.ts`, the context
+    // reads `dateOnlyFields` / `dateTimeFields` in `src/jsonld/context.ts`. Two
+    // hand-maintained lists of one fact, and moving a field in one of them is
+    // silent in the other.
+    //
+    // When they disagree the JSON-LD half is not merely different, it is
+    // ill-typed. A term declared `@type: xsd:dateTime` expands `"2024-01-01"` —
+    // the value coverage-002 carries, and what `serialize()` writes `^^xsd:date`
+    // — to `"2024-01-01"^^xsd:dateTime`, which is not a valid `xsd:dateTime`
+    // lexical form and violates the `sh:datatype xsd:date` on
+    // `coverage:InsurancePlanShape`. Nothing throws: a consumer just gets, from
+    // the JSON-LD path, a graph the shapes reject for a record the Turtle path
+    // writes cleanly.
+    //
+    // Asked of the PAIR rather than of the context alone. Asserting the context
+    // on its own pins a second copy of the answer and says nothing about
+    // whether the two copies still agree, which is the only thing that went
+    // wrong here.
+    const plan = loadCascadeRecordFixture('coverage-002');
+
+    it.each(['effectiveStart', 'effectiveEnd'])('%s is xsd:date in both', (field) => {
+      const node = parseTurtle(serialize(plan.input)).namedNode(plan.input.id as string);
+      const written = node.out(coverageNs[field]).term?.datatype?.value;
+
+      // The Turtle side first: it is the half the fixture corpus pins, so if it
+      // is what moved, the whole-graph comparison in
+      // `tests/conformance/coverage.test.ts` has already gone red and this
+      // assertion just says which datatype rather than which triple.
+      expect(written).toBe(NAMESPACES.xsd + 'date');
+
+      // `getContext()` returns the wrapper document, not the term map.
+      const { '@context': context } = getContext() as {
+        '@context': Record<string, unknown>;
+      };
+      expect(context[field]).toEqual({ '@id': 'coverage:' + field, '@type': 'xsd:date' });
+    });
+  });
 
   describe('Error handling', () => {
     it('throws on unknown record type in toJsonLd', () => {
