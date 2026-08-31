@@ -38,6 +38,24 @@ import type { SleepSnapshot } from '../models/sleep-snapshot.js';
 // ─── Internal Helpers ───────────────────────────────────────────────────────
 
 /**
+ * The nine field spellings an insurance plan is written in.
+ *
+ * Shared by both type names that resolve to `coverage:InsurancePlan`, and
+ * declared here so there is one copy of them rather than one per spelling.
+ */
+const INSURANCE_PLAN_PREDICATES: Record<string, string> = {
+  status: 'coverage:status',
+  providerName: 'coverage:providerName',
+  memberId: 'coverage:memberId',
+  groupNumber: 'coverage:groupNumber',
+  planName: 'coverage:planName',
+  planType: 'coverage:planType',
+  coverageType: 'coverage:coverageType',
+  subscriberId: 'coverage:subscriberId',
+  sourceRecordId: 'coverage:sourceRecordId',
+};
+
+/**
  * Type-specific predicate overrides.
  *
  * When a JSON field name maps to different RDF predicates depending on the
@@ -102,19 +120,32 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   //
   // `status` is the coverage v1.5 entry these joined: it already resolves to
   // health:status (a condition's clinical status), so the coverage spelling has
-  // to be selected by record type. Declared for InsurancePlan ONLY —
-  // coverage:status has rdfs:domain coverage:InsurancePlan.
-  InsurancePlan: {
-    status: 'coverage:status',
-    providerName: 'coverage:providerName',
-    memberId: 'coverage:memberId',
-    groupNumber: 'coverage:groupNumber',
-    planName: 'coverage:planName',
-    planType: 'coverage:planType',
-    coverageType: 'coverage:coverageType',
-    subscriberId: 'coverage:subscriberId',
-    sourceRecordId: 'coverage:sourceRecordId',
-  },
+  // to be selected by record type. Declared for the insurance plan class
+  // ONLY, under both spellings of its type name — coverage:status has
+  // rdfs:domain coverage:InsurancePlan.
+  InsurancePlan: INSURANCE_PLAN_PREDICATES,
+  // The same nine, under the spelling this SDK READS and never writes.
+  //
+  // The two halves of the write are chosen by different tables. The CLASS
+  // comes from `TYPE_TO_MAPPING_KEY`, which maps BOTH spellings to
+  // `insurance` and so to `coverage:InsurancePlan`. The PREDICATES come from
+  // here, keyed on `record.type` verbatim. With a row for only one of the
+  // two, a record still typed `CoverageRecord` was written as a
+  // `coverage:InsurancePlan` whose predicates stayed `clinical:` and
+  // `health:` — and `coverage:InsurancePlanShape` targets the CLASS, so it
+  // matched and reported `sh:minCount` violations on `providerName`,
+  // `memberId` and `coverageType` against a record carrying all three.
+  //
+  // `Coverage['type']` narrows to `InsurancePlan` and does not close this:
+  // the deprecated spelling is still a key of `TYPE_TO_MAPPING_KEY` (kept so
+  // `deserialize()` accepts it), still in `RECOGNIZED_DATA_TYPES` and still a
+  // `case` in `validateRecord`, so JSON off disk and any JavaScript caller
+  // reach `serialize()` with it.
+  //
+  // ONE OBJECT UNDER TWO KEYS, not a copy. A second literal is free to drift
+  // from the first, and the drift is invisible: both spellings still produce
+  // a document that parses, one of them under the wrong vocabulary.
+  CoverageRecord: INSURANCE_PLAN_PREDICATES,
 };
 
 /**
@@ -398,6 +429,7 @@ export const SERIALIZER_FIELD_TABLES: Readonly<Record<string, readonly string[]>
   IRI_LIST_FIELDS: [...IRI_LIST_FIELDS],
   PREFIXED_ENUM_FIELDS: Object.keys(PREFIXED_ENUM_FIELDS),
   EXPLICIT_DATETIME_FIELDS: [...EXPLICIT_DATETIME_FIELDS],
+  DATE_ONLY_FIELDS: [...DATE_ONLY_FIELDS],
   INTEGER_FIELDS: [...INTEGER_FIELDS],
   BLANK_NODE_TYPES: Object.keys(BLANK_NODE_TYPES),
   BLANK_NODE_PREDICATE_PREFIXES: Object.keys(BLANK_NODE_PREDICATE_PREFIXES),

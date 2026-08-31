@@ -138,14 +138,27 @@ export function getContext(): object {
   const dateTimeFields = new Set([
     'startDate', 'endDate', 'onsetDate', 'performedDate', 'reportedDate',
     'administrationDate', 'effectiveDate', 'effectivePeriodStart', 'effectivePeriodEnd',
-    'effectiveStart', 'effectiveEnd',
     'proxyGrantedAt', 'proxyRevokedAt',
     // core v3.4: dcterms:created on an export manifest.
     'created',
   ]);
 
-  // Fields that need xsd:date typing
-  const dateOnlyFields = new Set(['dateOfBirth', 'date']);
+  // Fields that need xsd:date typing.
+  //
+  // `effectiveStart` / `effectiveEnd` are the coverage v1.6 pair, and they
+  // belong here and not above for the reason the Turtle writer moved them:
+  // `coverage.ttl` ranges both `xsd:date` and `coverage:InsurancePlanShape`
+  // declares `sh:datatype xsd:date`. Typed `xsd:dateTime` here, the context
+  // expanded the `YYYY-MM-DD` the fixtures carry into
+  // `"2024-01-01"^^xsd:dateTime` — not a valid lexical form for that
+  // datatype, and a `sh:datatype` violation — so the JSON-LD serialization of
+  // a record disagreed with the Turtle one and was the ill-typed half.
+  //
+  // The deprecated `effectivePeriodStart` / `...End` stay in
+  // `dateTimeFields` above, matching `EXPLICIT_DATETIME_FIELDS` in the Turtle
+  // writer. Two lists of one fact; `tests/jsonld.test.ts` is what asks them
+  // the same question.
+  const dateOnlyFields = new Set(['dateOfBirth', 'date', 'effectiveStart', 'effectiveEnd']);
 
   // Fields that need xsd:boolean typing
   const booleanFields = new Set([

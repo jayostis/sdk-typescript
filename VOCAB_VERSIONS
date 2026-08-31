@@ -486,3 +486,59 @@ pots=1.4
 #     compared as graphs: all four match their expectedOutput in full, and
 #     coverage-004 earns the sh:minCount violation on coverage:providerName that
 #     its shaclConstraintViolated declares instead of passing unexamined.
+# ── 2026-08-31, review followup on #26. NO VERSION MOVED. Three defects in
+#    the entry above, found on the PR and fixed on it. ──
+#
+# THE ENTRY ABOVE CLAIMED MORE THAN THE CODE DID. It says 'CoverageRecord'
+#     "resolves to coverage:InsurancePlan like the other, so neither spelling
+#     can make this SDK write the deprecated class". True of the CLASS and only
+#     of the class. The class comes from TYPE_TO_MAPPING_KEY, which maps both
+#     spellings; the predicates come from TYPE_PREDICATE_OVERRIDES, which is
+#     keyed on record.type verbatim and had a row for 'InsurancePlan' alone. A
+#     record still typed 'CoverageRecord' was therefore written as a
+#     coverage:InsurancePlan with its nine predicates left in clinical: and
+#     health: — the exact "worse than the bug" state the entry above describes,
+#     reached from the other direction. coverage:InsurancePlanShape targets the
+#     CLASS, so it matched and reported sh:minCount on providerName, memberId
+#     and coverageType against a record carrying all three.
+#     Coverage['type'] narrowing does not close that path. The spelling is
+#     still a key of TYPE_TO_MAPPING_KEY (kept on purpose, per the entry
+#     above), still in RECOGNIZED_DATA_TYPES and still a case in
+#     validateRecord, so JSON read off disk and any JavaScript caller reach
+#     serialize() with it.
+#     The nine spellings now live in INSURANCE_PLAN_PREDICATES and BOTH type
+#     names reference that one object. One object under two keys rather than a
+#     copy: a second literal is free to drift, and the drift is invisible —
+#     both spellings still produce a document that parses, one of them under
+#     the wrong vocabulary.
+#
+# THE TWO SERIALIZATIONS OF ONE RECORD DISAGREED. The Turtle writer moved
+#     effectiveStart / effectiveEnd to xsd:date; src/jsonld/context.ts kept
+#     both in dateTimeFields, so the published context emitted
+#     {'@id': 'coverage:effectiveStart', '@type': 'xsd:dateTime'} and expanded
+#     the YYYY-MM-DD the fixtures carry to "2024-01-01"^^xsd:dateTime — not a
+#     valid xsd:dateTime lexical form, and a sh:datatype violation against
+#     coverage.shapes.ttl:146. The JSON-LD half was the ill-typed one, on a
+#     record the Turtle path wrote cleanly. Both keys moved to dateOnlyFields;
+#     the deprecated effectivePeriodStart / ...End stay in dateTimeFields,
+#     matching EXPLICIT_DATETIME_FIELDS in the writer.
+#     Two hand-maintained lists of one fact remain, and they are now asked the
+#     same question by test rather than left to agree by habit.
+#
+# THE NEW TABLE WAS OUTSIDE THE GUARD. DATE_ONLY_FIELDS is keyed by field name
+#     like every table in SERIALIZER_FIELD_TABLES and was not listed there, so
+#     the invariant in tests/serializer-field-tables.test.ts never walked it: a
+#     typo in it would match no field, fall through to the isDateTimeField
+#     heuristic, be written ^^xsd:dateTime against a shape declaring xsd:date,
+#     and nothing would go red. Listed now — and the aggregate itself is
+#     asserted to name all thirteen tables, since the omission was invisible
+#     precisely because the check is only as wide as what it is handed.
+#
+# tests/vocab-2026-08-27-wave4.test.ts INVERTED, not deleted. It asserted
+#     health:status and not.toContain('coverage:status') for a 'CoverageRecord',
+#     arguing from rdfs:domain coverage:InsurancePlan that the coverage
+#     spelling would wrongly entail the subject is a plan. That premise died
+#     with this PR: the subject already says a coverage:InsurancePlan, so the
+#     entailment the assertion avoided is stated outright by the class triple,
+#     and health:status there is not caution — it is a status written under a
+#     vocabulary the record's own shape does not read.

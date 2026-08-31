@@ -679,15 +679,37 @@ describe('coverage:status (coverage v1.5)', () => {
     expect(turtle).not.toContain('health:status "cancelled"');
   });
 
-  it('leaves a CoverageRecord on health:status', () => {
-    // coverage:status has rdfs:domain coverage:InsurancePlan. Asserting it on a
-    // subject typed clinical:CoverageRecord would entail, to a reasoner, that
-    // the subject is an InsurancePlan, so the override is declared for the plan
-    // type only.
+  it('writes the coverage: spelling under the deprecated type name too', () => {
+    // INVERTED, like the pin below it, and for the same reason: its premise no
+    // longer exists. It read "leaves a CoverageRecord on health:status", and
+    // argued from the domain — `coverage:status` has
+    // `rdfs:domain coverage:InsurancePlan`, so asserting it on a subject typed
+    // `clinical:CoverageRecord` would entail to a reasoner that the subject is
+    // an InsurancePlan, and the override was declared for the plan type only.
+    //
+    // THE DOMAIN ARGUMENT NOW POINTS THE OTHER WAY. There is no subject typed
+    // `clinical:CoverageRecord` left for it to be about: `TYPE_TO_MAPPING_KEY`
+    // maps both spellings to `insurance`, so `type: 'CoverageRecord'` already
+    // writes `a coverage:InsurancePlan`. The entailment the old assertion
+    // avoided is now stated outright by the class triple, and what
+    // `health:status` on that subject produces is not caution, it is a plan
+    // whose status is written under a vocabulary its own shape does not read.
+    //
+    // Which is the whole of the defect, not a corner of it. Declared for one
+    // spelling and not the other, the class moved and the nine predicates did
+    // not, and `coverage:InsurancePlanShape` — targeting the class — matched
+    // and reported `sh:minCount` on `providerName`, `memberId` and
+    // `coverageType` against a record carrying all three.
+    //
+    // The type name is still reachable with `Coverage['type']` narrowed:
+    // `deserialize()` accepts it by name, `RECOGNIZED_DATA_TYPES` lists it,
+    // `validateRecord` has a `case` for it, and JSON off disk carries whatever
+    // it carries.
     const rec = { ...plan(), type: 'CoverageRecord' } as Coverage;
     const turtle = serialize(rec);
-    expect(turtle).toContain('health:status "cancelled"');
-    expect(turtle).not.toContain('coverage:status');
+    expect(turtle).toContain('a coverage:InsurancePlan');
+    expect(turtle).toContain('coverage:status "cancelled"');
+    expect(turtle).not.toContain('health:status');
   });
 
   it('reads coverage:status back into the status field', () => {

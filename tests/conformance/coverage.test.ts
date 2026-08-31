@@ -44,7 +44,7 @@ import { describe, it, expect } from 'vitest';
 import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../support/fixtures.js';
-import { coverage, parseTurtle, rdf, triples } from '../support/graph.js';
+import { clinical, coverage, parseTurtle, rdf, triples } from '../support/graph.js';
 import { sh, shaclCheck } from '../support/shacl.js';
 import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
 import type { Coverage } from '../../src/models/coverage.js';
@@ -230,6 +230,70 @@ describe('coverage:InsurancePlanShape is a shape that actually evaluates', () =>
     // The control. Without it, a shape that rejected every status would satisfy
     // the assertion above and look exactly as correct.
     const report = await shaclCheck(planWithStatus('active'));
+
+    expect(report.conforms).toBe(true);
+    expect(report.results).toEqual([]);
+  });
+});
+
+describe('the deprecated `CoverageRecord` spelling, arriving as data', () => {
+  /**
+   * `Coverage['type']` is narrowed to `'InsurancePlan'`, which closes the path
+   * for a TypeScript consumer writing a literal — and only for them. The
+   * spelling is still live everywhere the type system is not: it is a key of
+   * `TYPE_TO_MAPPING_KEY` (`src/vocabularies/namespaces.ts:399`, retained on
+   * purpose so `deserialize()` accepts it), it is in `RECOGNIZED_DATA_TYPES`
+   * and it is a `case` in `validateRecord`. JSON read off disk, a fixture, or
+   * any JavaScript caller reaches `serialize()` with it.
+   *
+   * And on that path the two halves of the write disagree. The CLASS is chosen
+   * through `TYPE_TO_MAPPING_KEY` — which maps both spellings to `insurance` —
+   * so the subject is typed `coverage:InsurancePlan`. The PREDICATES are chosen
+   * through `TYPE_PREDICATE_OVERRIDES`, keyed on `record.type` verbatim, which
+   * had a row for `InsurancePlan` and none for `CoverageRecord` — so they stay
+   * `clinical:` and `health:`.
+   *
+   * That combination is the one state this file's header calls worse than the
+   * bug, reached from the other direction: `coverage:InsurancePlanShape` targets
+   * the class, matches, and reports `sh:minCount` violations on
+   * `coverage:providerName`, `coverage:memberId` and `coverage:coverageType`
+   * against a record carrying all three. Before the class moved, such a record
+   * wrote a coherent `clinical:CoverageRecord` graph and was judged by the
+   * clinical shape; the half-migrated graph is a regression the deprecated
+   * spelling cannot be blamed for.
+   */
+  function asDeprecatedSpelling(record: Coverage): Coverage {
+    // The cast is the point: this is what a `JSON.parse` result is, and the
+    // model's narrowing is exactly the thing that cannot stop it.
+    return { ...record, type: 'CoverageRecord' } as unknown as Coverage;
+  }
+
+  it('writes the same graph under either spelling of the type', () => {
+    // The whole graph, for the reason the header gives: the class is one triple
+    // of ten and it is the one already correct here.
+    expect(triples(serialize(asDeprecatedSpelling(coverage002.input as Coverage)))).toEqual(
+      triples(serialize(coverage002.input)),
+    );
+  });
+
+  it('does not leave a plan half-migrated: coverage class, clinical predicates', () => {
+    // Named separately from the graph comparison because the failure message is
+    // the diagnosis. A record typed `coverage:InsurancePlan` whose predicates
+    // are `clinical:` has no `coverage:providerName` at all.
+    const record = asDeprecatedSpelling(coverage002.input as Coverage);
+    const node = parseTurtle(serialize(record)).namedNode(record.id);
+
+    expect(node.out(rdf.type).values).toEqual([INSURANCE_PLAN]);
+    expect(node.out(coverage.providerName).values).toEqual(['Aetna']);
+    expect(node.out(clinical.providerName).values).toEqual([]);
+  });
+
+  it('earns the same clean verdict from the shapes', async () => {
+    // The consequence stated as the shapes see it. Three minCount violations on
+    // data that has all three fields is what this asserts the absence of, and
+    // `assertCovered` inside `shaclCheck` refuses the vacuous pass that an
+    // untargeted graph would otherwise produce.
+    const report = await shaclCheck(asDeprecatedSpelling(coverage002.input as Coverage));
 
     expect(report.conforms).toBe(true);
     expect(report.results).toEqual([]);
