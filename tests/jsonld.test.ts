@@ -62,6 +62,7 @@ const SERIALIZABLE_INPUT_TYPES = new Set([
   'ProcedureRecord',
   'FamilyHistoryRecord',
   'CoverageRecord',
+  'InsurancePlan',
   'PatientProfile',
   'ActivitySnapshot',
   'SleepSnapshot',
