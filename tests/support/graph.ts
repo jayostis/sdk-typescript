@@ -36,6 +36,16 @@ export const health = env.namespace(NAMESPACES.health);
 export const clinical = env.namespace(NAMESPACES.clinical);
 
 /**
+ * `coverage:`, for the same reason twice over.
+ *
+ * An insurance plan's fields are spelled in TWO vocabularies at once — the
+ * fixtures put `providerName` under `coverage:` and `payorName` under
+ * `clinical:` on one subject — so asking only one namespace cannot tell a
+ * correctly-spelled record from a record spelled entirely in the other.
+ */
+export const coverage = env.namespace(NAMESPACES.coverage);
+
+/**
  * `rdf:`, for `rdf:type` — the one predicate a typed blank node carries that is
  * not in `NAMESPACES`, which lists the vocabularies this SDK writes data under.
  */
