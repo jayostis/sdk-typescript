@@ -83,21 +83,37 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   DailySleepSnapshot: {
     date: 'cascade:date',
   },
-  // Coverage v1.5: `status` already resolves to health:status (a condition's
-  // clinical status), so the coverage spelling has to be selected by record
-  // type. Declared for InsurancePlan ONLY, not for CoverageRecord: coverage:
-  // status has rdfs:domain coverage:InsurancePlan, and asserting it on a
-  // subject typed clinical:CoverageRecord would entail, to a reasoner, that the
-  // subject is an InsurancePlan.
+  // An insurance plan is written in the coverage vocabulary, all of it. Each
+  // of these nine keys resolves to a `clinical:` or `health:` spelling through
+  // PROPERTY_PREDICATES, because the same JSON key names a different property
+  // on a different record type — which is exactly what this table is for.
   //
-  // KNOWN GAP, recorded rather than papered over: TYPE_MAPPING resolves BOTH
-  // 'CoverageRecord' and 'InsurancePlan' to rdfType clinical:CoverageRecord, so
-  // this SDK cannot currently emit a coverage:InsurancePlan subject at all. The
-  // predicate is therefore correct while the subject's class is not. Retargeting
-  // 'InsurancePlan' would change what every existing record serializes as, which
-  // is a migration and not part of a vocabulary sync.
+  // WHY PER TYPE AND NOT IN PROPERTY_PREDICATES. `sourceRecordId` is carried by
+  // 35 fixtures across other record types and stays `health:sourceRecordId`
+  // for every one of them; a global remap would move all 35. The other eight
+  // are narrower but the reasoning is the same.
+  //
+  // `payorName` IS NOT HERE AND MUST NOT BE. coverage-001 expects
+  // `clinical:payorName` on a `coverage:InsurancePlan` subject: coverage has no
+  // payor property distinct from `coverage:providerName`, which is
+  // `sh:maxCount 1`, so the clinical predicate is the only place a payor
+  // distinct from the provider can go. A blanket "clinical: -> coverage: on a
+  // plan" rewrite passes coverage-002 and -003 and breaks coverage-001.
+  //
+  // `status` is the coverage v1.5 entry these joined: it already resolves to
+  // health:status (a condition's clinical status), so the coverage spelling has
+  // to be selected by record type. Declared for InsurancePlan ONLY —
+  // coverage:status has rdfs:domain coverage:InsurancePlan.
   InsurancePlan: {
     status: 'coverage:status',
+    providerName: 'coverage:providerName',
+    memberId: 'coverage:memberId',
+    groupNumber: 'coverage:groupNumber',
+    planName: 'coverage:planName',
+    planType: 'coverage:planType',
+    coverageType: 'coverage:coverageType',
+    subscriberId: 'coverage:subscriberId',
+    sourceRecordId: 'coverage:sourceRecordId',
   },
 };
 
@@ -230,10 +246,13 @@ const PREFIXED_ENUM_FIELDS: Record<string, string> = {
  * don't contain "date" or "time" as a substring.
  */
 const EXPLICIT_DATETIME_FIELDS = new Set([
+  // The deprecated clinical: pair only. `effectiveStart` / `effectiveEnd` are
+  // in DATE_ONLY_FIELDS below: coverage.ttl:93,99 ranges both xsd:date and
+  // coverage.shapes.ttl:146 declares sh:datatype xsd:date, so the time
+  // component this used to append was a midnight-UTC placeholder the shape
+  // rejects.
   'effectivePeriodStart',
   'effectivePeriodEnd',
-  'effectiveStart',
-  'effectiveEnd',
   // Core v3.4: dcterms:created on an export manifest. Required to be
   // xsd:dateTime by cascade:ExportManifestShape, and the name contains neither
   // "date" nor "time", so the heuristic below would miss it.
@@ -259,17 +278,30 @@ const DATETIME_DATE_TYPES = new Set([
 function isDateTimeField(key: string, recordType?: string): boolean {
   if (EXPLICIT_DATETIME_FIELDS.has(key)) return true;
   const lower = key.toLowerCase();
-  // Specific date-only field
-  if (key === 'dateOfBirth') return false;
+  // Specific date-only fields
+  if (DATE_ONLY_FIELDS.has(key)) return false;
   if (key === 'date') return recordType !== undefined && DATETIME_DATE_TYPES.has(recordType);
   return lower.includes('date') || lower.includes('time');
 }
 
 /**
  * Fields whose values are date-only (no time component) and get ^^xsd:date typing.
+ *
+ * `effectiveStart` / `effectiveEnd` are the coverage v1.6 pair. Both are ranged
+ * `xsd:date` by `coverage.ttl` and declared `sh:datatype xsd:date` by
+ * `coverage:InsurancePlanShape`, and both are `InsurancePlan`-only across every
+ * fixture in the corpus, so listing them by name carries no cross-type risk.
+ * The deprecated `clinical:effectivePeriodStart` / `...End` keep their
+ * `xsd:dateTime` and stay in {@link EXPLICIT_DATETIME_FIELDS}.
  */
+const DATE_ONLY_FIELDS = new Set([
+  'dateOfBirth',
+  'effectiveStart',
+  'effectiveEnd',
+]);
+
 function isDateOnlyField(key: string): boolean {
-  return key === 'dateOfBirth';
+  return DATE_ONLY_FIELDS.has(key);
 }
 
 /**

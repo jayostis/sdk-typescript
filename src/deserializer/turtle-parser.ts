@@ -108,6 +108,29 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   // other field in this SDK maps to coverage:status.
   [`${NAMESPACES.coverage}status`]: 'status',
 
+  // Coverage v1.6, the read side of the eight spellings an InsurancePlan is
+  // WRITTEN in (TYPE_PREDICATE_OVERRIDES.InsurancePlan). Every one of them
+  // resolves to a clinical: or health: spelling through PROPERTY_PREDICATES, so
+  // without an entry here a plan's provider name would be written under
+  // coverage: and then dropped on read — the round trip losing the record's
+  // data with the writer looking innocent.
+  //
+  // Both spellings map to the same JSON key, which is what makes a pod written
+  // in the deprecated clinical: form still read back in full. Unambiguous: no
+  // other field in this SDK maps to any of these coverage: URIs.
+  //
+  // `coverage:payorName` is deliberately absent — no such property exists.
+  // A plan's payor is written clinical:payorName, and that URI is already
+  // reachable through PROPERTY_PREDICATES.
+  [`${NAMESPACES.coverage}providerName`]: 'providerName',
+  [`${NAMESPACES.coverage}memberId`]: 'memberId',
+  [`${NAMESPACES.coverage}groupNumber`]: 'groupNumber',
+  [`${NAMESPACES.coverage}planName`]: 'planName',
+  [`${NAMESPACES.coverage}planType`]: 'planType',
+  [`${NAMESPACES.coverage}coverageType`]: 'coverageType',
+  [`${NAMESPACES.coverage}subscriberId`]: 'subscriberId',
+  [`${NAMESPACES.coverage}sourceRecordId`]: 'sourceRecordId',
+
   // The blank-node children are NOT here. They are generated below, from the
   // terms that write them.
 };

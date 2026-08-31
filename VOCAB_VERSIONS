@@ -405,3 +405,84 @@ pots=1.4
 #     is a decision about public output rather than a comment fix.
 #     Pinned by tests/rules/context-collision.test.ts, including an assertion
 #     labelled OPEN DEFECT that goes RED when this is fixed.
+
+# ── 2026-08-31 — NO VERSION MOVED. An insurance plan is finally
+#    coverage:InsurancePlan, in the coverage vocabulary (#26). ──
+#
+# coverage=1.5 (UNCHANGED). Not a version this SDK was behind on: v1.6 and
+#     v1.7 are SHACL-ONLY and add no term — v1.6 widens
+#     coverage:InsurancePlanShape's cascade:dataProvenance list to include
+#     cascade:AIExtracted, v1.7 gives coverage:sourceRecordId the sh:path it
+#     never had, and coverage.ttl changes in neither beyond its changelog. This
+#     package validates neither value sets nor datatypes, so neither version
+#     asks anything of this code and claiming them would claim support it did
+#     not gain. The row stays at 1.5 and the drift against spec is real.
+#     What DID change is that a coverage shape can now see a record this SDK
+#     wrote at all; until this release every one of them was unreachable by
+#     construction.
+#
+# THE GAP THE coverage=1.5 ENTRY ABOVE RECORDED IS CLOSED. That entry called
+#     it "KNOWN GAP, pre-existing and NOT introduced here": TYPE_MAPPING
+#     resolved both 'InsurancePlan' and 'CoverageRecord' to rdfType
+#     clinical:CoverageRecord, so this SDK could not emit a
+#     coverage:InsurancePlan subject at all and coverage's own shapes never saw
+#     these records. coverage:status was therefore a one-way trip — written
+#     correctly, the class lost on read, health:status written on the way back
+#     out. TYPE_MAPPING.insurance now carries rdfType coverage:InsurancePlan
+#     and namePred coverage:providerName, and the round trip holds in both
+#     directions.
+#
+# ELEVEN DEFECTS, NOT ONE, and they had to move together. The class was one of
+#     them. Eight were predicates: providerName, memberId, groupNumber,
+#     planName, planType, coverageType and subscriberId were written clinical:
+#     where the corpus says coverage:, and sourceRecordId was written health:.
+#     Two were datatypes: effectiveStart and effectiveEnd carried xsd:dateTime
+#     where coverage.ttl:93,99 ranges xsd:date and coverage.shapes.ttl:146
+#     declares sh:datatype xsd:date, so the time component was a midnight-UTC
+#     placeholder.
+#     FIXING ONLY THE CLASS WOULD HAVE BEEN WORSE THAN THE BUG.
+#     coverage:InsurancePlanShape declares sh:minCount 1 at sh:Violation on
+#     coverage:providerName, coverage:memberId and coverage:coverageType.
+#     Retyping the subject while still writing clinical: makes the shape see
+#     these records for the first time and report three violations plus two
+#     datatype violations, on records whose data is correct.
+#     THE EIGHT ARE A PER-TYPE OVERRIDE, NOT A PROPERTY_PREDICATES REMAP.
+#     sourceRecordId is carried by 35 fixtures across other record types and
+#     stays health:sourceRecordId for every one of them; the other seven are
+#     narrower but the reasoning is identical. They join coverage:status in
+#     TYPE_PREDICATE_OVERRIDES.InsurancePlan, and the read side moves with them:
+#     all eight coverage: URIs are in the deserializer's
+#     ADDITIONAL_REVERSE_MAPPINGS, mapping to the same JSON keys the clinical:
+#     and health: spellings already map to, so a pod written either way reads
+#     back in full.
+#     clinical:payorName IS NOT ONE OF THEM AND DOES NOT MOVE. Coverage has no
+#     payor property distinct from coverage:providerName, which is
+#     sh:maxCount 1, so it is a legitimate clinical predicate on a plan.
+#     conformance's coverage-001 expects it under clinical: on a
+#     coverage:InsurancePlan subject, and a blanket "clinical: -> coverage: on a
+#     plan" rewrite passes coverage-002 and -003 and breaks it.
+#
+# clinical=1.16 (UNCHANGED): clinical:CoverageRecord is now READ AND NEVER
+#     WRITTEN, the asymmetry DEPRECATED_TYPE_ALIASES already gave the four
+#     clinical v1.13 classes. The class has been deprecated in favour of
+#     coverage:InsurancePlan since clinical v1.5 (clinical.ttl:187) and every
+#     release of this SDK since v1.3.0 wrote it, so the pods that need the read
+#     side are the ones this SDK produced — refusing them would be a data-loss
+#     bug dressed up as standards compliance. The clinical row does not move:
+#     nothing here implements a newer clinical version, a long-standing
+#     deprecation is simply observed.
+#     Coverage['type'] narrows to 'InsurancePlan'. 'CoverageRecord' stays in
+#     TYPE_TO_MAPPING_KEY so a caller holding the old JSON spelling can still
+#     name it to deserialize(), and it resolves to coverage:InsurancePlan like
+#     the other, so neither spelling can make this SDK write the deprecated
+#     class.
+#
+# THE SHAPES ARE VENDORED NOW, which is what makes any of this checkable.
+#     tests/shapes/ gains coverage.shapes.ttl (and clinical.shapes.ttl is
+#     re-synced, since spec#11 gave both coverage:sourceRecordId and
+#     clinical:payorName an sh:path). Before that, tests/support/shacl.ts's
+#     assertCovered would have refused coverage-001 rather than judging it.
+#     VERIFIED against conformance fixtures coverage-001 through coverage-004,
+#     compared as graphs: all four match their expectedOutput in full, and
+#     coverage-004 earns the sh:minCount violation on coverage:providerName that
+#     its shaclConstraintViolated declares instead of passing unexamined.

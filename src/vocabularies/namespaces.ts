@@ -236,10 +236,15 @@ export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; na
     nameKey: 'conditionName',
     namePred: 'health:conditionName',
   },
+  // Coverage v1.6: an insurance plan is `coverage:InsurancePlan`, written in
+  // the coverage vocabulary. `clinical:CoverageRecord` has been deprecated
+  // since clinical v1.5 and is listed in DEPRECATED_TYPE_ALIASES below, so it
+  // is READ and never written — the same asymmetry the four clinical v1.13
+  // classes get.
   insurance: {
-    rdfType: 'clinical:CoverageRecord',
+    rdfType: 'coverage:InsurancePlan',
     nameKey: 'providerName',
-    namePred: 'clinical:providerName',
+    namePred: 'coverage:providerName',
   },
   'patient-profile': {
     rdfType: 'cascade:PatientProfile',
@@ -383,8 +388,15 @@ export const TYPE_TO_MAPPING_KEY: Record<string, string> = {
   Procedure: 'procedures',
   Encounter: 'encounters',
   FamilyHistoryRecord: 'family-history',
-  CoverageRecord: 'insurance',
+  // InsurancePlan FIRST, and the order is load-bearing: the parser's
+  // `buildMappingKeyToTypeName` takes the first type name reaching a mapping
+  // key as the canonical one, so this is what makes a record READ back as
+  // 'InsurancePlan' rather than under the deprecated spelling.
   InsurancePlan: 'insurance',
+  // Retained so a caller still holding the deprecated JSON spelling can name it
+  // to `deserialize()`. Both resolve to coverage:InsurancePlan, so neither can
+  // make this SDK write clinical:CoverageRecord.
+  CoverageRecord: 'insurance',
   MedicationAdministration: 'medication-administrations',
   ImplantedDevice: 'implanted-devices',
   ImagingStudy: 'imaging-studies',
@@ -412,17 +424,23 @@ export const TYPE_TO_MAPPING_KEY: Record<string, string> = {
   Attachment: 'attachments',
 };
 
-// ─── Deprecated Type Aliases (clinical v1.13) ───────────────────────────────
+// ─── Deprecated Type Aliases (clinical v1.5, v1.13) ─────────────────────────
 
 /**
- * Deprecated `clinical:` class spellings and the `health:` class each one is
- * superseded by.
+ * Deprecated `clinical:` class spellings and the class each one is superseded
+ * by.
  *
  * Clinical v1.13 marked `clinical:LabResult`, `clinical:Condition`,
  * `clinical:Allergy` and `clinical:Immunization` `owl:deprecated true`, each
  * with an `rdfs:seeAlso` pointing at its `health:` equivalent. They were
  * **deprecated, not removed**: the pod export path is still their sole emitter
  * and existing pods contain them.
+ *
+ * `clinical:CoverageRecord` joins them from the other direction. It has been
+ * deprecated in favour of `coverage:InsurancePlan` since clinical v1.5
+ * (`clinical.ttl:187`) and this SDK wrote it anyway, for every coverage record
+ * in every release since v1.3.0 — so the pods needing the read side are the
+ * ones this SDK produced.
  *
  * The resulting asymmetry is deliberate and is implemented here:
  *
@@ -439,6 +457,7 @@ export const DEPRECATED_TYPE_ALIASES: Readonly<Record<string, string>> = {
   [`${NAMESPACES.clinical}Condition`]: `${NAMESPACES.health}ConditionRecord`,
   [`${NAMESPACES.clinical}Allergy`]: `${NAMESPACES.health}AllergyRecord`,
   [`${NAMESPACES.clinical}Immunization`]: `${NAMESPACES.health}ImmunizationRecord`,
+  [`${NAMESPACES.clinical}CoverageRecord`]: `${NAMESPACES.coverage}InsurancePlan`,
 };
 
 // ─── Wellness Container Classes (health v2.5) ───────────────────────────────
