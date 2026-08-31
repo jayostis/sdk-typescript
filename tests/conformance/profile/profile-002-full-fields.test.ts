@@ -41,9 +41,13 @@
  * their expected output, and `profile-003` — which follows the two-document
  * model — is the fixture `validate()` rejects.
  *
- * That refusal is also why this fixture is NOT on `followsTheFixtureContract`:
- * question 7 asks `shaclCheck` for a report, and `shaclCheck` throws here rather
- * than answer. The other six would pass.
+ * THE CONTRACT ASKS QUESTION 7 ANYWAY, and `shaclCheck` throws rather than
+ * answer it. That is the refusal above arriving where it can be seen. It could
+ * be silenced — an argument saying this fixture skips question 7 — and it must
+ * not be: an exemption would be available to every fixture and most attractive
+ * to the one with the most to hide, which is the whole reason the contract has
+ * no such argument. A question that cannot be answered is a question that fails
+ * loudly, naming the three `foaf:` predicates nothing constrains.
  *
  * WHY NOT `triples()`, AND WHAT CHANGED. A blank node compares by its
  * parser-assigned label there, stable within one parse and not across two, so a
@@ -51,9 +55,16 @@
  * against `_:b0_b3` as a disagreement that is not one. That is still true of
  * `triples()`. It is no longer true of the file: `graphDifference` canonicalises
  * both sides under RDFC-1.0, which names a blank node from the graph's own shape
- * rather than from the order it was parsed in, and the whole-graph question is
- * asked below for the first time. The traversals stay, because a canonical diff
- * says a line differs where they say which structure lost which field.
+ * rather than from the order it was parsed in, and questions 2 and 3 are askable
+ * of this fixture for the first time because of it.
+ *
+ * THE TRAVERSALS STAY, and are not made redundant by question 2. A canonical
+ * diff says which LINES differ; a traversal says which STRUCTURE lost which
+ * field. They also differ in what a change to one blank node does: because
+ * canonical labels are derived from the graph, a single missing triple
+ * renumbers the nodes around it and widens the diff to lines that are fine —
+ * question 3's failure on this fixture is one missing `rdf:type` per structure
+ * reported as eight differing lines. The traversal points at the field.
  *
  * `parseTurtle` takes text, so the `serialize()` under test stays visible.
  *
@@ -65,7 +76,8 @@ import { describe, it, expect } from 'vitest';
 import { serialize } from '../../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../../src/deserializer/turtle-parser.js';
 import { loadCascadeRecordFixture } from '../../support/fixtures.js';
-import { cascade, graphDifference, parseTurtle, quadsFromTurtle, rdf } from '../../support/graph.js';
+import { followsTheFixtureContract } from '../../support/fixture-contract.js';
+import { cascade, parseTurtle, rdf } from '../../support/graph.js';
 import type { PatientProfile } from '../../../src/models/patient-profile.js';
 
 const profile002 = loadCascadeRecordFixture('profile-002');
@@ -77,26 +89,10 @@ function serializedProfile() {
 }
 
 describe('profile-002 — Full fields: Patient profile with emergency contact, address, pharmacy, and all demographics', () => {
-  // `task.suite` is the enclosing describe. Asserting the title against the
-  // fixture rather than repeating the string here keeps one copy of it, in the
-  // place a reader sees first, and still fails if the corpus is reworded.
-  it('is the fixture this file thinks it is', ({ task }) => {
-    expect(task.suite?.name).toContain(profile002.description);
-    expect(profile002.shouldAccept).toBe(true);
-  });
-
-  it('writes the graph the corpus expects', async () => {
-    // The outer loop, askable here for the first time — see the header. The
-    // traversals below each check one structure against values written out by
-    // hand; this checks that there is nothing ELSE in the document, and nothing
-    // missing from it, which no number of per-structure assertions can say.
-    const difference = await graphDifference(
-      quadsFromTurtle(serialize(profile002.input)),
-      quadsFromTurtle(profile002.expectedOutput.turtle),
-    );
-
-    expect(difference).toBeNull();
-  });
+  // No `fields` rows: this fixture is POSITIVE, so a healthy SHACL report names
+  // no violation and question 7 has nothing to translate. A row here would be
+  // an assertion about a violation that should not exist.
+  followsTheFixtureContract(profile002, { shouldAccept: true });
 
   it('writes the emergency contact as a typed blank node carrying all three of its fields', () => {
     const contact = serializedProfile().out(cascade.emergencyContact);

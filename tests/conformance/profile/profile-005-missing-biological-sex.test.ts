@@ -1,16 +1,10 @@
 /**
  * `profile-005` — a patient profile with no `cascade:biologicalSex`.
  *
- * NOT on `followsTheFixtureContract`, and it would pass if it were: measured
- * across the corpus it is one of the three fixtures that answer all seven
- * questions today. It is left alone because #46 put exactly one fixture on the
- * contract, so that the contract is proved on one subject before it is spread —
- * nothing but this sentence can say the omission is a boundary rather than an
- * oversight.
- *
- * Its sibling `profile-004` is the converted one; the two make the same shape of
- * claim about different predicates, so they are the cheapest possible
- * before-and-after read of what the contract changes.
+ * On `followsTheFixtureContract`, like its sibling `profile-004`. The two make
+ * the same shape of claim about different predicates — a required field absent,
+ * caught by `sh:minCount` — so what is left hand-written below is only the rule
+ * and the predicate, which the contract does not name.
  *
  * @see tests/conformance/profile/profile-004-missing-dob.test.ts  the same claim, on the contract
  * @see spec/ontologies/core/v1/core.shapes.ttl                    cascade:PatientProfileShape
@@ -20,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 
 import { validate } from '../../../src/validator/index.js';
 import { loadFixture } from '../../support/fixtures.js';
+import { followsTheFixtureContract } from '../../support/fixture-contract.js';
 import { cascade } from '../../support/graph.js';
 import { sh, shaclCheck } from '../../support/shacl.js';
 import type { CascadeRecord } from '../../../src/models/common.js';
@@ -27,12 +22,9 @@ import type { CascadeRecord } from '../../../src/models/common.js';
 const profile005 = loadFixture('profile-005');
 
 describe('profile-005 — Negative: Patient profile missing required biologicalSex field', () => {
-  // `task.suite` is the enclosing describe. Asserting the title against the
-  // fixture rather than repeating the string here keeps one copy of it, in the
-  // place a reader sees first, and still fails if the corpus is reworded.
-  it('is the fixture this file thinks it is', ({ task }) => {
-    expect(task.suite?.name).toContain(profile005.description);
-    expect(profile005.shouldAccept).toBe(false);
+  followsTheFixtureContract(profile005, {
+    shouldAccept: false,
+    fields: [[cascade.biologicalSex, 'biologicalSex']],
   });
 
   it('earns the verdict the fixture declares, from the minCount rule', async () => {
