@@ -6,12 +6,17 @@
  * Measured — a file declaring one test ran five.
  */
 
+import { Readable } from 'stream';
+
 import { Parser } from 'n3';
 import env from '@zazuko/env';
+import JsonLdParser from '@rdfjs/parser-jsonld';
+import { canonize } from 'rdf-canonize';
 import type { AnyPointer } from 'clownface';
 import type { Quad } from '@rdfjs/types';
 
 import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
+import { CONTEXT_URI, getContext } from '../../src/jsonld/context.js';
 
 /**
  * `cascade.dataAbsentReason` rather than a CURIE string or a full IRI.
@@ -106,4 +111,128 @@ function termKey(term: Quad['subject'] | Quad['predicate'] | Quad['object']): st
   }
   if (term.termType === 'BlankNode') return `_:${term.value}`;
   return `<${term.value}>`;
+}
+
+/**
+ * Serves THIS BUILD's context for `CONTEXT_URI`, and refuses every other URL.
+ *
+ * `toJsonLd` writes `"@context": CONTEXT_URI` — a reference, not an inline
+ * context — so expanding its output requires resolving that URL. Left to
+ * itself the parser FETCHES IT, and doing so would break this suite in three
+ * ways at once. It would put live network I/O in a unit test, so the suite
+ * fails offline and in a sandboxed CI. It would make the test slow and flaky
+ * for reasons that have nothing to do with the SDK. And worst, it would
+ * compare `serialize()` against a context served from a WEBSITE rather than
+ * against `getContext()` — so a build whose context had drifted from the
+ * deployed copy would be judged by the deployed copy, which is the wrong
+ * question and looks exactly like the right one.
+ *
+ * Refusing any other URL is the other half. A silent fallback to the network
+ * for an unexpected URL would restore all three problems the moment the SDK
+ * changed what it emits; throwing means the test says so.
+ */
+const CONTEXT_LOADER = {
+  load(url: string): Promise<unknown> {
+    if (url !== CONTEXT_URI) {
+      throw new Error(
+        `Refusing to fetch ${url}. Tests resolve exactly one context — ${CONTEXT_URI}, `
+        + 'served from getContext() — so that they judge this build rather than a deployed one. '
+        + 'A new URL here means the SDK changed what it emits; teach this loader about it.',
+      );
+    }
+    // `getContext()` ALREADY returns `{ "@context": … }` — the whole document,
+    // not the bare context map — and `jsonld-context-parser` reads
+    // `document['@context']` off what it is handed. Wrapping it again nests a
+    // context inside a context, which the parser rejects as a keyword
+    // redefinition of `@context`. It is also not the jsonld.js
+    // `{ contextUrl, document, documentUrl }` envelope, which this loader
+    // rejects as an invalid remote context.
+    return Promise.resolve(getContext());
+  },
+};
+
+/**
+ * A JSON-LD document as quads.
+ *
+ * The parser EXPANDS the document against its context, which is what makes this
+ * usable for comparing one writer against another: a context that maps a term
+ * to the wrong IRI yields the wrong predicate rather than an error, so the
+ * disagreement survives into the graph where it can be seen. A reader that
+ * resolved terms some other way would hide exactly the defect worth catching.
+ *
+ * The context comes from `getContext()`, never the network — see
+ * `CONTEXT_LOADER`.
+ */
+export async function quadsFromJsonLd(doc: object): Promise<Quad[]> {
+  // `Stream<Quad>` is RDF/JS's EventEmitter-based interface, and it does not
+  // declare `Symbol.asyncIterator` — but every implementation of it, this one
+  // included, is a Node `Readable`, which does. The cast asserts the narrower
+  // truth about this parser rather than working around a type that is wrong.
+  const stream = new JsonLdParser({ documentLoader: CONTEXT_LOADER }).import(
+    Readable.from([JSON.stringify(doc)]),
+  ) as unknown as AsyncIterable<Quad>;
+
+  const quads: Quad[] = [];
+  for await (const quad of stream) quads.push(quad);
+  return quads;
+}
+
+/**
+ * One graph's canonical N-Quads lines, sorted.
+ *
+ * This is the tool `triples()` says it is not. A blank node compares by its
+ * parser-assigned LABEL there, which is stable within one parse and not across
+ * two, so `triples()` reads `_:b0_b1` against `_:b0_b3` as a disagreement that
+ * is not one. RDFC-1.0 replaces those labels with ones derived from the graph's
+ * own shape, so two isomorphic graphs produce identical lines and two that
+ * genuinely differ do not.
+ *
+ * Lines rather than the single canonical string, because a difference is worth
+ * reading as a set difference rather than as a wall of text — see
+ * `graphDifference`.
+ */
+export async function canonicalLines(quads: readonly Quad[]): Promise<string[]> {
+  const nquads = await canonize(quads, { algorithm: 'RDFC-1.0' });
+  return nquads.split('\n').filter((line) => line.trim() !== '').sort();
+}
+
+/** What two graphs disagree about, or `null` when they are isomorphic. */
+export interface GraphDifference {
+  onlyInLeft: string[];
+  onlyInRight: string[];
+}
+
+/**
+ * Two graphs compared as graphs, reporting WHAT differs rather than THAT it does.
+ *
+ * `null` for isomorphic, which is what a caller asserts on. The populated form
+ * exists because the failure message is the whole value of this check: a
+ * seventeen-triple graph that disagrees in one predicate produces a diff a
+ * reader can act on, where a boolean produces `expected true, got false`.
+ *
+ * Returned rather than asserted, so it can be called directly with input it
+ * MUST report on. A comparison only ever observed staying silent on a passing
+ * fixture has not been observed — `tests/README.md`, "A detector is proven by
+ * making it speak."
+ */
+export async function graphDifference(
+  left: readonly Quad[],
+  right: readonly Quad[],
+): Promise<GraphDifference | null> {
+  const [a, b] = await Promise.all([canonicalLines(left), canonicalLines(right)]);
+  const onlyInLeft = a.filter((line) => !b.includes(line));
+  const onlyInRight = b.filter((line) => !a.includes(line));
+
+  return onlyInLeft.length === 0 && onlyInRight.length === 0 ? null : { onlyInLeft, onlyInRight };
+}
+
+/**
+ * Turtle text as quads, for handing to `graphDifference`.
+ *
+ * Named alongside `quadsFromJsonLd` rather than left as a spread of
+ * `parseDataset`, so the two sides of a cross-format comparison read as the
+ * same kind of step and neither looks like the special case.
+ */
+export function quadsFromTurtle(turtle: string): Quad[] {
+  return new Parser().parse(turtle);
 }

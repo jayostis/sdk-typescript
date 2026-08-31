@@ -32,7 +32,8 @@
     "tests/terms/interpretation-source-code.test.ts",
     "tests/support/shacl.test.ts",
     "tests/support/fixtures.test.ts",
-    "tests/support/n3.d.ts"
+    "tests/support/n3.d.ts",
+    "tests/support/rdf-canonize.d.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
