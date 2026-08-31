@@ -542,3 +542,16 @@ pots=1.4
 #     entailment the assertion avoided is stated outright by the class triple,
 #     and health:status there is not caution — it is a status written under a
 #     vocabulary the record's own shape does not read.
+
+# 2026-08-31 — NO BUMP. src/jsonld/ changed and no row moves, deliberately.
+#   `toJsonLd` now writes the class of an inline nested node — cascade:EmergencyContact,
+#   cascade:Address, cascade:PharmacyInfo, cascade:RecordSummary — where before it wrote
+#   the node's children and no rdf:type. None of that is new vocabulary: all four classes
+#   have been in core since v2.2 and this SDK has written them in TURTLE all along. What
+#   changed is that the JSON-LD writer now reads the class from the term instead of not
+#   reading it at all, so bumping core would claim support that already existed in one
+#   format and was missing in the other.
+#   The term is now the source for BOTH formats: defineTerm builds jsonLdFor and
+#   fromJsonLdValue beside outputsFor, and src/jsonld/converter.ts forks on termFor(key)
+#   above the PROPERTY_PREDICATES lookup. A field that is termed no longer needs a row in
+#   that table to survive being written, which is what lets the table shrink (#46).

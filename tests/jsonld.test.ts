@@ -302,6 +302,12 @@ describe('JSON-LD Conversion', () => {
         if (ctx[key] === undefined) unresolved.push(key);
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
           for (const nestedKey of Object.keys(value as Record<string, unknown>)) {
+            // Keywords are skipped at BOTH levels, as they are at the top one
+            // above. A nested node carries `@type` — the class its term
+            // declares, written by `jsonLdFor` — and a keyword is not a term:
+            // it has no context entry and cannot be given one. Only the child
+            // property names are this check's business.
+            if (nestedKey.startsWith('@')) continue;
             if (ctx[nestedKey] === undefined) unresolved.push(`${key}.${nestedKey}`);
           }
         }

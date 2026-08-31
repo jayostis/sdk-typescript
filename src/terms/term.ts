@@ -235,6 +235,27 @@ export type Term = TermSpec & {
    * `predicateByType` / `ruleByType`. Returns `[]` when the field is absent.
    */
   outputsFor(record: Record<string, unknown>): Output[];
+
+  /**
+   * The same field, as it belongs in a JSON-LD document. `undefined` when the
+   * field is absent, which is what `outputsFor` says with `[]`.
+   *
+   * Takes the RECORD, like `outputsFor`, so resolving `ruleByType` stays here
+   * rather than at each call site. A caller that had to pull the value and the
+   * record type out itself would be a second place that knows how a term
+   * resolves, which is how the two come to disagree.
+   */
+  jsonLdFor(record: Record<string, unknown>): unknown;
+
+  /**
+   * One field's value read back off a JSON-LD document — the inverse of
+   * {@link Term.jsonLdFor}.
+   *
+   * Takes the value rather than the document: the reader has already matched
+   * the key, and handing the whole document back would invite a second lookup
+   * of the field it just found.
+   */
+  fromJsonLdValue(value: unknown, recordType?: string): unknown;
 };
 
 /** The prefix a blank node's nested fields are written under by default. */
@@ -815,6 +836,87 @@ function outputsForMember(
  * registered predicate. Checked HERE, at declaration, so a bad override takes
  * its own module down at load time rather than writing bad Turtle at runtime.
  */
+/**
+ * The forms a term can be written in JSON-LD, and a refusal for the rest.
+ *
+ * `FieldRule` names eight; four have no term yet. An unhandled form THROWS
+ * rather than passing the value through, because passing through is not
+ * "skipped", it is "written wrongly": an `iriList` would become an array of
+ * bare strings where the graph needs an ordered list of IRIs, and nothing would
+ * report it. Refusing what has no expressible form, naming the field, is the
+ * same rule `outputsForMember` follows for a `blankNode` it cannot write.
+ *
+ * `literal` and `number` pass through because the CONTEXT carries their
+ * datatype — `dateOfBirth` is `{ "@id": …, "@type": "xsd:date" }` there — and a
+ * second copy of that decision here is how two writers come to disagree.
+ */
+function jsonLdValue(key: string, rule: FieldRule, value: unknown): unknown {
+  switch (rule.form) {
+    case 'literal':
+    case 'number':
+      return value;
+    case 'blankNode':
+      return withNodeType(rule.rdfType, value);
+    default:
+      throw unwritableAsJsonLd(key, rule.form);
+  }
+}
+
+/**
+ * The inverse of {@link jsonLdValue}, and not optional.
+ *
+ * A record read back out of its own JSON-LD has to be the record that went in,
+ * and no model declares an `@type` key on a nested structure — so without this
+ * a round trip hands the caller back an `emergencyContact` carrying a key they
+ * never set. The Turtle pair already works this way: the writer puts `rdf:type`
+ * on the node and the reader drops it rebuilding the object.
+ */
+function recordValue(key: string, rule: FieldRule, value: unknown): unknown {
+  switch (rule.form) {
+    case 'literal':
+    case 'number':
+      return value;
+    case 'blankNode':
+      return withoutNodeType(value);
+    default:
+      throw unwritableAsJsonLd(key, rule.form);
+  }
+}
+
+function unwritableAsJsonLd(key: string, form: string): Error {
+  return new Error(
+    `No JSON-LD form for '${key}': the term declares form '${form}', which defineTerm `
+    + 'does not write yet. Add the case rather than letting the value through — an '
+    + 'unhandled form is written wrongly, not skipped.',
+  );
+}
+
+/**
+ * A nested node carrying the class its term declares.
+ *
+ * `rdfType` is optional, and absent means an UNTYPED node rather than an empty
+ * one, so a term declaring none leaves the value alone. Where it IS declared,
+ * omitting it is not cosmetic: a shape targeting `cascade:EmergencyContact`
+ * never reaches an untyped node, so the contact is valid Turtle, constrained by
+ * nothing, and invisible to any query asking for a contact.
+ */
+function withNodeType(rdfType: string | undefined, value: unknown): unknown {
+  if (rdfType === undefined) return value;
+  if (Array.isArray(value)) return value.map((member) => withNodeType(rdfType, member));
+  if (typeof value !== 'object' || value === null) return value;
+
+  return { '@type': rdfType, ...(value as Record<string, unknown>) };
+}
+
+/** The same node with the class taken back off. */
+function withoutNodeType(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNodeType);
+  if (typeof value !== 'object' || value === null) return value;
+
+  const { '@type': _class, ...rest } = value as Record<string, unknown>;
+  return rest;
+}
+
 export function defineTerm(spec: TermSpec): Term {
   const { key, predicateByType } = spec;
 
@@ -871,6 +973,18 @@ export function defineTerm(spec: TermSpec): Term {
       return members(value).flatMap((member) =>
         outputsForMember(member, key, activePredicate, activeRule),
       );
+    },
+
+    jsonLdFor(record: Record<string, unknown>): unknown {
+      const value = record[key];
+      if (!present(value)) return undefined;
+
+      const recordType = typeof record.type === 'string' ? record.type : undefined;
+      return jsonLdValue(key, ruleFor(spec, recordType), value);
+    },
+
+    fromJsonLdValue(value: unknown, recordType?: string): unknown {
+      return recordValue(key, ruleFor(spec, recordType), value);
     },
   };
 }
