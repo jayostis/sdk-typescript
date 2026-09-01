@@ -121,8 +121,8 @@ describe('absent-002 — Negative: raw HL7 v3 NullFlavor code written straight i
 
   it('reports the same violation through the SHIPPED validator', () => {
     // The verdict above is TEST-TIME only: `rdf-validate-shacl` is a
-    // devDependency and tests/shapes/ is not in package.json's `files`, so a
-    // consumer installing this package can reach none of it. `validate()` is
+    // devDependency and the shapes are read from a spec checkout this package
+    // does not contain, so a consumer installing it can reach none of it. `validate()` is
     // the whole of what ships, and "UNK" is exactly the input a real caller
     // sends — a raw HL7 v3 NullFlavor pasted through from a source system.
     expect(validate(absent002.input).errors.map((e) => e.field)).toContain('dataAbsentReason');
@@ -162,7 +162,7 @@ describe('absent-003 — Negative: two cascade:dataAbsentReason values on one re
 
   it('earns the verdict the fixture declares, from the cardinality rule', async () => {
     // `toHaveLength(1)` and not more: the shape's sh:in
-    // (tests/shapes/core.shapes.ttl:693) admits both 'not-asked' and
+    // (core.shapes.ttl, cascade:DataAbsentReasonShape) admits both 'not-asked' and
     // 'asked-unknown', so sh:maxCount is the only rule left for this fixture to
     // break. A second violation would mean the values changed, not the writer.
     const report = await shaclCheck(absent003.input);

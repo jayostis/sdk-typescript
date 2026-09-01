@@ -30,40 +30,16 @@
  * — the shape ahead of the term — that produces the false rejection.
  *
  * @see tests/rules/undeclared-child.test.ts  the rule this obligation serves
- * @see tests/shapes/README.md                how the shapes get here
+ * @see tests/support/spec-sources.ts  how the shapes get here
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 import { allTerms } from '../../src/terms/index.js';
 import { childPredicatesOf } from '../../src/terms/index.js';
-import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
-import { parseDataset } from '../support/graph.js';
+import { shapesGraph, expand, SHACL_NS } from '../support/spec-sources.js';
 
-const shapesDir = resolve(dirname(fileURLToPath(import.meta.url)), '../shapes');
-const MANIFEST = JSON.parse(readFileSync(resolve(shapesDir, 'vendored.json'), 'utf-8')) as Record<
-  string,
-  { specPath: string }
->;
-
-const SHAPES = parseDataset(
-  Object.keys(MANIFEST)
-    .sort()
-    .map((f) => readFileSync(resolve(shapesDir, f), 'utf-8'))
-    .join('\n'),
-);
-
-const SHACL = 'http://www.w3.org/ns/shacl#';
-
-/** `prefix:localName` → full IRI, so a term's spelling can be compared to a shape's. */
-function expand(curie: string): string {
-  const [prefix, local] = curie.split(':');
-  const ns = (NAMESPACES as Record<string, string>)[prefix];
-  return ns ? `${ns}${local}` : curie;
-}
+const SHAPES = shapesGraph();
 
 /**
  * Every `sh:path` IRI reachable from the node shape targeting `classIri`.
@@ -76,13 +52,13 @@ function expand(curie: string): string {
  */
 function pathsOfShapeTargeting(classIri: string): Set<string> | null {
   const nodeShapes = [...SHAPES]
-    .filter((q) => q.predicate.value === `${SHACL}targetClass` && q.object.value === classIri)
+    .filter((q) => q.predicate.value === `${SHACL_NS}targetClass` && q.object.value === classIri)
     .map((q) => q.subject.value);
   if (nodeShapes.length === 0) return null;
 
   const propertyShapes = new Set(
     [...SHAPES]
-      .filter((q) => q.predicate.value === `${SHACL}property` && nodeShapes.includes(q.subject.value))
+      .filter((q) => q.predicate.value === `${SHACL_NS}property` && nodeShapes.includes(q.subject.value))
       .map((q) => q.object.value),
   );
 
@@ -90,7 +66,7 @@ function pathsOfShapeTargeting(classIri: string): Set<string> | null {
     [...SHAPES]
       .filter(
         (q) =>
-          q.predicate.value === `${SHACL}path` &&
+          q.predicate.value === `${SHACL_NS}path` &&
           propertyShapes.has(q.subject.value) &&
           q.object.termType === 'NamedNode',
       )

@@ -103,7 +103,7 @@ export function termFindings(record: CascadeEntity): ValidationError[] {
     // The writer emits it — `childrenOf` writes every present key — so the
     // triple is in the graph under `cascade:<key>`, a predicate no `sh:path`
     // declares. This is the only place that is reportable. Nothing in
-    // `tests/shapes/` is `sh:closed`, so SHACL returns `conforms: true` on such
+    // no shape spec publishes is `sh:closed`, so SHACL returns `conforms: true` on such
     // a graph, indistinguishable from one that satisfied every constraint; and
     // the shapes are a devDependency besides, so a consumer's only judge is
     // this function. `spec` issue jayostis/spec#2 asks for the shape to close,

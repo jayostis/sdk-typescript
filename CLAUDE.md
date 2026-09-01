@@ -30,9 +30,10 @@ Both still refuse to INVENT. A value with no expressible form throws, naming the
 inexpressibility, not invalidity, and the two are not the same question.
 
 **`validate()` is the only judge, and it ships alone.** `rdf-validate-shacl` is a devDependency and
-`tests/shapes/` is not in `package.json`'s `files`, so SHACL is a test-time tool and nothing a
-consumer installs can reach it. Anything the shapes should catch in production has to be reachable
-from `validate()` — today that means a rule a term declares, since `validateCardinality` reads
+the shapes are read from a `spec` checkout that is not part of this package at all, so SHACL is a
+test-time tool and nothing a consumer installs can reach it. Anything the shapes should catch in
+production has to be reachable from `validate()` — today that means a rule a term declares, since
+`validateCardinality` reads
 `maxCount` off `termFor(field)` and knows nothing about the rest.
 
 ## MANDATORY: Deployment Discipline

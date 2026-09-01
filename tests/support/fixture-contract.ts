@@ -196,8 +196,9 @@ export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp):
 
   it('earns from the shipped validator the verdict the corpus declares', () => {
     // `validate()` is the whole of what ships: `rdf-validate-shacl` is a
-    // devDependency and `tests/shapes/` is not in package.json's `files`, so
-    // nothing a consumer installs can reach the SHACL verdict below.
+    // devDependency and the shapes are read from a spec checkout this package
+    // does not contain, so nothing a consumer installs can reach the SHACL
+    // verdict below.
     expect(validate(fixture.input).valid).toBe(fixture.shouldAccept);
   });
 

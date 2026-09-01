@@ -354,10 +354,10 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
 /**
  * Validate a single CascadeRecord for structural correctness.
  *
- * THE ONLY JUDGE THAT SHIPS. `rdf-validate-shacl` is a devDependency and
- * `tests/shapes/` is not in `package.json`'s `files`, so nothing a consumer
- * installs can reach SHACL: anything the shapes should catch in production has
- * to be reachable from here.
+ * THE ONLY JUDGE THAT SHIPS. `rdf-validate-shacl` is a devDependency and the
+ * shapes are read from a `spec` checkout that this package does not contain, so
+ * nothing a consumer installs can reach SHACL: anything the shapes should catch
+ * in production has to be reachable from here.
  *
  * Three layers, and they answer different questions. `validateBase` and the
  * per-type checks are hand-transcribed from the shapes and drift in both

@@ -55,11 +55,20 @@ export function turtleFiles(root: string): string[] {
  * is spec's directory layout, the second is a file only spec publishes. A
  * template literal counts — `` `ontologies/${name}` `` is how the deleted sync
  * script wrote one.
+ *
+ * A PATH, not the word. `ontologies/` must be followed by a path segment, an
+ * interpolation, or the end of the literal — a template head stops there, and
+ * the rest of the path is the expression after it. So the resolver's own
+ * refusal, "it holds no ontologies/ directory", is prose about a layout rather
+ * than a path anything opens, and needs no exemption to stay silent. `except` is for the files that must write real paths down to
+ * prove something, and they are named at the call site.
  */
-export function specPathLiterals(root: string): string[] {
+export function specPathLiterals(root: string, except: string[] = []): string[] {
+  const spared = new Set(except);
   const found: string[] = [];
 
   for (const file of filesUnder(root).filter((f) => /\.[mc]?tsx?$/.test(f))) {
+    if (spared.has(asPosix(root, file))) continue;
     const parsed = ts.createSourceFile(
       file,
       readFileSync(file, 'utf-8'),
@@ -71,7 +80,7 @@ export function specPathLiterals(root: string): string[] {
     const visit = (node: ts.Node): void => {
       if (
         (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) &&
-        /ontologies\/|\.shapes\.ttl/.test(node.text)
+        /ontologies\/(?:[\w{$]|$)|\.shapes\.ttl/.test(node.text)
       ) {
         found.push(`${asPosix(root, file)} -> ${node.text}`);
       }

@@ -26,39 +26,15 @@
  * claims, whose shape says something the term does not.
  *
  * @see tests/rules/min-length.test.ts  the rule this obligation serves
- * @see tests/shapes/README.md          how the shapes get here
+ * @see tests/support/spec-sources.ts  how the shapes get here
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 import { allTerms } from '../../src/terms/index.js';
-import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
-import { parseDataset } from '../support/graph.js';
+import { shapesGraph, expand, SHACL_NS } from '../support/spec-sources.js';
 
-const shapesDir = resolve(dirname(fileURLToPath(import.meta.url)), '../shapes');
-const MANIFEST = JSON.parse(readFileSync(resolve(shapesDir, 'vendored.json'), 'utf-8')) as Record<
-  string,
-  { specPath: string }
->;
-
-const SHAPES = parseDataset(
-  Object.keys(MANIFEST)
-    .sort()
-    .map((f) => readFileSync(resolve(shapesDir, f), 'utf-8'))
-    .join('\n'),
-);
-
-const SHACL = 'http://www.w3.org/ns/shacl#';
-
-/** `prefix:localName` → full IRI, so a term's spelling can be compared to a shape's. */
-function expand(curie: string): string {
-  const [prefix, local] = curie.split(':');
-  const ns = (NAMESPACES as Record<string, string>)[prefix];
-  return ns ? `${ns}${local}` : curie;
-}
+const SHAPES = shapesGraph();
 
 /**
  * predicate IRI → the longest `sh:minLength` any shape puts on it.
@@ -77,14 +53,14 @@ function expand(curie: string): string {
 const SHAPE_MIN_LENGTHS: ReadonlyMap<string, number> = (() => {
   const pathOf = new Map<string, string>();
   for (const q of SHAPES) {
-    if (q.predicate.value === `${SHACL}path` && q.object.termType === 'NamedNode') {
+    if (q.predicate.value === `${SHACL_NS}path` && q.object.termType === 'NamedNode') {
       pathOf.set(q.subject.value, q.object.value);
     }
   }
 
   const longest = new Map<string, number>();
   for (const q of SHAPES) {
-    if (q.predicate.value !== `${SHACL}minLength`) continue;
+    if (q.predicate.value !== `${SHACL_NS}minLength`) continue;
     const path = pathOf.get(q.subject.value);
     if (!path) continue;
     const declared = Number(q.object.value);

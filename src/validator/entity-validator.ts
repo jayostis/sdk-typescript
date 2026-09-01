@@ -98,7 +98,7 @@ export interface Finding {
  *
  * ── WHAT THE SHAPES SAY AND THIS DOES NOT YET READ ────────────────────────────
  *
- * Counted over the four vendored files in `tests/shapes/`. Three constraints are
+ * Counted over the four vocabularies `spec-sources.json` declares. Three constraints are
  * modelled — `sh:minCount` (136), `sh:maxCount` (381, on the term), `sh:in` (96,
  * on the term) — plus `sh:minLength` (30, on the term). Everything below is
  * published, judged by `pyshacl` in the conformance corpus, and invisible to

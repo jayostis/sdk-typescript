@@ -93,7 +93,17 @@ describe('specPathLiterals', () => {
     // `spec-sources.json` is the one place a spec path is written down, and it
     // is JSON: this walks TypeScript, so the manifest is out of scope by
     // construction rather than by an exception.
-    expect(specPathLiterals(repoRoot)).toEqual([]);
+    //
+    // The two spared files are the ones that BUILD scratch spec checkouts to
+    // prove a resolver refuses or resolves — they have to name real paths to do
+    // it. No file that reads spec for a verdict is spared, which is the rule
+    // this check is for.
+    expect(
+      specPathLiterals(repoRoot, [
+        'tests/spec-single-source.test.ts',
+        'tests/support/spec-sources.test.ts',
+      ]),
+    ).toEqual([]);
   });
 });
 
