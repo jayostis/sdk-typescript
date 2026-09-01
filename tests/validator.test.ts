@@ -179,7 +179,29 @@ describe('Validator', () => {
       expect(errorFields(result)).toContain('medicationName');
     });
 
-    it('a Medication with empty medicationName produces an error', () => {
+    // SKIPPED — needs a constraint the vocabulary does not yet state, and the
+    // code to read it. The value is TWO SPACES, not the empty string.
+    //
+    // `sh:minLength` is enforced, and `sh:minLength 1` does not mean non-empty:
+    // SHACL measures the value node after conversion to string, so `"  "` is
+    // length 2 and conforms. `""` IS reported — see tests/rules/min-length.test.ts.
+    // The constraint that would reject whitespace is `sh:pattern`, and no
+    // vendored shape declares one on any free-text field: all 28 `sh:pattern`
+    // declarations are format checks on coded values (cptCode, contentHash,
+    // schemaVersion). The trim this test assumes was an implementation detail of
+    // the hardcoded check it replaced, never a Cascade rule.
+    //
+    // Both halves are filed and BOTH are needed:
+    //
+    //   https://github.com/jayostis/spec/issues/26
+    //     spec: add sh:pattern so a required field cannot be whitespace
+    //   https://github.com/jayostis/sdk-typescript/issues/53
+    //     this SDK: read sh:pattern at all — 28 are declared, 0 are read
+    //
+    // Adding a `.trim()` here instead would reject records `pyshacl` accepts,
+    // which is the divergence tests/support/fixture-contract.ts exists to catch.
+    // Un-skip when both land.
+    it.skip('a Medication with empty medicationName produces an error (spec#26 + #53)', () => {
       const result = validate(
         makeRecord('MedicationRecord', { medicationName: '  ', isActive: true }),
       );
@@ -366,7 +388,35 @@ describe('Validator', () => {
       expect(errorFields(result)).toContain('vitalType');
     });
 
-    it('a VitalSign missing unit produces an error', () => {
+    // SKIPPED — undecided, not broken. `validate()` no longer requires `unit`
+    // because nothing in the vocabulary does, and whether that is right is an
+    // open question rather than a defect either way.
+    //
+    // `clinical:VitalSignShape` says so explicitly, in a comment rather than by
+    // omission: `# Optional: unit`, the same phrasing it uses for `value`
+    // directly above. `src/models/vital-sign.ts` declares `unit: string`,
+    // non-optional. One of the two has to move.
+    //
+    //   https://github.com/jayostis/sdk-typescript/issues/54
+    //     decide whether the model relaxes or the shape tightens — covers
+    //     ConditionRecord.status, which is the same disagreement
+    //
+    // NOT settled by the corpus, which is what makes it a question. #3 settled
+    // the same argument for `resultValue` because `absent-001` is a
+    // shouldAccept fixture carrying no resultValue — a record that must be
+    // accepted while missing the field. Every vital-sign fixture carries a
+    // unit, so the corpus is silent here rather than supportive.
+    //
+    // A SEPARATE DEFECT ON THE SAME PREDICATE, which does not block this and is
+    // not what this test is about: `clinical:unit` is declared
+    // `rdfs:domain clinical:LabResult`, so every vital sign carrying one
+    // entails it is a lab result — including the eight in the reference pod.
+    //
+    //   https://github.com/jayostis/spec/issues/27
+    //
+    // Left asserting the old behaviour so that whichever way #54 goes, this
+    // turns red and gets revisited. Un-skip when #54 is decided.
+    it.skip('a VitalSign missing unit produces an error (#54)', () => {
       const result = validate(
         makeRecord('VitalSign', {
           vitalType: 'heartRate',
@@ -460,7 +510,28 @@ describe('Validator', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('a PatientProfile missing givenName produces an error', () => {
+    // SKIPPED — blocked upstream, not a defect in this file.
+    //
+    // `validate()` used to require `givenName` and `familyName` from a hardcoded
+    // switch case. NO vendored shape declares an `sh:path` for either predicate,
+    // and `src/models/patient-profile.ts` marks both optional — so the
+    // requirement had no source in the vocabulary or in the model. It is gone,
+    // and these two assert it.
+    //
+    // Not merely unrequired: `tests/support/shacl.ts` REFUSES to judge a record
+    // carrying `foaf:givenName` / `foaf:familyName` rather than return the
+    // vacuous `conforms: true` that an unconstrained predicate produces. There
+    // is no SHACL verdict to check against in either direction.
+    //
+    //   https://github.com/jayostis/sdk-typescript/issues/47
+    //   blocked in turn on
+    //   https://github.com/jayostis/sdk-typescript/issues/35
+    //
+    // #47 cannot be answered before #35 decides whether the always-private
+    // health document carries a patient name at all. Left asserting the old
+    // behaviour, so whichever way #35 goes these turn red and get revisited
+    // rather than being silently forgotten. Un-skip when #35 lands.
+    it.skip('a PatientProfile missing givenName produces an error (#47, blocked on #35)', () => {
       const result = validate(
         makeRecord('PatientProfile', { familyName: 'Doe' }),
       );
@@ -468,7 +539,11 @@ describe('Validator', () => {
       expect(errorFields(result)).toContain('givenName');
     });
 
-    it('a PatientProfile missing familyName produces an error', () => {
+    // SKIPPED — same block as the test above.
+    //   https://github.com/jayostis/sdk-typescript/issues/47
+    //   blocked in turn on
+    //   https://github.com/jayostis/sdk-typescript/issues/35
+    it.skip('a PatientProfile missing familyName produces an error (#47, blocked on #35)', () => {
       const result = validate(
         makeRecord('PatientProfile', { givenName: 'Jane' }),
       );
@@ -476,7 +551,30 @@ describe('Validator', () => {
       expect(errorFields(result)).toContain('familyName');
     });
 
-    it('a PatientProfile with empty givenName produces an error', () => {
+    // SKIPPED — blocked on FOUR issues, and it is the only test here that needs
+    // all of them. Two independent reasons stack:
+    //
+    // 1. WHETHER `givenName` IS REQUIRED AT ALL. No vendored shape declares an
+    //    `sh:path` for `foaf:givenName`, the model marks it optional, and
+    //    `tests/support/shacl.ts` refuses to judge a record carrying it rather
+    //    than return a vacuous conforms:true.
+    //
+    //      https://github.com/jayostis/sdk-typescript/issues/47
+    //      blocked in turn on
+    //      https://github.com/jayostis/sdk-typescript/issues/35
+    //
+    // 2. WHETHER `"  "` COUNTS AS ABSENT, which is a separate question and would
+    //    still be open even if #35 made `givenName` required tomorrow. The value
+    //    is two spaces; `sh:minLength 1` measures characters, so it conforms,
+    //    and no shape declares an `sh:pattern` on any free-text field.
+    //
+    //      https://github.com/jayostis/spec/issues/26
+    //      https://github.com/jayostis/sdk-typescript/issues/53
+    //
+    // See the same second reason on `a Medication with empty medicationName`
+    // above, which needs only that half. Un-skip when #35 and spec#26 are both
+    // decided; either alone leaves this failing.
+    it.skip('a PatientProfile with empty givenName produces an error (#47/#35 + spec#26/#53)', () => {
       const result = validate(makeValidPatientProfile({ givenName: '  ' }));
       expect(result.valid).toBe(false);
       expect(errorFields(result)).toContain('givenName');
