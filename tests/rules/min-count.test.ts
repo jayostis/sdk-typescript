@@ -21,7 +21,7 @@ import { describe, it, expect } from 'vitest';
 
 import { validate } from '../../src/validator/index.js';
 import { allTerms, termFor } from '../../src/terms/index.js';
-import { severityFor } from '../../src/terms/term.js';
+import { severityFor } from '../../src/terms/index.js';
 import { errorFields, labResult, patientProfile, record } from './records.js';
 
 describe('sh:minCount', () => {

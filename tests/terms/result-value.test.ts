@@ -18,7 +18,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { termFor } from '../../src/terms/index.js';
-import { requirePredicate } from '../../src/terms/term.js';
+import { requirePredicate } from '../../src/terms/index.js';
 
 const LAB = { id: 'urn:uuid:lab008-aaaa-bbbb-cccc-ddddeeeeffff', type: 'LabResultRecord' };
 const outputs = (value: unknown) => termFor('resultValue')?.outputsFor({ ...LAB, resultValue: value });

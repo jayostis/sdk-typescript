@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { defineTerm, requirePredicate } from '../../src/terms/term.js';
+import { defineTerm, requirePredicate } from '../../src/terms/index.js';
 import { termFor } from '../../src/terms/index.js';
 
 describe('requirePredicate', () => {

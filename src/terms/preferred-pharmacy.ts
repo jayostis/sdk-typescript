@@ -21,7 +21,8 @@
  * @see spec/ontologies/core/v1/core.ttl  cascade:PharmacyInfo
  */
 
-import { defineTerm, requirePredicate } from './term.js';
+import { defineTerm } from './term.js';
+import { requirePredicate } from './predicate.js';
 
 export const preferredPharmacy = defineTerm({
   key: 'preferredPharmacy',

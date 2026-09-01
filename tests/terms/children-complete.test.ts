@@ -39,7 +39,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 import { allTerms } from '../../src/terms/index.js';
-import { childPredicatesOf } from '../../src/terms/term.js';
+import { childPredicatesOf } from '../../src/terms/index.js';
 import { NAMESPACES } from '../../src/vocabularies/namespaces.js';
 import { parseDataset } from '../support/graph.js';
 

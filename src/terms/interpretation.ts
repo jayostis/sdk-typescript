@@ -35,7 +35,8 @@
  * @see spec/ontologies/health/v1/health.shapes.ttl  health:LabResultRecordShape
  */
 
-import { defineTerm, requirePredicate } from './term.js';
+import { defineTerm } from './term.js';
+import { requirePredicate } from './predicate.js';
 
 export const interpretation = defineTerm({
   key: 'interpretation',

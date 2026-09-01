@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { TurtleBuilder, SubjectBuilder } from '../src/serializer/turtle-builder.js';
-import type { Output } from '../src/terms/term.js';
+import type { Output } from '../src/terms/index.js';
 
 const SUBJECT = '<urn:uuid:rec-1>';
 

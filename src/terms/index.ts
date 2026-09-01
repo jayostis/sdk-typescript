@@ -12,10 +12,18 @@
  * @module terms
  */
 
+export * from './types.js';
+export * from './predicate.js';
+export * from './rule.js';
+export * from './children.js';
+export * from './turtle.js';
+export * from './json-ld.js';
+export * from './value.js';
 export * from './term.js';
 
-import type { Term } from './term.js';
-import { childPredicatesOf, writesBlankNode } from './term.js';
+import type { Term } from './types.js';
+import { childPredicatesOf } from './children.js';
+import { writesBlankNode } from './rule.js';
 import { address } from './address.js';
 import { biologicalSex } from './biological-sex.js';
 import { clinicalSummary } from './clinical-summary.js';

@@ -22,7 +22,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { termFor } from '../../src/terms/index.js';
-import { requirePredicate } from '../../src/terms/term.js';
+import { requirePredicate } from '../../src/terms/index.js';
 
 const PROFILE = { id: 'urn:uuid:profile02-aaaa-bbbb-cccc-ddddeeeeffff', type: 'PatientProfile' };
 

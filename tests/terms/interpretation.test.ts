@@ -18,7 +18,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { termFor } from '../../src/terms/index.js';
-import { requirePredicate } from '../../src/terms/term.js';
+import { requirePredicate } from '../../src/terms/index.js';
 
 const LAB = { id: 'urn:uuid:lab010-aaaa-bbbb-cccc-ddddeeeeffff', type: 'LabResultRecord' };
 const VITAL = { id: 'urn:uuid:vs001-aaaa-bbbb-cccc-ddddeeeeffff', type: 'VitalSign' };

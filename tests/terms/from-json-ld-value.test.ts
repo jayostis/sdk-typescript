@@ -16,7 +16,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { defineTerm, requirePredicate } from '../../src/terms/term.js';
+import { defineTerm, requirePredicate } from '../../src/terms/index.js';
 
 const emergencyContact = defineTerm({
   key: 'emergencyContact',
