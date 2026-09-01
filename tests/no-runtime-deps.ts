@@ -17,12 +17,21 @@ import { join, relative } from 'node:path';
 
 import ts from 'typescript';
 
-/** Every `.ts` file under `dir`, recursively, as absolute paths. */
+/**
+ * Every TypeScript file under `dir`, recursively, as absolute paths.
+ *
+ * `.mts`, `.cts` and `.tsx` as well as `.ts`, none of which `endsWith('.ts')`
+ * is true for. `src/` holds none of them today, and that is the reason to match
+ * them rather than not to: a file the walk never opens is one the report calls
+ * clean, so the check would answer "no third-party import" when what happened
+ * was that it did not look. `.d.ts` is deliberately included — a declaration
+ * file naming a package is shipped to consumers in `dist/`.
+ */
 function sourcesUnder(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) return sourcesUnder(full);
-    return entry.name.endsWith('.ts') ? [full] : [];
+    return /\.[mc]?tsx?$/.test(entry.name) ? [full] : [];
   });
 }
 
@@ -30,13 +39,17 @@ function sourcesUnder(dir: string): string[] {
  * Every module specifier `source` imports, in the order they are written.
  *
  * Static `import` and `export ... from` carry a `moduleSpecifier`; a dynamic
- * `import()` is a call whose callee is the `import` keyword. A dynamic import
- * whose argument is not a literal — `import(name)` — names no specifier to
- * report, and `src/` writes none; a computed specifier is the one form this
+ * `import()` is a call whose callee is the `import` keyword; an inline
+ * `import('n3').Quad` in a TYPE position is none of those — it is an
+ * `ImportTypeNode`, and it is the form that survives into the emitted `.d.ts`,
+ * where a consumer resolves it against their own `node_modules`. A dynamic
+ * import whose argument is not a literal — `import(name)` — names no specifier
+ * to report, and `src/` writes none; a computed specifier is the one form this
  * function cannot see.
  */
 function specifiersIn(source: string, fileName: string): string[] {
-  const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, kind);
   const found: string[] = [];
 
   const visit = (node: ts.Node): void => {
@@ -49,6 +62,12 @@ function specifiersIn(source: string, fileName: string): string[] {
       ts.isStringLiteral(node.arguments[0])
     ) {
       found.push(node.arguments[0].text);
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteral(node.argument.literal)
+    ) {
+      found.push(node.argument.literal.text);
     }
     ts.forEachChild(node, visit);
   };
