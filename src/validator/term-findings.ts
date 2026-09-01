@@ -13,7 +13,15 @@
  * @module validator/term-findings
  */
 
-import { allTerms, childPredicateFor, ownEntry, ruleFor, severityFor, termFor } from '../terms/index.js';
+import {
+  DEFAULT_NESTED_PREFIX,
+  allTerms,
+  childPredicateFor,
+  ownEntry,
+  ruleFor,
+  severityFor,
+  termFor,
+} from '../terms/index.js';
 import { undeclaredChildKeys } from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Finding, RecordFields } from './entity-validator.js';
@@ -123,7 +131,7 @@ export function termFindings(record: CascadeEntity): ValidationError[] {
           // `cascade:https://other.example.org/ns#wardCount` — a predicate
           // nothing writes, in a message whose whole job is to name the one
           // that is written.
-          `${childPredicateFor(child, rule.nestedPrefix ?? 'cascade')} is written ` +
+          `${childPredicateFor(child, rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX)} is written ` +
           `under no domain, range or shape`,
         severity: 'error',
       });
