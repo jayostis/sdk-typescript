@@ -49,11 +49,21 @@ function sourcesUnder(dir: string): string[] {
  * `import cf = require('clownface')` is the fourth, and not a dead one: under
  * `module: NodeNext` it compiles and tsc emits a `createRequire(import.meta.url)`
  * into the JavaScript, so an archaic-looking spelling takes a live runtime
- * dependency.
+ * dependency. A plain `require('n3')` is the fifth — how a `.cts` file loads a
+ * package, and how an ESM file does through `createRequire`.
  *
- * A dynamic import whose argument is not a literal — `import(name)` — names no
- * specifier to report, and `src/` writes none; a computed specifier is the one
- * form this function cannot see.
+ * Two forms remain invisible, and neither is an oversight:
+ *
+ * - A COMPUTED specifier. `import(name)` and `require(name)` name nothing to
+ *   report, and a `require` aliased to another identifier is the same problem
+ *   wearing a different hat. `src/` writes neither.
+ * - `/// <reference types="n3" />`. Detectable — it is on
+ *   `SourceFile.typeReferenceDirectives`, not in the AST — and deliberately not
+ *   read. Compiled under this repo's settings the directive does NOT reach the
+ *   emitted `.d.ts`, used or unused, so no consumer inherits it; meanwhile
+ *   `/// <reference types="node" />` is legitimate and idiomatic, and reading
+ *   directives would flag it on day one. A guard that needs an allow-list
+ *   entry immediately is one somebody switches off.
  */
 function specifiersIn(source: string, fileName: string): string[] {
   const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -65,9 +75,10 @@ function specifiersIn(source: string, fileName: string): string[] {
       if (ts.isStringLiteral(node.moduleSpecifier)) found.push(node.moduleSpecifier.text);
     } else if (
       ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require')) &&
       node.arguments[0] &&
-      ts.isStringLiteral(node.arguments[0])
+      ts.isStringLiteralLike(node.arguments[0])
     ) {
       found.push(node.arguments[0].text);
     } else if (
@@ -93,17 +104,23 @@ function specifiersIn(source: string, fileName: string): string[] {
 /**
  * Does this specifier need something installed?
  *
- * A relative path is a file in this repository, whatever its extension: the
- * JSON data asset is admitted here and not by a clause of its own. Everything
- * else is a name a resolver looks up, and `node:` is the only prefix that is
- * answered by the runtime instead of by `node_modules`.
+ * A path is a file on disk, whatever its extension and whether it is relative
+ * or absolute: the JSON data asset is admitted here and not by a clause of its
+ * own. Everything else is a name a resolver looks up, and `node:` is the only
+ * prefix answered by the runtime instead of by `node_modules`.
  *
  * A bare `crypto` is therefore a finding. An npm package by that name exists,
  * so the specifier alone cannot say which one a resolver hands back, and `src/`
  * writes the prefix everywhere already.
+ *
+ * So is `#internal/thing`. A subpath import resolves through package.json's
+ * `imports` field, and that field is ALLOWED to map a subpath onto a package —
+ * which is most of why the form exists. The specifier cannot say whether
+ * anything is installed, so this reports rather than assumes; `imports` is
+ * undeclared here, so writing one means adding the field in the same change.
  */
 function needsInstalling(specifier: string): boolean {
-  return !specifier.startsWith('.') && !specifier.startsWith('node:');
+  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('node:');
 }
 
 /** `file -> specifier` for every import under `srcDir` that names a package. */
