@@ -20,11 +20,13 @@
  * @module terms/definitions
  */
 
+
 export { address } from './address.js';
 export { allergen } from './allergen.js';
 export { biologicalSex } from './biological-sex.js';
 export { clinicalSummary } from './clinical-summary.js';
 export { conditionName } from './condition-name.js';
+export { courseOfTherapyType } from './course-of-therapy-type.js';
 export { dataAbsentReason } from './data-absent-reason.js';
 export { dateOfBirth } from './date-of-birth.js';
 export { emergencyContact } from './emergency-contact.js';

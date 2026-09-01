@@ -555,3 +555,15 @@ pots=1.4
 #   fromJsonLdValue beside outputsFor, and src/jsonld/converter.ts forks on termFor(key)
 #   above the PROPERTY_PREDICATES lookup. A field that is termed no longer needs a row in
 #   that table to survive being written, which is what lets the table shrink (#46).
+
+# 2026-08-31 — NO BUMP. src/models/ changed and no row moves, deliberately.
+#   The new directory is src/models/validators/, which declares no vocabulary: it
+#   transcribes constraints the shapes ALREADY state — sh:minCount, sh:maxCount,
+#   sh:minLength — into a form validate() can read at runtime. Nothing here adds
+#   a class, a predicate or a property, and the models themselves are untouched
+#   and still compile to `export {};`.
+#   What it changes is WHERE a rule lives. A term owns facts about a PREDICATE,
+#   true wherever it appears; a per-record-type validator owns facts about a
+#   RECORD TYPE — an sh:minCount is scoped to one node shape — and rules spanning
+#   two fields, which no per-field constraint can state. Bumping a vocabulary row
+#   for that would claim support for something spec did not publish.
