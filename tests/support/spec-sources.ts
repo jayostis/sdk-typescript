@@ -36,22 +36,49 @@ const here = dirname(fileURLToPath(import.meta.url));
 const MANIFEST_PATH = resolve(here, '../../spec-sources.json');
 
 /**
+ * The manifest, checked rather than cast.
+ *
+ * A cast to `Record<string, VocabularySources>` is a claim, not a check: an
+ * entry written with only `shapes` satisfies the compiler and reaches
+ * `join(root, undefined)`, which throws `ERR_INVALID_ARG_TYPE` out of
+ * `node:path` — a message naming neither the vocabulary nor the key, behind
+ * which every SHACL-importing suite fails at once. This module's header
+ * promises every failure names what it tried, and that promise is only worth
+ * something if the manifest is read as untrusted JSON, which is what it is.
+ *
+ * Exported so it can be handed a manifest that MUST make it speak — the same
+ * shape as the detectors in `tests/spec-single-source.ts`, and for the same
+ * reason: a refusal proven only by never firing is not proven.
+ */
+export function parseManifest(raw: unknown, source: string): Record<string, VocabularySources> {
+  const entries = Object.entries((raw ?? {}) as Record<string, { ontology?: unknown }>);
+
+  if (entries.length === 0) {
+    throw new Error(`${source} lists no vocabularies, so every SHACL verdict would be vacuous.`);
+  }
+
+  for (const [name, entry] of entries) {
+    if (typeof entry?.ontology !== 'string') {
+      throw new Error(
+        `${source} lists "${name}" with no "ontology" path. Every entry must name the ontology `
+        + 'file spec publishes for it; "shapes" is the only optional key.',
+      );
+    }
+  }
+
+  return raw as Record<string, VocabularySources>;
+}
+
+/**
  * The manifest, read once.
  *
  * readFileSync rather than an import: the runtime attribute is spelled `assert`
  * on this package's Node 18 floor and `with` on current Node, and neither
  * spelling parses on both.
  */
-const MANIFEST = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')) as Record<
-  string,
-  { ontology: string; shapes?: string }
->;
+const MANIFEST = parseManifest(JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')), MANIFEST_PATH);
 
 const VOCABULARIES = Object.keys(MANIFEST).sort();
-
-if (VOCABULARIES.length === 0) {
-  throw new Error(`${MANIFEST_PATH} lists no vocabularies, so every SHACL verdict would be vacuous.`);
-}
 
 /** The sibling checkout, the layout a developer clones into. */
 const SIBLING = resolve(here, '../../../spec');
@@ -59,11 +86,18 @@ const SIBLING = resolve(here, '../../../spec');
 /**
  * Does this directory hold a spec checkout?
  *
- * `ontologies/` rather than the directory merely existing: pointed one level
- * too high, at the directory spec is cloned INTO, every path resolves to
- * something absent and the first symptom is a shapes graph with nothing in it.
+ * The top segment of a declared path rather than the directory merely existing:
+ * pointed one level too high, at the directory spec is cloned INTO, every path
+ * resolves to something absent and the first symptom is a shapes graph with
+ * nothing in it.
+ *
+ * Read off the manifest, not written here. A literal `'ontologies'` in this
+ * module is this module resolving a spec path for itself — the thing
+ * `specPathLiterals` in `tests/spec-single-source.ts` reports, and the thing
+ * the manifest exists so that nobody needs.
  */
-const holdsSpec = (dir: string): boolean => existsSync(join(dir, 'ontologies'));
+const holdsSpec = (dir: string): boolean =>
+  Object.values(MANIFEST).every((entry) => existsSync(join(dir, entry.ontology.split('/')[0] ?? '')));
 
 /**
  * The spec checkout, or a refusal naming every way to supply one.

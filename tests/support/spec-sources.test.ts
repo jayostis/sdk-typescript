@@ -17,7 +17,7 @@ import { join, dirname, isAbsolute } from 'node:path';
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { specRoot, pathsFor, shapesGraph } from './spec-sources.js';
+import { specRoot, pathsFor, shapesGraph, parseManifest } from './spec-sources.js';
 
 /** A scratch spec checkout holding the files named, with any content. */
 function scratchSpec(files: string[]): string {
@@ -64,6 +64,37 @@ describe('specRoot', () => {
     process.env.CASCADE_SPEC_DIR = elsewhere;
 
     expect(specRoot()).toBe(elsewhere);
+  });
+});
+
+describe('parseManifest', () => {
+  it('names the vocabulary and the key when an entry declares no ontology', () => {
+    // `pathsFor` reads `declared.ontology` straight into `join`, so an entry
+    // missing the key throws ERR_INVALID_ARG_TYPE from `node:path` — a message
+    // naming neither the vocabulary nor the key, out of a module whose header
+    // promises every failure names the path it tried. Every SHACL-importing
+    // suite fails at once behind it.
+    const missing = { genomics: { shapes: 'ontologies/genomics/v1-draft/genomics.shapes.ttl' } };
+
+    expect(() => parseManifest(missing, '/somewhere/spec-sources.json')).toThrow('genomics');
+    expect(() => parseManifest(missing, '/somewhere/spec-sources.json')).toThrow('ontology');
+    expect(() => parseManifest(missing, '/somewhere/spec-sources.json')).toThrow(
+      '/somewhere/spec-sources.json',
+    );
+  });
+
+  it('refuses a manifest that lists no vocabularies', () => {
+    // An empty manifest makes every SHACL verdict vacuous rather than absent:
+    // the shapes graph parses nothing and conforms to everything.
+    expect(() => parseManifest({}, '/somewhere/spec-sources.json')).toThrow(
+      '/somewhere/spec-sources.json',
+    );
+  });
+
+  it('takes a manifest whose every entry declares an ontology', () => {
+    const declared = { core: { ontology: 'ontologies/core/v1/core.ttl' } };
+
+    expect(parseManifest(declared, '/somewhere/spec-sources.json')).toEqual(declared);
   });
 });
 

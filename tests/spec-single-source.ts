@@ -56,18 +56,29 @@ export function turtleFiles(root: string): string[] {
  * template literal counts — `` `ontologies/${name}` `` is how the deleted sync
  * script wrote one.
  *
+ * A BARE `ontologies` counts too, and it is the form that matters most. A path
+ * assembled a segment at a time — `join(root, 'ontologies', sub, name)`, which
+ * is how the deleted drift check wrote one — puts no slash in any literal, so a
+ * pattern keyed on `ontologies/` reports the likeliest reintroduction as clean.
+ * The whole literal must be the segment, which is what keeps prose about the
+ * layout out of it.
+ *
  * A PATH, not the word. `ontologies/` must be followed by a path segment, an
  * interpolation, or the end of the literal — a template head stops there, and
  * the rest of the path is the expression after it. So the resolver's own
  * refusal, "it holds no ontologies/ directory", is prose about a layout rather
  * than a path anything opens, and needs no exemption to stay silent. `except` is for the files that must write real paths down to
  * prove something, and they are named at the call site.
+ *
+ * JavaScript as well as TypeScript: `check-shapes-drift.mjs` was a `.mjs`, and
+ * the TypeScript parser reads one. A `.sh` or a `.yml` cannot be parsed and is
+ * not walked here — `vendoringNames` is what sees those, by name.
  */
 export function specPathLiterals(root: string, except: string[] = []): string[] {
   const spared = new Set(except);
   const found: string[] = [];
 
-  for (const file of filesUnder(root).filter((f) => /\.[mc]?tsx?$/.test(f))) {
+  for (const file of filesUnder(root).filter((f) => /\.[mc]?[jt]sx?$/.test(f))) {
     if (spared.has(asPosix(root, file))) continue;
     const parsed = ts.createSourceFile(
       file,
@@ -80,7 +91,7 @@ export function specPathLiterals(root: string, except: string[] = []): string[] 
     const visit = (node: ts.Node): void => {
       if (
         (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) &&
-        /ontologies\/(?:[\w{$]|$)|\.shapes\.ttl/.test(node.text)
+        /^ontologies$|ontologies\/(?:[\w{$]|$)|\.shapes\.ttl/.test(node.text)
       ) {
         found.push(`${asPosix(root, file)} -> ${node.text}`);
       }
@@ -101,24 +112,41 @@ export function specPathLiterals(root: string, except: string[] = []): string[] 
  * end with "re-run scripts/sync-shapes-from-spec.sh" — a remedy nobody can
  * carry out, printed by the check people see most.
  *
+ * EVERY FILE, not only the TypeScript. Not one file the scheme lived in was
+ * TypeScript: `sync-shapes-from-spec.sh`, `check-shapes-drift.mjs`, and the
+ * `check:shapes-drift` entry in `package.json` that ran them. Walking `.ts`
+ * alone means all three can come back and this check stays green, which is the
+ * one reintroduction it exists to stop.
+ *
+ * The PATH is matched as well as the lines. A re-added script need never
+ * mention itself, and its own filename is the loudest mention there is — a path
+ * hit is reported without a line number to say so.
+ *
  * `except` spares the files that PROVE this check, which have to write the dead
- * names down to hand them to it. Naming them at the call site rather than here
- * keeps the exemption where a reader meets it, and keeps it to two files.
+ * names down to hand them to it, and the two append-only records of what was
+ * true at a past release. Naming them at the call site rather than here keeps
+ * the exemption where a reader meets it.
  */
 export function vendoringNames(root: string, except: string[] = []): string[] {
   const gone = ['tests/shapes', 'vendored.json', 'sync-shapes-from-spec', 'check-shapes-drift'];
   const spared = new Set(except);
   const found: string[] = [];
 
-  for (const file of filesUnder(root).filter((f) => /\.[mc]?tsx?$/.test(f))) {
-    if (spared.has(asPosix(root, file))) continue;
-    const lines = readFileSync(file, 'utf-8').split('\n');
+  for (const file of filesUnder(root)) {
+    const posix = asPosix(root, file);
+    if (spared.has(posix)) continue;
 
-    lines.forEach((line, index) => {
-      for (const name of gone) {
-        if (line.includes(name)) found.push(`${asPosix(root, file)}:${index + 1} -> ${name}`);
-      }
-    });
+    for (const name of gone) {
+      if (posix.includes(name)) found.push(`${posix} -> ${name}`);
+    }
+
+    readFileSync(file, 'utf-8')
+      .split('\n')
+      .forEach((line, index) => {
+        for (const name of gone) {
+          if (line.includes(name)) found.push(`${posix}:${index + 1} -> ${name}`);
+        }
+      });
   }
 
   return found.sort();

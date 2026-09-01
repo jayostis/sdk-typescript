@@ -77,6 +77,19 @@ describe('specPathLiterals', () => {
     expect(specPathLiterals(root)).toEqual(['scripts/sync.ts -> ontologies/']);
   });
 
+  it('names a path assembled one segment at a time', () => {
+    // The form the deleted drift check used — `join(specRoot, 'ontologies', sub,
+    // name)`. Not one of its literals carries a slash or a `.shapes.ttl`
+    // suffix, so a pattern keyed on those two spellings reports the likeliest
+    // reintroduction of a self-resolved spec path as clean.
+    const root = scratchTree({
+      'tests/support/shacl.ts':
+        "const p = join(root, 'ontologies', 'core', 'v1', 'core.ttl');\n",
+    });
+
+    expect(specPathLiterals(root)).toEqual(['tests/support/shacl.ts -> ontologies']);
+  });
+
   it('is silent for an @see citation', () => {
     // The 20-odd `@see spec/ontologies/…` lines in `src/terms/definitions/` are
     // why this parses instead of grepping. They cite spec; they do not read it.
@@ -91,8 +104,10 @@ describe('specPathLiterals', () => {
 
   it('finds no hardcoded spec path in the code we actually ship', () => {
     // `spec-sources.json` is the one place a spec path is written down, and it
-    // is JSON: this walks TypeScript, so the manifest is out of scope by
-    // construction rather than by an exception.
+    // is JSON: this walks TypeScript and JavaScript, so the manifest is out of
+    // scope by construction rather than by an exception. `tests/support/spec-sources.ts`
+    // is NOT spared either — it reads the layout's top directory off the
+    // manifest rather than spelling it, which is what keeps it silent here.
     //
     // The two spared files are the ones that BUILD scratch spec checkouts to
     // prove a resolver refuses or resolves — they have to name real paths to do
@@ -131,12 +146,46 @@ describe('vendoringNames', () => {
     ]);
   });
 
+  it('names the scheme where it was actually written — a script, and the npm entry that ran it', () => {
+    // Not one of these files is TypeScript, and that is the point: the scheme
+    // lived in a `.sh`, a `.mjs` and `package.json`. Re-adding all three is the
+    // likeliest reintroduction, and a walker keyed on `.ts` calls it clean.
+    //
+    // The `.mjs` is named by its PATH, not by a line: a re-added script need
+    // never mention itself, and its filename is the loudest mention there is.
+    const root = scratchTree({
+      'scripts/check-shapes-drift.mjs': 'const stale = compare();\n',
+      'scripts/sync-shapes-from-spec.sh': '#!/bin/sh\ncp "$SPEC/$path" "$dest"\n',
+      'package.json': '{\n  "scripts": { "drift": "node scripts/check-shapes-drift.mjs" }\n}\n',
+    });
+
+    expect(vendoringNames(root)).toEqual([
+      'package.json:2 -> check-shapes-drift',
+      'scripts/check-shapes-drift.mjs -> check-shapes-drift',
+      'scripts/sync-shapes-from-spec.sh -> sync-shapes-from-spec',
+    ]);
+  });
+
   it('finds nothing naming the vendoring scheme in what we actually ship', () => {
-    // The two files spared are this one and the detector it drives: proving a
-    // check that reports dead names means writing dead names down. Anything
-    // else naming one is a finding, including a comment.
+    // Every file, not only the TypeScript, so a re-added `.sh`, `.mjs` or npm
+    // script is a finding. Anything naming a dead name is one, including a
+    // comment.
+    //
+    // Four files are spared, in two pairs. This one and the detector it drives,
+    // because proving a check that reports dead names means writing dead names
+    // down. And `CHANGELOG.md` and `VOCAB_VERSIONS`, because both are
+    // append-only records of what was true at a past release: `CHANGELOG.md:117`
+    // and `VOCAB_VERSIONS:481` describe the release that vendored
+    // `coverage.shapes.ttl` into `tests/shapes/`, and that release did. Editing
+    // a dated entry to match today would be a lie about a version someone can
+    // still install. Nothing a reader takes as CURRENT is spared.
     expect(
-      vendoringNames(repoRoot, ['tests/spec-single-source.ts', 'tests/spec-single-source.test.ts']),
+      vendoringNames(repoRoot, [
+        'tests/spec-single-source.ts',
+        'tests/spec-single-source.test.ts',
+        'CHANGELOG.md',
+        'VOCAB_VERSIONS',
+      ]),
     ).toEqual([]);
   });
 });

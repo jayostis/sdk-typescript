@@ -67,7 +67,7 @@ copying the shape of whatever file you opened first.
   this for an unmapped `dataType`, and a skip that reports green is worse than a
   failure, because nothing ever tells you it stopped checking. Where a case
   genuinely cannot be judged, assert that it cannot: `shaclCheck` refuses a graph
-  the vendored shapes are silent on rather than returning a vacuous
+  the shapes are silent on rather than returning a vacuous
   `conforms: true`.
 - **Assert on the graph, not on the Turtle text.** Two writers spell the same
   graph differently — a repeated predicate and an object list are the same
