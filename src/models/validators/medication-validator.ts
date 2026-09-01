@@ -18,10 +18,13 @@
  * stop — `givenName` was required by a switch, declared by a model, and
  * required by no shape at all, and nothing put those three claims in one place.
  *
- * `minLength` is DECLARED AND NOT YET ENFORCED. `CascadeEntityValidator`
- * currently checks presence and arity only; carrying the value now means the
- * transcription is complete when the check arrives, rather than a third of a
- * property block being silently dropped in the meantime.
+ * `sh:minLength` IS NOT TRANSCRIBED HERE, and the block is still complete.
+ * `clinical:MedicationShape`'s `clinical:drugName` block declares `sh:minCount 1`,
+ * `sh:maxCount 1` and `sh:minLength 1`; this file carries the first and
+ * `src/terms/definitions/medication-name.ts` carries the other two, because a
+ * cap and a length are true of the predicate wherever it appears and a minCount
+ * is true of this record type alone. Reading one property block therefore means
+ * reading two files, which is the cost of not declaring the same rule twice.
  *
  * @see spec/ontologies/clinical/v1/clinical.shapes.ttl  clinical:MedicationShape
  * @module models/validators
@@ -37,9 +40,10 @@ export class MedicationValidator extends CascadeEntityValidator<Medication> {
   additionalConstraints(): Constraints<Medication> {
     return {
       // clinical.shapes.ttl:759 — the only field the shape requires.
-      // NO maxCount: the term carries it. A cap is true of the predicate
-      // wherever it appears; a minCount is true of this record type only.
-      medicationName: { minCount: 1, minLength: 1 },
+      // NO maxCount and NO minLength: the term carries both. A cap and a
+      // length are true of the predicate wherever it appears; a minCount is
+      // true of this record type only.
+      medicationName: { minCount: 1 },
 
       // THE SHAPE DOES NOT REQUIRE THIS AND THE MODEL DOES.
       // `clinical:MedicationShape` gives `clinical:status` an `sh:maxCount 1`

@@ -567,3 +567,21 @@ pots=1.4
 #   RECORD TYPE — an sh:minCount is scoped to one node shape — and rules spanning
 #   two fields, which no per-field constraint can state. Bumping a vocabulary row
 #   for that would claim support for something spec did not publish.
+
+# 2026-08-31 — NO BUMP. sh:minLength is now enforced, and no row moves.
+#   The constraint was already published: 30 sh:property blocks across the four
+#   vendored shape files declare one, over 28 distinct predicates, and every one
+#   is sh:minLength 1 — including the two predicates that appear in two shapes,
+#   dct:title and health:conditionName, which agree. This SDK is catching up to
+#   what spec already says, not asserting anything new.
+#   It landed on the TERM rather than in a validator's constraint table, because
+#   that measurement says it is a fact about a PREDICATE and not about any one
+#   record type. clinical:ProcedureShape is the case that separates the two:
+#   clinical:procedureName carries sh:minLength 1 and NO sh:minCount, so an
+#   absent procedure name conforms and a present empty one does not.
+#   CHARACTERS, NOT CONTENT. SHACL measures the value node converted to string,
+#   so "  " is length 2 and conforms. The check does not trim. A whitespace-only
+#   name is a real defect and sh:minLength is not the constraint that states it;
+#   sh:pattern is, and no shape declares one. Trimming here would reject records
+#   pyshacl accepts, which is exactly the divergence the fixture contract exists
+#   to catch.

@@ -25,5 +25,8 @@ export const medicationName = defineTerm({
   // that declares it. A cap answers HOW MANY and a minCount answers AT LEAST
   // ONE; neither substitutes for the other, and two values pass both.
   maxCount: 1,
+  // sh:minLength 1, declared in the same property block as the cap above.
+  // CHARACTERS, not content: "  " is two of them and conforms. See TermSpec.
+  minLength: 1,
   rule: { form: 'literal' },
 });

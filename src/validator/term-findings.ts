@@ -142,6 +142,32 @@ export function termFindings(record: CascadeEntity): ValidationError[] {
         });
       }
     }
+
+    // `sh:minLength`. Every member, for the reason the value set above is:
+    // a repeated predicate can be empty in its second triple.
+    //
+    // CHARACTERS, and no trim — see {@link TermSpec.minLength}. SHACL measures
+    // the value node converted to string, so `"  "` is length 2 and conforms.
+    // A whitespace-only name is a genuine defect and this is not the constraint
+    // that catches it; rejecting it here would put this validator ahead of the
+    // shapes, and every fixture judged against both would disagree.
+    //
+    // Non-strings are skipped rather than coerced, exactly as the value set
+    // skips them. `sh:minLength` is ill-formed against a blank node, and
+    // stringifying a number to measure it would invent a rule out of a
+    // datatype the shape constrains separately.
+    if (term.minLength !== undefined) {
+      for (const member of members) {
+        if (typeof member !== 'string' || member.length >= term.minLength) continue;
+        errors.push({
+          field,
+          message:
+            `${field} is ${member.length} characters; the vocabulary requires ` +
+            `at least ${term.minLength}`,
+          severity,
+        });
+      }
+    }
   }
 
   // Rules about a value that is ABSENT, which no walk of the record can reach.

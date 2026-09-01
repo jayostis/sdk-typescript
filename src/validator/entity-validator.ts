@@ -84,19 +84,23 @@ export interface Finding {
  * `sh:property` block, and a reader holding the shape open should be able to
  * check this line by line without translating.
  *
- * `minLength` is here and is NOT yet enforced anywhere — see
- * {@link CascadeEntityValidator.findingsFor}. It is declared because all six
- * required fields measured so far carry `sh:minLength 1` beside their
- * `sh:minCount 1`, and leaving it undeclarable would mean transcribing two
- * thirds of a property block and calling it done.
+ * NO `minLength`, AND NO `maxCount` ON A TERMED FIELD. Both are facts about a
+ * PREDICATE — true wherever it appears, not just on this record type — and both
+ * are declared on the term instead. `sh:minLength` was measured before it moved:
+ * 30 property blocks, 28 predicates, every one `sh:minLength 1`, with no
+ * variation even for the two predicates that appear in two shapes. A field that
+ * has no term therefore has no length check, which is the same answer `maxCount`
+ * gives and for the same reason — the fix is to declare the term.
+ *
+ * `minCount` stays here because it does NOT generalise: `clinical:procedureName`
+ * carries an `sh:minLength 1` and no `sh:minCount` at all, so a length rule and
+ * a presence rule about one predicate genuinely live in different places.
  */
 export interface Constraint {
   /** `sh:minCount 1`. Absent means the field may be omitted. */
   readonly minCount?: 1;
   /** `sh:maxCount`. ABSENT MEANS UNCONSTRAINED, not 1 — reading it as 1 rejects conformant records. */
   readonly maxCount?: number;
-  /** `sh:minLength`. Absent means a value of any length, including empty. */
-  readonly minLength?: number;
   /** `sh:in`. Absent means any value. */
   readonly values?: readonly string[];
 }
@@ -128,8 +132,9 @@ type OwnKeys<T> = Exclude<keyof T, keyof CascadeRecord>;
  * which is the whole defect this layer exists to answer: `givenName` was
  * required by a switch, declared by a model, and required by no shape at all.
  *
- * What the TYPE cannot say, and this must: `minLength`, `values`, and 1..*,
- * since `MultiValue<T>` admits the empty array.
+ * What the TYPE cannot say, and this must: `values`, and 1..*, since
+ * `MultiValue<T>` admits the empty array. Length is not on that list — a term
+ * says it, for every record type at once.
  */
 export type Constraints<T> =
   { [K in Extract<RequiredKeys<T>, OwnKeys<T>>]: Constraint & { minCount: 1 } } &
@@ -252,12 +257,13 @@ export abstract class CascadeEntityValidator<T extends CascadeRecord> {
   /**
    * The per-field half, walked from {@link constraints}.
    *
-   * `minLength` and `values` are DELIBERATELY NOT CHECKED HERE. Both are
-   * already carried by the term modules for the fields that have terms —
-   * `values` today, `minLength` not yet — and a second implementation is how
-   * two checks of one rule come to disagree. This method covers presence and
-   * arity only; the rest belongs to whichever layer ends up owning it, decided
-   * once rather than in both places.
+   * `values` is DELIBERATELY NOT CHECKED HERE, and `minLength` is no longer
+   * declarable at all: both are carried by the term modules, and a second
+   * implementation is how two checks of one rule come to disagree. That
+   * question was open when this method was written and is now answered —
+   * `sh:minLength` is invariant per predicate across every shape that declares
+   * one, so it is a term fact, and `Constraint` dropped the field rather than
+   * keep a name nothing reads. This method covers presence and arity only.
    */
   protected constraintFindings(rec: RecordFields): readonly Finding[] {
     const findings: Finding[] = [];
