@@ -24,8 +24,10 @@ import ts from 'typescript';
  * is true for. `src/` holds none of them today, and that is the reason to match
  * them rather than not to: a file the walk never opens is one the report calls
  * clean, so the check would answer "no third-party import" when what happened
- * was that it did not look. `.d.ts` is deliberately included — a declaration
- * file naming a package is shipped to consumers in `dist/`.
+ * was that it did not look. `.d.ts` is included on the same argument and not on
+ * a claim about `dist/`: tsc does not copy an input declaration file there, but
+ * one under `src/` is still source the compiler reads, and a bare specifier in
+ * it is still a package the build resolves.
  */
 function sourcesUnder(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -42,10 +44,16 @@ function sourcesUnder(dir: string): string[] {
  * `import()` is a call whose callee is the `import` keyword; an inline
  * `import('n3').Quad` in a TYPE position is none of those — it is an
  * `ImportTypeNode`, and it is the form that survives into the emitted `.d.ts`,
- * where a consumer resolves it against their own `node_modules`. A dynamic
- * import whose argument is not a literal — `import(name)` — names no specifier
- * to report, and `src/` writes none; a computed specifier is the one form this
- * function cannot see.
+ * where a consumer resolves it against their own `node_modules`.
+ *
+ * `import cf = require('clownface')` is the fourth, and not a dead one: under
+ * `module: NodeNext` it compiles and tsc emits a `createRequire(import.meta.url)`
+ * into the JavaScript, so an archaic-looking spelling takes a live runtime
+ * dependency.
+ *
+ * A dynamic import whose argument is not a literal — `import(name)` — names no
+ * specifier to report, and `src/` writes none; a computed specifier is the one
+ * form this function cannot see.
  */
 function specifiersIn(source: string, fileName: string): string[] {
   const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -68,6 +76,12 @@ function specifiersIn(source: string, fileName: string): string[] {
       ts.isStringLiteral(node.argument.literal)
     ) {
       found.push(node.argument.literal.text);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      ts.isStringLiteral(node.moduleReference.expression)
+    ) {
+      found.push(node.moduleReference.expression.text);
     }
     ts.forEachChild(node, visit);
   };
