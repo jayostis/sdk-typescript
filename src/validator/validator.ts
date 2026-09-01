@@ -113,9 +113,19 @@ const AGENT_ACTIVITY_REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>
   InteractionScenario: ['title', 'involvedResources'],
 };
 
-// Types that should ideally have coding system references
+// Types that should ideally have coding system references.
+//
+// TYPES ON THE LEGACY PATH ONLY. `validate()` returns early for a record type
+// with a validator, so `validateWarnings` never runs for one — an entry here
+// for a migrated type is unreachable, and the entry is what someone edits.
+// `MedicationRecord` was listed and was dead: its copy of this rule is
+// `MedicationValidator.crossFieldFindings`, and editing this set would have
+// left medications following the old text with nothing to say so.
+//
+// A validator migrating a type takes this rule with it and removes the name,
+// the same way it deletes its `case` from `validateTypeSpecific`. The set
+// empties as the migration finishes, and goes when the last type lands.
 const CLINICAL_TYPES_WANTING_CODES: ReadonlySet<string> = new Set([
-  'MedicationRecord',
   'ConditionRecord',
   'LabResultRecord',
   'VitalSign',
