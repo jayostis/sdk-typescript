@@ -118,6 +118,7 @@ describe('the shapes were read at all', () => {
       'conditionName',
       'medicationName',
       'providerName',
+      'relationship',
       'testName',
       'vaccineName',
     ]);

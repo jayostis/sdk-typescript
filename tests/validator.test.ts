@@ -544,14 +544,93 @@ describe('Validator', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('a valid ProcedureRecord passes with only base fields', () => {
+    // NOT ProcedureRecord either — see the skipped test below. It asserted
+    // "passes with only base fields" and passed, and `pyshacl` violates on the
+    // same record. Left in this group it would be a green claim that the shape
+    // contradicts.
+    //
+    // ActivitySnapshot and SleepSnapshot below are the two that genuinely
+    // belong here, checked rather than assumed: `shaclCheck` returns
+    // `conforms: true` for a bare record of each.
+
+    // NOT FamilyHistoryRecord, which was in this group and does not belong to
+    // it. `health:FamilyHistoryRecordShape` opens its first property block with
+    // "# REQUIRED: conditionName (FHIR condition.code is required per entry)"
+    // and an `sh:minCount 1` under it. The record type has always had a
+    // type-specific required field; nothing read it until `conditionName`
+    // became a term, and this test asserted the opposite the whole time.
+    // It moved down, to the two tests that say what the shape says.
+  });
+
+  describe('ProcedureRecord validation', () => {
+    /**
+     * SKIPPED, NOT DELETED, AND IT ASSERTS THE TRUTH — see #49.
+     *
+     * `validate()` returns `valid: true` for a procedure with no name.
+     * `pyshacl` returns a Violation on the same record:
+     *
+     *   [Violation] (node-level): Procedure must have a name, as
+     *   clinical:procedureName (canonical) or health:procedureName (deprecated
+     *   import spelling, accepted during the clinical v1.15 migration window)
+     *
+     * NODE-LEVEL is why this is skipped rather than fixed here. The rule is an
+     * `sh:or` across two paths on `clinical:ProcedureShape` — either spelling
+     * satisfies it — so no per-field constraint states it and no term can carry
+     * it. `minCountByType` on `procedureName` would demand the canonical
+     * spelling and reject every C-CDA import the migration window exists to
+     * accept, which is a worse answer than the current one.
+     *
+     * It needs `crossFieldFindings` on a `ProcedureValidator`, which is #49.
+     * The same disjunction problem as the missing-coding warning, and #49 has
+     * an open question about where a rule of that shape should live.
+     *
+     * The test this replaced said "a valid ProcedureRecord passes with only
+     * base fields" and was green — a claim the shape contradicts, kept alive by
+     * nothing reading the rule. Written the right way round and skipped, it is
+     * a to-do that names its issue. Green and wrong, it was a to-do nobody knew
+     * existed.
+     */
+    it.skip('a ProcedureRecord without a name is reported (#49)', () => {
       const result = validate(makeRecord('ProcedureRecord'));
+
+      expect(result.valid).toBe(false);
+      expect(errorFields(result)).toContain('procedureName');
+    });
+
+    it('a ProcedureRecord with a name passes', () => {
+      const result = validate(makeRecord('ProcedureRecord', { procedureName: 'Appendectomy' }));
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('FamilyHistoryRecord validation', () => {
+    it('a valid FamilyHistoryRecord passes with both required fields', () => {
+      const result = validate(
+        makeRecord('FamilyHistoryRecord', {
+          conditionName: 'Type 2 diabetes',
+          relationship: 'mother',
+        }),
+      );
       expect(result.valid).toBe(true);
     });
 
-    it('a valid FamilyHistoryRecord passes with only base fields', () => {
+    it('a FamilyHistoryRecord without either required field reports BOTH', () => {
+      // TWO, and asserting one was the bug in the first version of this test.
+      // `health:FamilyHistoryRecordShape` gives `health:conditionName` and
+      // `clinical:relationship` an `sh:minCount 1` each, at sh:Violation, and
+      // `pyshacl` reports both on a bare record:
+      //
+      //   conditionName: Family history record must name exactly one condition
+      //   relationship:  Family history record must state exactly one relationship
+      //                  to the patient
+      //
+      // `toContain('conditionName')` passed while `relationship` went unjudged,
+      // which is a test that looks thorough and checks half the shape. Asserting
+      // the whole set is what makes a missed field fail rather than hide.
       const result = validate(makeRecord('FamilyHistoryRecord'));
-      expect(result.valid).toBe(true);
+
+      expect(result.valid).toBe(false);
+      expect(errorFields(result).sort()).toEqual(['conditionName', 'relationship']);
     });
   });
 

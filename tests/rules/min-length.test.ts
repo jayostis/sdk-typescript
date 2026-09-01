@@ -59,6 +59,7 @@ const TERMED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> 
   ['LabResultRecord', 'testName', { resultValue: '412', resultUnit: 'ng/mL' }],
   ['ImmunizationRecord', 'vaccineName', {}],
   ['CoverageRecord', 'providerName', {}],
+  ['FamilyHistoryRecord', 'relationship', { conditionName: 'Type 2 diabetes' }],
 ];
 
 describe('the sweep covers what it claims to', () => {
