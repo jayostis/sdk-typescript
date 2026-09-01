@@ -164,6 +164,32 @@ export type TermSpec = {
    */
   values?: readonly string[];
   /**
+   * The shortest a value may be — `sh:minLength` from the shapes.
+   *
+   * Flat, like {@link TermSpec.values} and {@link TermSpec.maxCount} beside it,
+   * and measurement says flat is the whole truth: 30 `sh:property` blocks across
+   * the four vendored shape files declare an `sh:minLength`, over 28 distinct
+   * predicates, and EVERY ONE OF THEM IS 1. The two predicates that appear in
+   * more than one shape — `dct:title` and `health:conditionName` — carry the
+   * same value in both. There is no per-type variation to model, the way there
+   * is for {@link TermSpec.minCountByType}.
+   *
+   * A FACT ABOUT THE PREDICATE, which is why it lives here rather than in a
+   * validator's `Constraints` table. `clinical:ProcedureShape` is the case that
+   * proves the two are different questions: `clinical:procedureName` carries an
+   * `sh:minLength 1` and NO `sh:minCount`, so an absent procedure name conforms
+   * and a present empty one does not. A term judges the values a record
+   * carries; whether it must carry one at all belongs to the record type.
+   *
+   * CHARACTERS, NOT CONTENT. SHACL's condition is the length of the value node
+   * after conversion to string, so `"  "` is length 2 and conforms. This does
+   * not trim, and must not: a whitespace-only name is a real data defect and
+   * `sh:minLength` is not the constraint that states it — `sh:pattern` is, and
+   * no shape declares one. Trimming here would reject records `pyshacl` accepts,
+   * which is the divergence `tests/support/fixture-contract.ts` exists to catch.
+   */
+  minLength?: number;
+  /**
    * recordType -> the severity this term's rules are reported at, defaulting
    * to `'error'` for every type not named.
    *

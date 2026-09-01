@@ -20,13 +20,24 @@
  * @module terms/definitions
  */
 
+
 export { address } from './address.js';
+export { allergen } from './allergen.js';
 export { biologicalSex } from './biological-sex.js';
 export { clinicalSummary } from './clinical-summary.js';
+export { conditionName } from './condition-name.js';
+export { courseOfTherapyType } from './course-of-therapy-type.js';
 export { dataAbsentReason } from './data-absent-reason.js';
 export { dateOfBirth } from './date-of-birth.js';
 export { emergencyContact } from './emergency-contact.js';
 export { interpretation } from './interpretation.js';
 export { interpretationSourceCode } from './interpretation-source-code.js';
+export { medicationName } from './medication-name.js';
 export { preferredPharmacy } from './preferred-pharmacy.js';
+export { providerName } from './provider-name.js';
+export { relationship } from './relationship.js';
+export { resultUnit } from './result-unit.js';
 export { resultValue } from './result-value.js';
+export { testName } from './test-name.js';
+export { unit } from './unit.js';
+export { vaccineName } from './vaccine-name.js';
