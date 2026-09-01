@@ -103,6 +103,10 @@ describe('thirdPartyImports', () => {
       'b.ts': "export { Parser } from 'clownface';\n",
       'c.ts': "const env = await import('@zazuko/env');\nexport const x = env;\n",
       'd.ts': "import type { Quad } from 'rdf-validate-shacl';\nexport type Q = Quad;\n",
+      // Not a dead form under `module: NodeNext`: it compiles, and tsc emits a
+      // `createRequire(import.meta.url)` into the JavaScript — a real runtime
+      // require of a real package, reached by a spelling that looks archaic.
+      'e.ts': "import cf = require('clownface');\nexport const c = cf;\n",
     });
 
     expect(thirdPartyImports(root)).toEqual([
@@ -110,6 +114,7 @@ describe('thirdPartyImports', () => {
       'b.ts -> clownface',
       'c.ts -> @zazuko/env',
       'd.ts -> rdf-validate-shacl',
+      'e.ts -> clownface',
     ]);
   });
 
