@@ -167,3 +167,35 @@ describe('every member, and only the members it can measure', () => {
     expect(lengthMessages(result, 'allergen')).toEqual([]);
   });
 });
+
+describe('what skipping a non-string costs, said out loud', () => {
+  // THE TEST ABOVE PINS HALF OF THIS and deliberately asserts only that no
+  // LENGTH finding fires — "the value is wrong here and something else has to
+  // be what says so". Today nothing is. `minCountByType` is satisfied because
+  // `hasField` counts `42` as present, the value-set and length loops both skip
+  // every non-string member, and no other layer looks at the runtime type, so
+  // the record is ACCEPTED.
+  //
+  // THIS IS A LOOSENING THIS BRANCH INTRODUCED. `validateTypeSpecific`'s
+  // deleted `case 'AllergyRecord'` ran `requiredString`, which rejected any
+  // non-string outright; replacing it with a term `minCount` plus `minLength`
+  // dropped that check along with the case, for every field the switch used to
+  // guard that way — `allergen`, `medicationName`, `testName`, `vaccineName`,
+  // `conditionName`, `providerName` and `relationship`.
+  //
+  // Pinned rather than fixed, because the fix is `sh:datatype` and that is a
+  // layer, not a patch: 360 property blocks declare one, and it is named in
+  // `entity-validator.ts` as the largest single gap in this SDK's judgement.
+  // Asserted as the CURRENT verdict so that landing it turns this red and
+  // someone flips it, which is the one thing an unasserted gap cannot do.
+  it.each([
+    ['AllergyRecord', 'allergen', {}],
+    ['LabResultRecord', 'testName', { resultValue: '412', resultUnit: 'ng/mL' }],
+    ['ImmunizationRecord', 'vaccineName', {}],
+  ])('%s accepts a numeric %s, and no layer objects', (type, field, rest) => {
+    const result = validate(record(type, { ...rest, [field]: 42 }));
+
+    expect(messagesFor(result, field)).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+});

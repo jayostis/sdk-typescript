@@ -595,3 +595,16 @@ pots=1.4
 #   predicate — daily-snapshot date (x2), family-history relationship, procedure
 #   cptCode and procedureStatus. The serializer was correct throughout; only the
 #   prose was wrong, and it is prose because nothing derives it.
+
+# 2026-09-01 — NO BUMP. Review followup on #56; no vocabulary changed.
+#   The src/models/ edit is two `Maps to` doc comments in daily-snapshot.ts.
+#   The note above records them as corrected in this branch; they were INVERTED
+#   instead — set to health:date on the two fields the serializer writes
+#   cascade:date for, leaving the file contradicting its own module docblock
+#   eleven lines up. The serializer was never wrong: TYPE_PREDICATE_OVERRIDES
+#   and TYPE_MAPPING both say cascade:date for DailyActivitySnapshot and
+#   DailySleepSnapshot, and tests/daily-snapshot.test.ts asserts it. Only the
+#   prose moved, in the wrong direction, and it is prose because nothing derives
+#   it — there is no check comparing a `Maps to` comment against what the
+#   serializer emits, which is why an inversion could land inside a change whose
+#   subject was those very comments.

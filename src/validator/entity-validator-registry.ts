@@ -39,20 +39,31 @@ import type { CascadeRecord } from '../models/common.js';
 type AnyEntityValidator = CascadeEntityValidator<CascadeRecord>;
 
 /**
- * Built once, at module load, from the manifest's exports.
+ * Index validators by the record type each claims, refusing a type claimed
+ * twice.
  *
  * An explicit loop rather than `new Map(...)`, so a second validator claiming a
  * record type THROWS instead of quietly replacing the first. The same guard
  * `src/terms/index.ts` puts on duplicate term keys, and for the same reason: a
  * map built from a list silently keeps the last entry, and a rule that stopped
  * applying is not a failure anyone would notice.
+ *
+ * A FUNCTION OVER A LIST THE CALLER SUPPLIES, and exported for that reason
+ * alone — nothing but the `BY_TYPE` initialiser below calls it in `src/`. Aimed
+ * only at our own manifest, where no two validators collide, the guard would
+ * pass identically if it were inverted or if `already` were dropped: it can
+ * only be shown to work by being handed a collision, and there is no collision
+ * to hand it inside a codebase where it holds. `tests/terms/registry.ts` splits
+ * the barrel check out for the same reason, and this is the missing counterpart
+ * to it — `src/terms/index.ts` builds its map inline and its duplicate-key
+ * guard is, today, still unexercised.
  */
-const BY_TYPE: ReadonlyMap<string, AnyEntityValidator> = (() => {
+export function indexByType(
+  candidates: Iterable<AnyEntityValidator>,
+): Map<string, AnyEntityValidator> {
   const byType = new Map<string, AnyEntityValidator>();
 
-  for (const Validator of Object.values(validators)) {
-    const validator = new Validator() as AnyEntityValidator;
-
+  for (const validator of candidates) {
     const already = byType.get(validator.type);
     if (already) {
       throw new Error(
@@ -65,7 +76,18 @@ const BY_TYPE: ReadonlyMap<string, AnyEntityValidator> = (() => {
   }
 
   return byType;
-})();
+}
+
+/**
+ * Built once, at module load, from the manifest's exports.
+ *
+ * `Object.values` over the manifest module is what makes this DERIVED: a
+ * validator becomes reachable by being exported from
+ * `src/models/validators/index.ts` and by nothing else.
+ */
+const BY_TYPE: ReadonlyMap<string, AnyEntityValidator> = indexByType(
+  Object.values(validators).map((Validator) => new Validator() as AnyEntityValidator),
+);
 
 /**
  * The validator for a record type, or `undefined` where none exists yet.

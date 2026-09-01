@@ -45,7 +45,7 @@ export interface DailyActivitySnapshot extends CascadeRecord {
   /**
    * Timestamp the snapshot applies to (ISO 8601). Required by
    * `health:DailyActivitySnapshotShape`.
-   * Maps to `health:date` in Turtle serialization.
+   * Maps to `cascade:date` in Turtle serialization.
    */
   date: string;
 
@@ -93,7 +93,7 @@ export interface DailySleepSnapshot extends CascadeRecord {
   /**
    * Timestamp the snapshot applies to (ISO 8601). Required by
    * `health:DailySleepSnapshotShape`.
-   * Maps to `health:date` in Turtle serialization.
+   * Maps to `cascade:date` in Turtle serialization.
    */
   date: string;
 
