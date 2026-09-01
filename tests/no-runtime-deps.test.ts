@@ -113,6 +113,37 @@ describe('thirdPartyImports', () => {
     ]);
   });
 
+  it('names a specifier written inline in a type position', () => {
+    // `import('n3').Quad` in a type is the same dependency as
+    // `import type { Quad } from 'n3'` spelled so that it is not a statement,
+    // and it is the form that survives into the emitted `.d.ts`: a consumer
+    // installing this package would get types that do not resolve without n3
+    // in their own node_modules, which is the thing being prevented.
+    const root = scratchSrc({
+      'jsonld/converter.ts': "export type Q = import('n3').Quad;\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual(['jsonld/converter.ts -> n3']);
+  });
+
+  it('reads every TypeScript extension, not only .ts', () => {
+    // `'writer.mts'.endsWith('.ts')` is false, and a file the walk never opens
+    // is a file the report calls clean. Nothing under `src/` uses these today,
+    // which is exactly why the check must not be the reason anyone finds out —
+    // it would say "no third-party import" rather than "I did not look".
+    const root = scratchSrc({
+      'a.mts': "import { Parser } from 'n3';\n",
+      'b.cts': "import { Parser } from 'n3';\n",
+      'c.tsx': "import { Parser } from 'n3';\nexport const El = () => <div />;\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual([
+      'a.mts -> n3',
+      'b.cts -> n3',
+      'c.tsx -> n3',
+    ]);
+  });
+
   it('names an unprefixed builtin', () => {
     // `crypto` without the `node:` prefix is not obviously a builtin: an npm
     // package by that name exists, and the specifier alone cannot say which
