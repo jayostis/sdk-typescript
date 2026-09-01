@@ -173,12 +173,15 @@ describe('vendoringNames', () => {
     //
     // Four files are spared, in two pairs. This one and the detector it drives,
     // because proving a check that reports dead names means writing dead names
-    // down. And `CHANGELOG.md` and `VOCAB_VERSIONS`, because both are
-    // append-only records of what was true at a past release: `CHANGELOG.md:117`
-    // and `VOCAB_VERSIONS:481` describe the release that vendored
-    // `coverage.shapes.ttl` into `tests/shapes/`, and that release did. Editing
-    // a dated entry to match today would be a lie about a version someone can
-    // still install. Nothing a reader takes as CURRENT is spared.
+    // down. And `CHANGELOG.md` and `VOCAB_VERSIONS`, because a changelog cannot
+    // do its job without naming what it records. Two ways, both unavoidable:
+    // the entries at `CHANGELOG.md:117` and `VOCAB_VERSIONS:481` describe the
+    // release that vendored `coverage.shapes.ttl` into `tests/shapes/`, and that
+    // release did — editing a dated entry to match today would be a lie about a
+    // version someone can still install. And the Unreleased entry for #58 has to
+    // name `tests/shapes/`, the sync script and the drift check in order to say
+    // they were deleted. Nothing a reader takes as a CURRENT instruction is
+    // spared.
     expect(
       vendoringNames(repoRoot, [
         'tests/spec-single-source.ts',

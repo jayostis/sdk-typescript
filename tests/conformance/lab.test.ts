@@ -22,8 +22,8 @@
  * hands the validator nothing left to violate and gets back a clean verdict on
  * incomplete data.
  *
- * The verdict is askable at all because `clinical.shapes.ttl` is vendored.
- * Before it was, `serialize()` writing lab-013's value and unit as
+ * The verdict is askable at all because `clinical.shapes.ttl` is among the
+ * shapes loaded. Before it was, `serialize()` writing lab-013's value and unit as
  * `clinical:value` / `clinical:unit` put two predicates in the graph that no
  * loaded shape declared an `sh:path` for, and `assertCovered` refused the whole
  * record rather than return the vacuous `conforms: true` that silence produces.

@@ -19,10 +19,10 @@
  * turtle-serializer.ts and another of the same name in turtle-parser.ts —
  * and nothing but a round trip asks them the same question.
  *
- * An EARNS question is only asked where the vendored shapes can actually answer
+ * An EARNS question is only asked where the shapes `spec` publishes can actually answer
  * it. `shaclCheck` refuses a graph they are silent on rather than returning the
  * vacuous conforms:true silence produces, and absent-001 is such a graph: it
- * carries a `clinical:loincCode` triple no vendored shape constrains. Only
+ * carries a `clinical:loincCode` triple no loaded shape constrains. Only
  * absent-002 is asked both questions here — see each describe below.
  *
  * Claims that hold only WHILE a defect exists are not here; they belong on that

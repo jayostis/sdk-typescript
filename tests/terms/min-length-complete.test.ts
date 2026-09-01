@@ -1,5 +1,5 @@
 /**
- * Every `sh:minLength` a vendored shape puts on a predicate a term claims, that
+ * Every `sh:minLength` a loaded shape puts on a predicate a term claims, that
  * term declares.
  *
  * THE DRIFT THIS CATCHES is the quiet one. `sh:maxCount` and `sh:in` falling
@@ -81,9 +81,9 @@ const TERMS_ON_CONSTRAINED_PREDICATES = allTerms().filter((term) =>
 );
 
 describe('the shapes were read at all', () => {
-  it('finds sh:minLength in the vendored shapes, so an empty sweep cannot pass', () => {
+  it('finds sh:minLength in the loaded shapes, so an empty sweep cannot pass', () => {
     // The whole file is derived from this map. If the traversal breaks — a
-    // reshaped shapes file, a renamed vendored copy — every assertion below
+    // reshaped shapes file, a renamed vocabulary in the manifest — every assertion below
     // passes on nothing, which is the failure this file is about.
     expect(SHAPE_MIN_LENGTHS.size).toBeGreaterThanOrEqual(28);
   });

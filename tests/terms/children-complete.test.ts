@@ -100,7 +100,7 @@ describe('a term declares every child its shape does', () => {
 
       expect(
         declared,
-        `no vendored shape declares sh:targetClass <${classIri}>, so nothing judges the children `
+        `no shape spec publishes declares sh:targetClass <${classIri}>, so nothing judges the children `
           + `${key} writes and validate() is their only reader`,
       ).not.toBeNull();
 

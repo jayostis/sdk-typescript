@@ -207,7 +207,7 @@ export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp):
     // allowed and is the case today; what must not happen is a rule the
     // vocabulary states being invisible to the only validator that ships.
     //
-    // `shaclCheck` refuses a graph the vendored shapes are silent on rather
+    // `shaclCheck` refuses a graph the loaded shapes are silent on rather
     // than returning the vacuous `conforms: true` that silence produces, so
     // reaching a report at all is part of what this asserts.
     const report = await shaclCheck(fixture.input as CascadeRecord);

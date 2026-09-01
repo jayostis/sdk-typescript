@@ -5,7 +5,7 @@
  * keyed on the rule rather than on the module.
  *
  * The LISTS are not re-asserted member by member. They are extracted from the
- * vendored shapes by script, and a test that retyped seventy-four codes would
+ * shapes by script, and a test that retyped seventy-four codes would
  * be a second hand-transcription checking the first — the exact defect the
  * extraction exists to avoid. What is asserted is the size, the boundaries a
  * reader cannot infer, and what the validator does with a value off the list.

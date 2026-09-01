@@ -95,7 +95,7 @@ describe('profile-002 — Full fields: Patient profile with emergency contact, a
   //
   // Only question 7 is blocked. `shaclCheck` throws on this fixture rather than
   // answering, because no shapes file in `spec` declares an `sh:path` for any
-  // `foaf:` predicate — all ten checked, the four vendored here and the six that
+  // `foaf:` predicate — all ten checked, the four written here and the six that
   // are not — so a verdict about a profile carrying a name would be the vacuous
   // `conforms: true` that `assertCovered` exists to refuse. Blocked upstream on
   // jayostis/spec#22, and behind that on #35, which asks whether this SDK should

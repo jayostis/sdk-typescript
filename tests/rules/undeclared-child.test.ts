@@ -38,7 +38,7 @@
  *
  * NO PATIENT PROFILE IN THE SHACL LAYER, though `emergencyContact` is the
  * reviewer's own example and is asked about at the writer and validator layers.
- * Every profile this SDK writes carries `foaf:name`, no vendored shape declares
+ * Every profile this SDK writes carries `foaf:name`, no shape `spec` publishes declares
  * an `sh:path` for any `foaf:` predicate, and `assertCovered` refuses the graph
  * on that ground alone — a refusal naming the wrong predicate, which would be
  * red for a reason this rule did not cause. See tests/conformance/profile.test.ts.

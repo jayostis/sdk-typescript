@@ -69,7 +69,7 @@ describe('profile-004 — Negative: Patient profile missing required dateOfBirth
   // The three are `dateOfBirth`, `givenName` and `familyName`. Only the first
   // is sourced: `cascade:PatientProfileShape` gives `cascade:dateOfBirth` an
   // `sh:minCount 1`, and `validate()` reports it. The other two came from a
-  // hardcoded switch case that no shape backs — no vendored shape declares an
+  // hardcoded switch case that no shape backs — no shape `spec` publishes declares an
   // `sh:path` for `foaf:givenName` or `foaf:familyName` at all, and the models
   // mark both optional.
   //

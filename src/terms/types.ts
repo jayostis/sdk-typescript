@@ -168,7 +168,7 @@ export type TermSpec = {
    *
    * Flat, like {@link TermSpec.values} and {@link TermSpec.maxCount} beside it,
    * and measurement says flat is the whole truth: 30 `sh:property` blocks across
-   * the four vendored shape files declare an `sh:minLength`, over 28 distinct
+   * the four shapes files `spec` publishes declare an `sh:minLength`, over 28 distinct
    * predicates, and EVERY ONE OF THEM IS 1. The two predicates that appear in
    * more than one shape — `dct:title` and `health:conditionName` — carry the
    * same value in both. There is no per-type variation to model, the way there

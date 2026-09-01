@@ -21,7 +21,7 @@
  * a lab result writes `health:interpretation`. The list is identical on all
  * three shapes, so `values` stays flat.
  *
- * The 74 entries are EXTRACTED from the vendored shape rather than typed out. A
+ * The 74 entries are EXTRACTED from the shape rather than typed out. A
  * value set nobody diffed against spec is the same hand-transcription defect
  * that makes `validate()` both too strict and too lax elsewhere, and a list this
  * long is where a typo would hide best. Regenerating it is a shapes query, not

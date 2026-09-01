@@ -338,6 +338,41 @@
 
 ### Internal
 
+- **`spec` is read where it is checked out, and every copy is deleted.** Four
+  shapes files lived in `tests/shapes/`, kept in step with upstream by
+  `scripts/sync-shapes-from-spec.sh` and a 239-line `scripts/check-shapes-drift.mjs`.
+  A copy that falls behind asserts last month's constraints while reporting
+  green, and the drift check existed only because the copies did; both are gone,
+  along with `vendored.json` and the `check:shapes-drift` npm script. Nothing in
+  this repository is a `.ttl` file any more. `spec-sources.json` is the one place
+  a spec path is written down and `tests/support/spec-sources.ts` its only
+  reader, resolving an explicit path, then `CASCADE_SPEC_DIR`, then the `../spec`
+  sibling — the order both upstream repositories document, and the order CI uses
+  after cloning the revision `conformance/scripts/SPEC_PIN` pins. **REFUSES,
+  NEVER SKIPS**: a suite that cannot find the shapes validates against an empty
+  graph, and an empty graph conforms to everything, so every failure throws
+  naming the path it tried and both ways to change it. `parseManifest` checks the
+  manifest rather than casting it, so an entry with no `ontology` names the
+  vocabulary and the key instead of throwing `ERR_INVALID_ARG_TYPE` out of
+  `node:path`. (#58)
+- **Three detectors stop the scheme coming back**, in `tests/spec-single-source.ts`:
+  `turtleFiles` reports a Turtle file anywhere in the tree, `specPathLiterals`
+  parses TypeScript and JavaScript for a string literal naming a spec path — a
+  whole-literal `ontologies` included, so a path assembled a segment at a time is
+  caught — and `vendoringNames` walks every file, matching paths as well as
+  lines, so a re-added `.sh`, `.mjs` or npm script is a finding. Parsed rather
+  than grepped for the path check: the ~20 `@see spec/ontologies/…` citations
+  under `src/terms/definitions/` are the traceability this repository wants, and
+  a text pattern would report every one. `CHANGELOG.md` and `VOCAB_VERSIONS` are
+  spared at the call site as append-only records of what was true at a past
+  release. (#58)
+- **Contributors need a `spec` checkout now.** `CONTRIBUTING.md`, `AGENTS.md` and
+  `README.md` said to clone `conformance` as a sibling and stopped there;
+  following any of them verbatim left `npm test` throwing `no spec checkout at
+  <path>`. All three now name `spec` as a required sibling and `CASCADE_SPEC_DIR`
+  as the alternative. Nothing a consumer installs changes: `rdf-validate-shacl`
+  is still a devDependency and no shapes file was ever in `package.json`'s
+  `files`. (#58)
 - `emergencyContact`, `address` and `preferredPharmacy` are declared as term
   modules — the first use of `{ form: 'blankNode' }`, and the first terms whose
   outputs nest. None declares a `nestedPrefix`: `childrenOf` defaults to

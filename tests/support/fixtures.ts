@@ -4,7 +4,7 @@
  * Deliberately free of `n3`, `clownface` and `rdf-validate-shacl`, so a suite
  * that only reads fixtures does not pay for them. Measured at import: this
  * module 27 ms, `graph.ts` ~500 ms to load the RDF libraries, `shacl.ts` a
- * further ~350 ms to index the vendored shapes.
+ * further ~350 ms to index the shapes read out of the `spec` checkout.
  */
 
 import { readFileSync } from 'fs';
