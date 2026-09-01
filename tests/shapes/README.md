@@ -10,7 +10,7 @@ read by tests only. Never imported by `src/`, never published.
 | `clinical.shapes.ttl` | `spec/ontologies/clinical/v1/clinical.shapes.ttl` |
 | `coverage.shapes.ttl` | `spec/ontologies/coverage/v1/coverage.shapes.ttl` |
 
-Synced from `spec@067db6c`.
+Synced from `spec@b73b28c`.
 
 A deliberate subset, not a mirror. `tests/support/shacl.ts` refuses to return a
 SHACL verdict for a graph these shapes are silent on — a type no `sh:targetClass`

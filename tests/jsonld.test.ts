@@ -302,6 +302,12 @@ describe('JSON-LD Conversion', () => {
         if (ctx[key] === undefined) unresolved.push(key);
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
           for (const nestedKey of Object.keys(value as Record<string, unknown>)) {
+            // Keywords are skipped at BOTH levels, as they are at the top one
+            // above. A nested node carries `@type` — the class its term
+            // declares, written by `jsonLdFor` — and a keyword is not a term:
+            // it has no context entry and cannot be given one. Only the child
+            // property names are this check's business.
+            if (nestedKey.startsWith('@')) continue;
             if (ctx[nestedKey] === undefined) unresolved.push(`${key}.${nestedKey}`);
           }
         }
@@ -353,6 +359,52 @@ describe('JSON-LD Conversion', () => {
         '@context': Record<string, unknown>;
       };
       expect(context[field]).toEqual({ '@id': 'coverage:' + field, '@type': 'xsd:date' });
+    });
+  });
+
+  describe('The reading fork reaches full-IRI keys too', () => {
+    // `toJsonLd` stamps `@type` onto every nested blank node and `fromJsonLd`
+    // takes it back off — but the strip reached only the branch keyed on the
+    // SHORT field name. A document that arrived expanded, which is what a
+    // JSON-LD processor emits and what `fromJsonLd` documents as supported,
+    // took the full-IRI branch and kept `@type` as a record field.
+    //
+    // Not a cosmetic extra key. `NESTED_SKIP` holds `type` and `id`, not
+    // `@type`, so `childrenOf` writes it through `childPredicateFor`, whose
+    // `://` test fails on `@type` and so emits no angle brackets: the output is
+    // `cascade:@type`, and `@type` is not a PN_LOCAL. That is not a wrong
+    // triple, it is a document no parser accepts.
+    const contact = { '@type': 'cascade:EmergencyContact', contactName: 'Maria' };
+    const emergencyContactIri = NAMESPACES.cascade + 'emergencyContact';
+
+    const profileWith = (key: string) => ({
+      '@id': 'urn:uuid:full-iri-profile',
+      '@type': 'cascade:PatientProfile',
+      [key]: contact,
+    });
+
+    it('strips a nested @type arriving under a full-IRI key', () => {
+      const record = fromJsonLd(profileWith(emergencyContactIri)) as Record<string, unknown>;
+
+      expect(record.emergencyContact).toEqual({ contactName: 'Maria' });
+    });
+
+    it('reads a full-IRI key as the short key reads it', () => {
+      // The two spellings are the same document. Anything true of one branch
+      // has to be true of the other, or which processor the caller happened to
+      // run decides what they get back.
+      expect(fromJsonLd(profileWith(emergencyContactIri))).toEqual(
+        fromJsonLd(profileWith('emergencyContact')),
+      );
+    });
+
+    it('writes Turtle a parser accepts', () => {
+      // The end of the failure, and the assertion that would have caught it:
+      // every other question in the suite compares graphs, and a graph that
+      // does not parse never reaches a comparison.
+      const record = fromJsonLd(profileWith(emergencyContactIri)) as CascadeRecord;
+
+      expect(() => parseTurtle(serialize(record))).not.toThrow();
     });
   });
 

@@ -542,3 +542,84 @@ pots=1.4
 #     entailment the assertion avoided is stated outright by the class triple,
 #     and health:status there is not caution — it is a status written under a
 #     vocabulary the record's own shape does not read.
+
+# 2026-08-31 — NO BUMP. src/jsonld/ changed and no row moves, deliberately.
+#   `toJsonLd` now writes the class of an inline nested node — cascade:EmergencyContact,
+#   cascade:Address, cascade:PharmacyInfo, cascade:RecordSummary — where before it wrote
+#   the node's children and no rdf:type. None of that is new vocabulary: all four classes
+#   have been in core since v2.2 and this SDK has written them in TURTLE all along. What
+#   changed is that the JSON-LD writer now reads the class from the term instead of not
+#   reading it at all, so bumping core would claim support that already existed in one
+#   format and was missing in the other.
+#   The term is now the source for BOTH formats: defineTerm builds jsonLdFor and
+#   fromJsonLdValue beside outputsFor, and src/jsonld/converter.ts forks on termFor(key)
+#   above the PROPERTY_PREDICATES lookup. A field that is termed no longer needs a row in
+#   that table to survive being written, which is what lets the table shrink (#46).
+
+# 2026-08-31 — NO BUMP. src/models/ changed and no row moves, deliberately.
+#   The new directory is src/models/validators/, which declares no vocabulary: it
+#   transcribes constraints the shapes ALREADY state — sh:minCount, sh:maxCount,
+#   sh:minLength — into a form validate() can read at runtime. Nothing here adds
+#   a class, a predicate or a property, and the models themselves are untouched
+#   and still compile to `export {};`.
+#   What it changes is WHERE a rule lives. A term owns facts about a PREDICATE,
+#   true wherever it appears; a per-record-type validator owns facts about a
+#   RECORD TYPE — an sh:minCount is scoped to one node shape — and rules spanning
+#   two fields, which no per-field constraint can state. Bumping a vocabulary row
+#   for that would claim support for something spec did not publish.
+
+# 2026-08-31 — NO BUMP. sh:minLength is now enforced, and no row moves.
+#   The constraint was already published: 30 sh:property blocks across the four
+#   vendored shape files declare one, over 28 distinct predicates, and every one
+#   is sh:minLength 1 — including the two predicates that appear in two shapes,
+#   dct:title and health:conditionName, which agree. This SDK is catching up to
+#   what spec already says, not asserting anything new.
+#   It landed on the TERM rather than in a validator's constraint table, because
+#   that measurement says it is a fact about a PREDICATE and not about any one
+#   record type. clinical:ProcedureShape is the case that separates the two:
+#   clinical:procedureName carries sh:minLength 1 and NO sh:minCount, so an
+#   absent procedure name conforms and a present empty one does not.
+#   CHARACTERS, NOT CONTENT. SHACL measures the value node converted to string,
+#   so "  " is length 2 and conforms. The check does not trim. A whitespace-only
+#   name is a real defect and sh:minLength is not the constraint that states it;
+#   sh:pattern is, and no shape declares one. Trimming here would reject records
+#   pyshacl accepts, which is exactly the divergence the fixture contract exists
+#   to catch.
+
+# 2026-08-31 — NO BUMP. Three terms added, five model comments corrected.
+#   unit, resultUnit and relationship transcribe sh:maxCount / sh:minCount /
+#   sh:minLength that clinical.shapes.ttl and health.shapes.ttl ALREADY declare
+#   and that no term claimed, so a record carrying two units validated clean.
+#   Catching up to published constraints is not new vocabulary support.
+#   The five src/models/ edits are `Maps to` doc comments that named the wrong
+#   predicate — daily-snapshot date (x2), family-history relationship, procedure
+#   cptCode and procedureStatus. The serializer was correct throughout; only the
+#   prose was wrong, and it is prose because nothing derives it.
+
+# 2026-09-01 — NO BUMP. Review followup on #56; no vocabulary changed.
+#   The src/models/ edit is two `Maps to` doc comments in daily-snapshot.ts.
+#   The note above records them as corrected in this branch; they were INVERTED
+#   instead — set to health:date on the two fields the serializer writes
+#   cascade:date for, leaving the file contradicting its own module docblock
+#   eleven lines up. The serializer was never wrong: TYPE_PREDICATE_OVERRIDES
+#   and TYPE_MAPPING both say cascade:date for DailyActivitySnapshot and
+#   DailySleepSnapshot, and tests/daily-snapshot.test.ts asserts it. Only the
+#   prose moved, in the wrong direction, and it is prose because nothing derives
+#   it — there is no check comparing a `Maps to` comment against what the
+#   serializer emits, which is why an inversion could land inside a change whose
+#   subject was those very comments.
+
+# 2026-09-01 — NO BUMP. Review followup on #63; no vocabulary changed.
+#   The src/jsonld/ edit fixes the READER, not the vocabulary. toJsonLd has
+#   stamped a nested node's class since the term became the source for both
+#   formats (see the core-v2.2 note above), and fromJsonLd took it back off —
+#   but only on the branch keyed by the short field name. A document that
+#   arrived EXPANDED, which is what a JSON-LD processor emits and what
+#   fromJsonLd documents as supported, took the full-IRI branch and kept @type
+#   as a record field. NESTED_SKIP holds `type` and `id`, not `@type`, so
+#   serialize() then wrote it as the predicate cascade:@type — not a PN_LOCAL,
+#   so a document no parser accepts rather than a wrong triple.
+#   The classes and predicates involved are unchanged and have been in core
+#   since v2.2; what moved is that both of fromJsonLd's key spellings now go
+#   through the same term. Bumping a row would claim new support for something
+#   one of the two spellings already had.

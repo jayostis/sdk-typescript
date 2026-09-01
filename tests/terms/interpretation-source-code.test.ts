@@ -31,8 +31,8 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { interpretationSourceCode } from '../../src/terms/interpretation-source-code.js';
-import { requirePredicate } from '../../src/terms/term.js';
+import { interpretationSourceCode } from '../../src/terms/definitions/interpretation-source-code.js';
+import { requirePredicate } from '../../src/terms/index.js';
 import { termFor } from '../../src/terms/index.js';
 
 const LAB_ID = 'urn:uuid:lab013-aaaa-bbbb-cccc-ddddeeeeffff';

@@ -9,8 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { defineTerm, requirePredicate } from '../../src/terms/term.js';
-import { termFor } from '../../src/terms/index.js';
+import { defineTerm, requirePredicate } from '../../src/terms/index.js';
 
 describe('requirePredicate', () => {
   it('resolves a registered key to the predicate spec defines for it', () => {
@@ -59,14 +58,5 @@ describe('defineTerm', () => {
         rule: { form: 'literal' },
       }),
     ).not.toThrow();
-  });
-});
-
-describe('termFor', () => {
-  it('returns undefined for a field no term claims, leaving the serializer defaults to run', () => {
-    // Most registered fields have no rule and must keep reaching the
-    // type-driven branches of emitField. An unclaimed key is the normal case,
-    // not a missing registration.
-    expect(termFor('resultUnit')).toBeUndefined();
   });
 });

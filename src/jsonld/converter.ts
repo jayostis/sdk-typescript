@@ -8,6 +8,7 @@
  */
 
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY, buildReversePredicateMap } from '../vocabularies/namespaces.js';
+import { termFor } from '../terms/index.js';
 import { CONTEXT_URI } from './context.js';
 import type { CascadeEntity } from '../models/common.js';
 
@@ -50,9 +51,29 @@ export function toJsonLd(record: CascadeEntity): object {
     '@type': mapping.rdfType,
   };
 
+  // Widened once, as `serializeRecord` does at turtle-serializer.ts:642. A term
+  // reads the whole record — that is what keeps `ruleByType` resolution in one
+  // place — and `CascadeEntity` carries no index signature to read it through.
+  const rec: Record<string, unknown> = { ...record };
+
   // Map all record properties to the JSON-LD doc
-  for (const [key, value] of Object.entries(record)) {
+  for (const [key, value] of Object.entries(rec)) {
     if (key === 'id' || key === 'type' || value === undefined || value === null) continue;
+
+    // A term owns this field in both formats, so it is written here and the
+    // legacy chain below never sees it. First, and above `PROPERTY_PREDICATES`
+    // deliberately: a termed field must not depend on a row in the table that
+    // terms are replacing, or deleting that row would drop the field from every
+    // JSON-LD document this SDK writes without a word. `emitField` forks in the
+    // same place and for the same reason (turtle-serializer.ts:668).
+    //
+    // Everything below this point is the legacy chain. It shrinks as fields are
+    // termed and goes away entirely when the last one moves.
+    const term = termFor(key);
+    if (term) {
+      doc[key] = term.jsonLdFor(rec);
+      continue;
+    }
 
     const pred = PROPERTY_PREDICATES[key];
     if (!pred) continue;
@@ -146,6 +167,16 @@ export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
   for (const [key, value] of Object.entries(raw)) {
     if (key.startsWith('@') || value === undefined || value === null) continue;
 
+    // The reading half of the same fork, in the same place and for the same
+    // reason — see `toJsonLd`. What `jsonLdFor` added on the way out comes back
+    // off here, so a record read out of its own JSON-LD is the record that
+    // went in.
+    const term = termFor(key);
+    if (term) {
+      record[key] = term.fromJsonLdValue(value, resolvedType);
+      continue;
+    }
+
     // Check if key is a known property name (short form from context)
     if (key in PROPERTY_PREDICATES) {
       // Handle dataProvenance: strip the "cascade:" prefix
@@ -163,9 +194,20 @@ export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
     }
 
     // Check if key is a full IRI
+    //
+    // THE SAME FORK AGAIN, and it has to be. A full IRI and the short field
+    // name are two spellings of one document — expansion is what a JSON-LD
+    // processor emits, and `fromJsonLd` documents both as supported — so a
+    // reading rule that reaches only the short branch lets the spelling the
+    // caller happened to receive decide what they get back. What `jsonLdFor`
+    // stamped on the way out (a nested node's `@type`) comes off here too;
+    // without it the `@type` survives as a record field, `NESTED_SKIP` does not
+    // hold it, and `serialize` writes it as the predicate `cascade:@type` —
+    // not a PN_LOCAL, and so a document no parser accepts.
     const jsonKey = REVERSE_PREDICATE_MAP.get(key);
     if (jsonKey) {
-      record[jsonKey] = value;
+      const iriTerm = termFor(jsonKey);
+      record[jsonKey] = iriTerm ? iriTerm.fromJsonLdValue(value, resolvedType) : value;
       continue;
     }
   }

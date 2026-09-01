@@ -2,7 +2,75 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`sh:minLength` is enforced, on the term that owns the predicate.** It had
+  been declarable on a validator's constraints table and read by nothing, so a
+  required field was satisfied by `""` — a rule the shapes state and
+  `validate()` did not apply. Measured before it was placed: 30 `sh:property`
+  blocks across the four vendored shape files declare an `sh:minLength`, over 28
+  distinct predicates, and **every one is 1**, including the two predicates that
+  appear in more than one shape. Invariant per predicate, so it is a fact about
+  a predicate and lives on the term beside `sh:maxCount`, not per record type.
+  Six terms carry it: `allergen`, `conditionName`, `medicationName`,
+  `providerName`, `testName`, `vaccineName`; `relationship` makes seven.
+  **CHARACTERS, NOT CONTENT** — SHACL measures the value node converted to
+  string, so `"  "` is length 2 and conforms, and the check does not trim. A
+  whitespace-only name is a real defect and `sh:pattern` is the constraint that
+  would state it; no shape declares one, and rejecting it here would refuse
+  records `pyshacl` accepts. (#51)
+- **Per-record-type validators.** `CascadeEntityValidator` is an abstract class
+  whose `Constraints<T>` is driven by the model interface: every non-optional
+  own field must be declared with a `minCount`, and omitting one is a **compile
+  error naming the field**. `validate()` forks on `record.type` — a type with a
+  validator is judged entirely by it, a type without one takes the previous path
+  unchanged — so the hardcoded `validateTypeSpecific` switch can be retired one
+  record type at a time. `MedicationRecord` is migrated. This is the structure
+  that makes a rule impossible to declare in a model and forget in a validator,
+  which is how `givenName` came to be required by a switch, declared by a model,
+  and required by no shape at all. (#51)
+- **Three terms for published caps nothing was reading.** `clinical:unit` has
+  `sh:maxCount 1` on `clinical:VitalSignShape`, `clinical:LabResultShape` and —
+  as `health:unit` — `health:DailyVitalReadingShape`; `health:resultUnit` has it
+  on `health:LabResultRecordShape`; `clinical:relationship` has it, plus an
+  `sh:minCount 1` and an `sh:minLength 1`, on `health:FamilyHistoryRecordShape`.
+  None was claimed by a term, so a record carrying two of any of them — which is
+  what the faithful reader returns for a document with two such triples —
+  validated clean. (#51)
+
+
+- **`ValidationResult.info`** — findings the vocabulary grades `sh:Info`, in
+  their own array rather than folded into `warnings`. The array is how a caller
+  reads a verdict: everything in `errors` says `'error'` and everything in
+  `warnings` says `'warning'`, so a third grade inside the second would be
+  reachable only by filtering an array named for something else. `valid` is
+  unchanged and still means "no errors"; code reading the two existing arrays is
+  unaffected, except that an Info-graded finding stops arriving in `errors`.
+- **`Severity`** — `'error' | 'warning' | 'info'`, matching SHACL's three, and
+  the type of both `ValidationError.severity` and `TermSpec.severityByType`.
+  `sh:Info` appears 59 times across the vendored shapes.
+
 ### Fixed
+
+- **A coverage record with no `providerName` is no longer accepted.**
+  `coverage:InsurancePlanShape` declares `sh:minCount 1` on
+  `coverage:providerName` and judges records typed `CoverageRecord` as well as
+  `InsurancePlan`, because both serialize to `a coverage:InsurancePlan` (#26).
+  Only the `InsurancePlan` spelling was transcribed, so `validate()` returned
+  `valid: true` where `pyshacl` returns `conforms: false` with "Insurance
+  provider name is required". `src/models/coverage.ts` had declared the field
+  non-optional all along; the validator was the only one of the three that
+  disagreed. (#51)
+- **A family history record is judged on both of its required fields.**
+  `health:FamilyHistoryRecordShape` requires `health:conditionName` **and**
+  `clinical:relationship`, each `sh:minCount 1` at `sh:Violation`. Only the
+  first was enforced. (#51)
+- **Five `Maps to` comments in the models named the wrong predicate.**
+  `daily-snapshot.ts` `date` (twice), `family-history.ts` `relationship`,
+  `procedure.ts` `cptCode` and `procedureStatus`. Documentation only — the
+  serializer was correct throughout — but a wrong one sends a reader querying a
+  predicate that is never written. (#51)
+
 
 - **An insurance plan is `coverage:InsurancePlan`, written in the coverage
   vocabulary.** `TYPE_MAPPING` resolved both `InsurancePlan` and
@@ -198,20 +266,20 @@
   child lost. Latent — no term declares a `ruleByType` — and closed before the
   first one does.
 
-### Added
-
-- **`ValidationResult.info`** — findings the vocabulary grades `sh:Info`, in
-  their own array rather than folded into `warnings`. The array is how a caller
-  reads a verdict: everything in `errors` says `'error'` and everything in
-  `warnings` says `'warning'`, so a third grade inside the second would be
-  reachable only by filtering an array named for something else. `valid` is
-  unchanged and still means "no errors"; code reading the two existing arrays is
-  unaffected, except that an Info-graded finding stops arriving in `errors`.
-- **`Severity`** — `'error' | 'warning' | 'info'`, matching SHACL's three, and
-  the type of both `ValidationError.severity` and `TermSpec.severityByType`.
-  `sh:Info` appears 59 times across the vendored shapes.
-
 ### Changed
+
+- **`validate()` accepts records it previously rejected**, which is the only
+  loosening in this release and the one thing a consumer may notice. A
+  `LabResultRecord` with no `resultValue` or no `resultUnit`, and a `VitalSign`
+  with no `unit`, are now valid. **No shape ever required them**: `pyshacl`
+  returns zero results of any kind on those graphs, and the conformance corpus
+  marks `absent-001`, `lab-011` and `lab-012` `shouldAccept: true` while this
+  SDK refused all three. The requirement came from a hardcoded `switch` case and
+  had no source in the vocabulary. Callers depending on `validate()` to catch a
+  missing lab unit should not — it was never a Cascade rule. The `sh:maxCount 1`
+  that sat in the same property block is still enforced, now off a term. (#3)
+
+
 
 - **`Coverage['type']` narrows from `'CoverageRecord' | 'InsurancePlan'` to
   `'InsurancePlan'`, and `clinical:CoverageRecord` is now READ AND NEVER

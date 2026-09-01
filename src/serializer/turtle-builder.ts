@@ -23,7 +23,7 @@
  * @module serializer
  */
 
-import type { Output } from '../terms/term.js';
+import type { Output } from '../terms/index.js';
 
 // ─── String Escaping ────────────────────────────────────────────────────────
 

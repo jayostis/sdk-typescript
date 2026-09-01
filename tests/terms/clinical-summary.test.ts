@@ -22,7 +22,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { termFor } from '../../src/terms/index.js';
-import { requirePredicate } from '../../src/terms/term.js';
+import { requirePredicate } from '../../src/terms/index.js';
 import { validate } from '../../src/validator/index.js';
 
 const MANIFEST = { id: 'urn:uuid:pod002-aaaa-bbbb-cccc-ddddeeeeffff', type: 'ExportManifest' };

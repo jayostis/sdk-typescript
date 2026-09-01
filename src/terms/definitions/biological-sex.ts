@@ -19,7 +19,8 @@
  * @see spec/ontologies/core/v1/core.shapes.ttl  cascade:PatientProfileShape
  */
 
-import { defineTerm, requirePredicate } from './term.js';
+import { defineTerm } from '../term.js';
+import { requirePredicate } from '../predicate.js';
 
 export const biologicalSex = defineTerm({
   key: 'biologicalSex',

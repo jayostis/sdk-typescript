@@ -24,6 +24,7 @@
   // the include as those are cleaned up is the intended direction.
   "include": [
     "src/**/*.ts",
+    "tests/validator/entity-validator-registry.test.ts",
     "tests/public-surface.test.ts",
     "tests/vocab-2026-08-train.test.ts",
     "tests/conformance/absent.test.ts",
@@ -32,7 +33,8 @@
     "tests/terms/interpretation-source-code.test.ts",
     "tests/support/shacl.test.ts",
     "tests/support/fixtures.test.ts",
-    "tests/support/n3.d.ts"
+    "tests/support/n3.d.ts",
+    "tests/support/rdf-canonize.d.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

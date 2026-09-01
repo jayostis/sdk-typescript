@@ -27,7 +27,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { allTerms, blankNodeTermKeys } from '../../src/terms/index.js';
-import { childPredicatesOf, defineTerm, requirePredicate } from '../../src/terms/term.js';
+import { childPredicatesOf, defineTerm, requirePredicate } from '../../src/terms/index.js';
 
 /**
  * A term whose blank node is reachable ONLY through `ruleByType`.

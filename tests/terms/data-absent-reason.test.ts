@@ -19,8 +19,8 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { dataAbsentReason } from '../../src/terms/data-absent-reason.js';
-import { requirePredicate } from '../../src/terms/term.js';
+import { dataAbsentReason } from '../../src/terms/definitions/data-absent-reason.js';
+import { requirePredicate } from '../../src/terms/index.js';
 
 const ID = 'urn:uuid:absent03-aaaa-bbbb-cccc-ddddeeeeffff';
 

@@ -7,7 +7,7 @@ Where a new test file goes.
 | `tests/` | One file per feature area — `serializer.test.ts`, `deserializer.test.ts`, `jsonld.test.ts`, `validator.test.ts`, one per vocabulary wave — or per public module, like `turtle-builder.test.ts`. | It exercises the SDK's public surface: a record in and Turtle or JSON-LD out, or one exported class on its own. |
 | `tests/terms/` | The term modules: rule forms, and the registry invariants over them. | It is about how a term SERIALIZES a field — a rule form's outputs, a predicate override, or a registry-wide invariant. Term logic is pure, so these need no serializer. |
 | `tests/rules/` | One file per SHACL constraint component — `max-count.test.ts`, `value-set.test.ts`, `min-count.test.ts`. | It is about a rule the vocabulary states, and it belongs here because a rule spans three layers: what a term declares, what the writer does with it (usually nothing, on purpose), and what `validate()` reports. Split across `tests/terms/`, `tests/serializer.test.ts` and `tests/validator.test.ts`, each third can only *claim* the other two exist. Constructed records; `tests/rules/records.ts` builds them. |
-| `tests/conformance/` | One file per fixture family, named for the prefix: `absent-001..003` → `absent.test.ts`, `lab-*` → `lab.test.ts`. | It drives a real fixture through `serialize()` and asserts on the resulting graph or its SHACL verdict. One family per file, so a family's fixtures are read together and a new one has an obvious home. |
+| `tests/conformance/` | One directory per fixture family, one file per fixture inside it — `profile/profile-004-missing-dob.test.ts`. Families not yet migrated are still one file for the whole family (`absent.test.ts`, `lab.test.ts`, `coverage.test.ts`); both shapes are collected. | It drives a real fixture through the SDK and asserts on the resulting graph or its verdict. **One file per fixture**, named `<fixture-id>-<slug>.test.ts`, so a failing file names the fixture before anyone opens it and a new fixture has one obvious home. A family with no coverage yet has no directory rather than an empty one. |
 | `tests/shapes/` | Vendored `.shapes.ttl` from `spec`, and nothing else. | Never. Re-sync it from `spec`; do not hand-edit. |
 | `tests/support/` | Fixture loaders and other helpers shared between test files. | It is a helper, not a test. Files here carry no `.test.ts` suffix and vitest does not collect them. |
 
@@ -75,7 +75,39 @@ copying the shape of whatever file you opened first.
   triples and different bytes — so a string comparison fails on a difference that
   is not one, and `toContain` passes on a substring that proves nothing about
   what else the document says. `triples()` in `tests/support/graph.ts` is the
-  tool where both sides are ground; a graph carrying blank nodes needs traversal
-  instead. The one thing text can say that a parsed graph cannot is that a
-  document *fails* to parse — an undeclared `@prefix` is invisible to
-  `toContain` and fatal to a reader.
+  tool where both sides are ground. A graph carrying blank nodes needs
+  `graphDifference`, which canonicalises both sides so a blank node is named from
+  the graph's own shape rather than from the order it was parsed in — or
+  traversal, which follows an edge without ever naming the node it lands on.
+  Prefer traversal when the failure message matters: a canonical diff says a line
+  differs, a traversal says which structure lost which field. The one thing text
+  can say that a parsed graph cannot is that a document *fails* to parse — an
+  undeclared `@prefix` is invisible to `toContain` and fatal to a reader.
+- **The seven questions belong to the contract, not to the fixture.**
+  `followsTheFixtureContract` in `tests/support/fixture-contract.ts` asks every
+  fixture the same things — written in both formats and the two agreeing, read
+  back from both, and judged by both validators — so strengthening a question
+  strengthens every fixture at once, and a fixture cannot quietly ask less than
+  its siblings. It registers its `it`s in the CALLER's describe and opens none of
+  its own, which is load-bearing: the identity question reads `task.suite?.name`,
+  and a nested describe would have it compare the helper's title instead and go
+  vacuous while still passing. What stays hand-written beside it is what is true
+  of THAT fixture — which rule it breaks, on which predicate — because the
+  contract can only say the verdicts line up, never which one was right.
+- **Everything the contract needs comes from the call site, and none of it is an
+  opt-out.** No table keyed by fixture id: a reader sees the fixture, the contract
+  line, and beside it whatever that line needed to know. The one thing supplied
+  so far is a predicate-to-field mapping, because a SHACL result names an
+  `sh:path` and `validate()` names a JSON key and nothing can bridge those but a
+  human. There is deliberately NO argument meaning "skip this question" — an
+  unmapped violation is REPORTED rather than passed, since otherwise omitting a
+  mapping row would be an exemption available to every fixture and most
+  attractive to the one with the most to hide.
+- **Never let a JSON-LD test reach the network.** `toJsonLd` writes
+  `"@context": CONTEXT_URI`, a reference, so expanding its output means resolving
+  that URL — and a parser left to itself FETCHES it. The deployed copy has
+  drifted from `getContext()`: the same corpus scores 6 of 90 equivalent against
+  the network and 56 of 90 against this build. A fetching test is therefore
+  judging a website rather than the SDK, fails offline and in a sandboxed CI, and
+  looks exactly as correct. `quadsFromJsonLd` in `tests/support/graph.ts` serves
+  `getContext()` for that one URL and throws for any other.

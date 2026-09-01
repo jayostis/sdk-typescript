@@ -19,8 +19,13 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
-import { predicateFor, termFor } from '../terms/index.js';
-import { childPredicateFor, childPredicatesIn, ruleFor } from '../terms/term.js';
+import {
+  childPredicateFor,
+  childPredicatesIn,
+  predicateFor,
+  ruleFor,
+  termFor,
+} from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
@@ -45,7 +50,10 @@ import type { SleepSnapshot } from '../models/sleep-snapshot.js';
  */
 const INSURANCE_PLAN_PREDICATES: Record<string, string> = {
   status: 'coverage:status',
-  providerName: 'coverage:providerName',
+  // NOT providerName. Its term owns the field and carries the same
+  // per-type spelling in `predicateByType`; `emitField` forks to the term
+  // before it reads this table, so a row here would be dead and
+  // `tests/terms/superseded-overrides.test.ts` refuses one.
   memberId: 'coverage:memberId',
   groupNumber: 'coverage:groupNumber',
   planName: 'coverage:planName',

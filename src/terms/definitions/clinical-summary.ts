@@ -35,7 +35,8 @@
  * @see spec/ontologies/core/v1/core.ttl  cascade:RecordSummary
  */
 
-import { defineTerm, requirePredicate } from './term.js';
+import { defineTerm } from '../term.js';
+import { requirePredicate } from '../predicate.js';
 
 /** `sh:minCount 1` on `cascade:RecordSummaryShape`; the counts are optional. */
 const count = { form: 'literal', datatype: 'xsd:integer' } as const;
