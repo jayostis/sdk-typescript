@@ -585,3 +585,13 @@ pots=1.4
 #   sh:pattern is, and no shape declares one. Trimming here would reject records
 #   pyshacl accepts, which is exactly the divergence the fixture contract exists
 #   to catch.
+
+# 2026-08-31 — NO BUMP. Three terms added, five model comments corrected.
+#   unit, resultUnit and relationship transcribe sh:maxCount / sh:minCount /
+#   sh:minLength that clinical.shapes.ttl and health.shapes.ttl ALREADY declare
+#   and that no term claimed, so a record carrying two units validated clean.
+#   Catching up to published constraints is not new vocabulary support.
+#   The five src/models/ edits are `Maps to` doc comments that named the wrong
+#   predicate — daily-snapshot date (x2), family-history relationship, procedure
+#   cptCode and procedureStatus. The serializer was correct throughout; only the
+#   prose was wrong, and it is prose because nothing derives it.

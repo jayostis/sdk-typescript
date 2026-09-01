@@ -93,6 +93,37 @@ export class MedicationValidator extends CascadeEntityValidator<Medication> {
    * Reported against `loincCode` because a finding needs a field to hang on and
    * that is the one a clinical record most often means. That is a presentation
    * choice, not a claim that `loincCode` specifically is missing.
+   *
+   * ── IT COULD BE A SHAPE, AND THE IDIOM IS ALREADY IN THE FILE ──────────────
+   *
+   * "No shape requires a coding" is a fact about what spec HAS published, not a
+   * limit of SHACL. A node-level `sh:or` over property shapes on different paths
+   * states this exactly, and `clinical:ProcedureShape` already does it — for a
+   * name in two spellings rather than a code in three, but the same construct:
+   *
+   *     sh:or (
+   *         [ sh:property [ sh:path clinical:procedureName ; sh:minCount 1 ] ]
+   *         [ sh:property [ sh:path health:procedureName   ; sh:minCount 1 ] ]
+   *     ) ;
+   *     sh:message "Procedure must have a name, as ..."@en ;
+   *
+   * The medication rule is that with three alternatives — `clinical:loincCode`,
+   * `health:testCode`, `health:snomedCode` — on a shape targeting
+   * `clinical:Medication`.
+   *
+   * THE SEVERITY IS THE ONLY AWKWARD PART, and it also has a precedent here.
+   * `sh:severity` belongs to the shape a constraint sits on, not to one
+   * constraint inside it (clinical.shapes.ttl:43), so putting `sh:Warning` on
+   * `clinical:MedicationShape` would downgrade its `sh:minCount` and every other
+   * rule with it. The answer spec already used is a SECOND node shape carrying
+   * only the soft rule — `clinical:ProcedureNameSpellingShape`, targeting the
+   * same subjects and declaring `sh:severity sh:Warning` on its one property.
+   * A `clinical:MedicationCodingShape` beside `MedicationShape` is that shape.
+   *
+   * NOT FILED, and worth filing: if it lands upstream this method disappears and
+   * the rule is generated from the shape like every other, which is the point of
+   * writing it down here rather than leaving "SHACL can't say this" implied. It
+   * can. Nobody has asked it to.
    */
   protected override crossFieldFindings(rec: RecordFields): readonly Finding[] {
     const present = (field: string): boolean => {

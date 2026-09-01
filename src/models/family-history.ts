@@ -24,7 +24,7 @@ export interface FamilyHistory extends CascadeRecord {
 
   /**
    * Relationship of the family member to the patient (e.g., `"mother"`, `"father"`, `"sibling"`).
-   * Maps to `health:relationship` in Turtle serialization.
+   * Maps to `clinical:relationship` in Turtle serialization.
    */
   relationship: string;
 

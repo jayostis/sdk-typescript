@@ -95,6 +95,53 @@ export interface Finding {
  * `minCount` stays here because it does NOT generalise: `clinical:procedureName`
  * carries an `sh:minLength 1` and no `sh:minCount` at all, so a length rule and
  * a presence rule about one predicate genuinely live in different places.
+ *
+ * ── WHAT THE SHAPES SAY AND THIS DOES NOT YET READ ────────────────────────────
+ *
+ * Counted over the four vendored files in `tests/shapes/`. Three constraints are
+ * modelled — `sh:minCount` (136), `sh:maxCount` (381, on the term), `sh:in` (96,
+ * on the term) — plus `sh:minLength` (30, on the term). Everything below is
+ * published, judged by `pyshacl` in the conformance corpus, and invisible to
+ * `validate()`, which is the only judge a consumer can reach.
+ *
+ * NONE OF IT IS BLOCKED ON A DESIGN QUESTION. The list is unbuilt, not
+ * impossible. It splits three ways only by WHERE each belongs:
+ *
+ *   1. STRAIGHT INTO THIS INTERFACE — one field, one comparison, one more
+ *      optional key and one more branch in `constraintFindings`, exactly what
+ *      `minLength` was before it moved to the term:
+ *        sh:datatype  360   sh:minInclusive 42   sh:pattern    38
+ *        sh:maxInclusive 17 sh:nodeKind     14   sh:maxLength   4
+ *      `sh:datatype` is the largest single gap in the SDK's judgement and the
+ *      one that lets `medicationName: 42` validate clean today.
+ *
+ *   2. ON THE CLASS, NOT IN THIS BAG — not per-field, so `Constraint` is the
+ *      wrong shape for them and {@link CascadeEntityValidator} is the right one:
+ *        sh:or     27  a disjunction across paths — what `crossFieldFindings`
+ *                      exists for; see MedicationValidator for a rule that is
+ *                      already this and is not yet a shape
+ *        sh:node   27  shape composition — validator inheritance, which
+ *                      `additionalConstraints()` is already documented as
+ *                      supporting
+ *        sh:closed  2  a whole-record rule; the term system's undeclared-child
+ *                      check is the same idea one level down
+ *
+ *   3. REPRESENTABLE BUT NOT CHECKABLE FROM HERE — `sh:class` (26) and
+ *      `sh:qualifiedValueShape` (2) constrain the TYPE OF THE REFERENT of an
+ *      IRI. Writing that down is easy; answering it needs the pod, and
+ *      `validate()` is handed one record. A missing input, not a missing type.
+ *
+ * ALSO UNREAD, AND NOT A CONSTRAINT: `sh:message` (277). The shapes ship their
+ * own authored wording — "Insurance provider name is required" is spec's
+ * sentence, not this SDK's — and every message here is hand-written beside it.
+ * A generated validator would emit the shape's, and the messages would stop
+ * being a thing tests pin independently of the vocabulary.
+ *
+ * THE RULE FOR WHATEVER READS THIS NEXT: a construct that is not implemented
+ * must FAIL rather than be skipped. A generator that silently drops the 38
+ * `sh:pattern`s emits a validator that looks complete and accepts records the
+ * shapes reject — the vacuous pass, mass-produced. That obligation does not go
+ * away as the list shrinks; it holds until the list is empty.
  */
 export interface Constraint {
   /** `sh:minCount 1`. Absent means the field may be omitted. */

@@ -1,14 +1,27 @@
 /**
  * coverage v1 — `coverage:providerName`: the insurer named on a plan.
  *
- * Termed for `sh:minCount 1` on `coverage:InsurancePlanShape`, and reading the
- * shape narrows the rule. `validateTypeSpecific` required a provider name on
- * BOTH `InsurancePlan` and the deprecated `CoverageRecord` spelling, from one
- * `case` covering the two. Only `coverage:InsurancePlanShape` declares the
- * `sh:minCount`; `clinical:CoverageRecordShape` requires the deprecated
- * `clinical:providerName` instead, and this SDK reads that spelling and never
- * writes it (#26). Requiring it of a record type nothing here emits was a rule
- * with no source.
+ * Termed for `sh:minCount 1` on `coverage:InsurancePlanShape`, which requires it
+ * of BOTH record types — and an earlier version of this comment argued it
+ * required it of only one. The argument was: `clinical:CoverageRecordShape`
+ * declares the `sh:minCount` on the deprecated `clinical:providerName`, this SDK
+ * reads that spelling and never writes it (#26), so requiring a provider name of
+ * a `CoverageRecord` was a rule with no source. Every clause of that is true and
+ * the conclusion does not follow.
+ *
+ * WHAT IT MISSED IS WHICH SHAPE ACTUALLY JUDGES THE RECORD. A record typed
+ * `CoverageRecord` serializes to `a coverage:InsurancePlan` carrying
+ * `coverage:providerName` — that is what #26 fixed — so the shape that targets
+ * it is `coverage:InsurancePlanShape`, the one WITH the `sh:minCount`.
+ * `clinical:CoverageRecordShape` is irrelevant not because it is lenient but
+ * because nothing this SDK writes is ever a `clinical:CoverageRecord`.
+ *
+ * MEASURED, not reasoned, after the reasoning had already been wrong once.
+ * `shaclCheck` on `{ type: 'CoverageRecord', memberId, coverageType }` returns
+ * `conforms: false` with "Insurance provider name is required", byte-identical
+ * to what it returns for the same record typed `InsurancePlan`. With the row
+ * missing, `validate()` returned `valid: true` on that record — a clean verdict
+ * on data the shapes reject, which is the one failure this SDK cannot see.
  *
  * `predicateByType` because the field is written under two vocabularies: the
  * base `PROPERTY_PREDICATES` row is the deprecated `clinical:providerName`,
@@ -35,7 +48,15 @@ export const providerName = defineTerm({
     // violations on data that is present.
     CoverageRecord: 'coverage:providerName',
   },
-  minCountByType: { InsurancePlan: 1 },
+  // BOTH types, because ONE shape requires it of both: whichever name the
+  // caller uses, the record is written `a coverage:InsurancePlan` and judged by
+  // `coverage:InsurancePlanShape`. See the module comment for the reasoning
+  // this replaced, which had the shapes right and the targeting wrong.
+  //
+  // The gap was invisible from this file. `predicateByType` directly above
+  // already names CoverageRecord, so the term read as complete while accepting
+  // a coverage record carrying no provider at all.
+  minCountByType: { InsurancePlan: 1, CoverageRecord: 1 },
   // The cap sits in the same property block as the minCount in every shape
   // that declares it. A cap answers HOW MANY and a minCount answers AT LEAST
   // ONE; neither substitutes for the other, and two values pass both.
