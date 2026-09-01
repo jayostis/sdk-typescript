@@ -282,28 +282,53 @@ describe('Validator', () => {
       expect(errorFields(result)).toContain('testName');
     });
 
-    it('a LabResult missing resultValue produces an error', () => {
-      const result = validate(
-        makeRecord('LabResultRecord', { testName: 'TSH', resultUnit: 'mIU/L' }),
-      );
-      expect(result.valid).toBe(false);
-      expect(errorFields(result)).toContain('resultValue');
-    });
-
-    it('a LabResult missing resultUnit produces an error', () => {
-      const result = validate(
-        makeRecord('LabResultRecord', { testName: 'TSH', resultValue: 2.5 }),
-      );
-      expect(result.valid).toBe(false);
-      expect(errorFields(result)).toContain('resultUnit');
-    });
-
-    it('a LabResult with all three fields missing produces three errors', () => {
+    /**
+     * ONE required field, not three — #3.
+     *
+     * Three tests stood here demanding `resultValue` and `resultUnit`, and three
+     * independent sources say neither is required:
+     *
+     *   THE SHAPE distinguishes them deliberately, in the same node shape.
+     *   `health:testName` carries `sh:minCount 1`, `sh:maxCount 1`,
+     *   `sh:minLength 1` and the message "Lab result must have exactly one
+     *   non-empty testName". `health:resultValue` gets `sh:maxCount 1` under a
+     *   comment reading "REQUIRED cardinality: resultValue is at most one" —
+     *   required CARDINALITY, and the paragraph beneath it explains the cap is
+     *   there so two same-day readings of one analyte cannot merge into
+     *   "95, 310". Same author, same shape, `sh:minCount` on one knowingly and
+     *   not on the other.
+     *
+     *   THE MODEL agrees: `resultValue?` and `resultUnit?` are optional in
+     *   `src/models/lab-result.ts`; `testName` is not.
+     *
+     *   THE CORPUS agrees, and pointedly. `absent-001` is `shouldAccept: true`
+     *   and is described as "lab result with no value, carrying a ratified
+     *   reason for the absence" — a fixture whose whole subject is a lab result
+     *   with no `resultValue`. These tests asserted that record is invalid.
+     *   `lab-011` and `lab-012` are `shouldAccept: true` and failed the same way.
+     *
+     * `pyshacl` returns ZERO results of any kind on a lab result carrying only
+     * a `testName`. The requirement came from a hardcoded `switch` case and had
+     * no source in the vocabulary, which is #3 and is why it was deleted rather
+     * than reimplemented.
+     *
+     * What survives is the half that was always true, asserted as an exact set
+     * so a field creeping back in fails here rather than passing quietly.
+     */
+    it('a bare LabResult reports testName, and nothing else', () => {
       const result = validate(makeRecord('LabResultRecord'));
+
       expect(result.valid).toBe(false);
-      expect(errorFields(result)).toContain('testName');
-      expect(errorFields(result)).toContain('resultValue');
-      expect(errorFields(result)).toContain('resultUnit');
+      expect(errorFields(result).sort()).toEqual(['testName']);
+    });
+
+    it('a LabResult with only a testName is valid', () => {
+      // The positive form of the same claim, and the one `absent-001` makes.
+      // Without it the assertion above would still pass under a validator that
+      // rejected everything.
+      const result = validate(makeRecord('LabResultRecord', { testName: 'TSH' }));
+
+      expect(result.valid).toBe(true);
     });
   });
 
