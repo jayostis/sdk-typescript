@@ -4,6 +4,21 @@
 
 ### Added
 
+- **The zero-runtime-dependency claim is enforced instead of assumed.**
+  `README.md` advertises a zero-dependency Turtle deserializer and
+  `package.json` has no `dependencies` key at all, and nothing checked either —
+  the property was a habit. `thirdPartyImports` in `tests/no-runtime-deps.ts`
+  walks `src/**/*.ts` and reports `file -> specifier` for every import that
+  needs installing; a relative path is admitted whatever its extension, so the
+  JSON data asset is not a special case, and `node:` is the only prefix answered
+  by the runtime rather than by `node_modules`. **Parsed, not grepped** — a
+  dozen JSDoc `@example` blocks under `src/` show a consumer importing from
+  `@the-cascade-protocol/sdk`, and a check that reported those would be switched
+  off on its first run. Newly worth having because `@zazuko/env`, `clownface`,
+  `n3` and `rdf-validate-shacl` are now devDependencies and are exactly what
+  someone reaches for while working on the serializer: an import of one from
+  `src/` builds, typechecks and passes every other suite. `CONTRIBUTING.md`
+  states the rule beside the `npm ci` note. (#23)
 - **`sh:minLength` is enforced, on the term that owns the predicate.** It had
   been declarable on a validator's constraints table and read by nothing, so a
   required field was satisfied by `""` — a rule the shapes state and

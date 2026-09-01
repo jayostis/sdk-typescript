@@ -32,6 +32,14 @@ npm run build
 
 Install the hooks once: `sh scripts/install-hooks.sh`. The pre-commit hook blocks commits to `src/models/` or `src/vocabularies/` without updating `VOCAB_VERSIONS`.
 
+### `src/` has no runtime dependencies
+
+`package.json` has no `dependencies` key, and `README.md` advertises a zero-dependency Turtle deserializer. Nothing under `src/` may import a package: every specifier there is a relative path or a `node:` builtin, and `tests/no-runtime-deps.test.ts` fails naming the file and the package if that stops being true.
+
+`devDependencies` are unconstrained, and that is the reason the rule needs writing down. `@zazuko/env`, `clownface`, `n3` and `rdf-validate-shacl` are installed here and are exactly what you reach for while working on the serializer — so an import of one from `src/` type-checks, builds, and passes every other suite. Nothing would notice until a consumer had already shipped against a dependency tree the README says does not exist.
+
+This is not a judgement that the SDK must never take a dependency. It makes the decision visible so that adding one is a change somebody makes on purpose, in a diff that says so.
+
 ### Debugging a test
 
 Install the recommended **Vitest** extension — VS Code offers it on first open, from `.vscode/extensions.json`. It puts Run and Debug next to every `describe` and `it`, and reads vitest's own discovery, so a moved or renamed suite needs no configuration on your side.
