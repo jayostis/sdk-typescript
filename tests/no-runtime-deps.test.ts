@@ -149,6 +149,53 @@ describe('thirdPartyImports', () => {
     ]);
   });
 
+  it('names a require() call', () => {
+    // A `.cts` file is CommonJS and requires directly; an ESM `.ts` file gets
+    // there through `createRequire`. Either way a package is loaded at runtime
+    // without an import statement anywhere in the file.
+    const root = scratchSrc({
+      'a.cts': "const { Parser } = require('n3');\nmodule.exports = Parser;\n",
+      'b.ts':
+        "import { createRequire } from 'node:module';\n" +
+        "const require = createRequire(import.meta.url);\n" +
+        "export const cf = require('clownface');\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual(['a.cts -> n3', 'b.ts -> clownface']);
+  });
+
+  it('names a dynamic import written as a template literal', () => {
+    const root = scratchSrc({
+      'a.ts': 'export const n3 = await import(`n3`);\n',
+    });
+
+    expect(thirdPartyImports(root)).toEqual(['a.ts -> n3']);
+  });
+
+  it('is silent for an absolute path', () => {
+    // A path is a path whether or not it starts at the root. Nothing under
+    // `src/` writes one, and a resolver never consults `node_modules` for it.
+    const root = scratchSrc({
+      'a.ts': "import { x } from '/opt/generated/x.js';\nexport const y = x;\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual([]);
+  });
+
+  it('names a subpath import', () => {
+    // `#internal/thing` resolves through package.json's `imports` field, and
+    // that field is allowed to map a subpath onto a PACKAGE — which is the
+    // whole reason the form exists. So the specifier alone cannot say whether
+    // anything is installed, and the guard reports rather than assumes. This
+    // package declares no `imports`, so nothing can write one today without
+    // adding the field in the same change.
+    const root = scratchSrc({
+      'a.ts': "import { parse } from '#internal/parser';\nexport const p = parse;\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual(['a.ts -> #internal/parser']);
+  });
+
   it('names an unprefixed builtin', () => {
     // `crypto` without the `node:` prefix is not obviously a builtin: an npm
     // package by that name exists, and the specifier alone cannot say which
