@@ -200,15 +200,6 @@ function singleStringError(
   };
 }
 
-/** {@link singleStringError} for a required field of a record under test. */
-function requiredString(
-  rec: RecordFields,
-  field: string,
-  absent: string,
-): ValidationError | undefined {
-  return singleStringError(rec[field], field, absent);
-}
-
 /**
  * {@link singleStringError} for a field whose one value must be a NUMBER.
  *
@@ -315,22 +306,7 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
   const rec: RecordFields = { ...record };
 
   switch (record.type) {
-    case 'MedicationRecord': {
-      const nameError = requiredString(rec, 'medicationName', 'medicationName is required for MedicationRecord');
-      if (nameError) errors.push(nameError);
-      if (!hasField(rec, 'isActive')) {
-        errors.push({
-          field: 'isActive',
-          message: 'isActive is required for MedicationRecord',
-          severity: 'error',
-        });
-      }
-      break;
-    }
-
     case 'ConditionRecord': {
-      const nameError = requiredString(rec, 'conditionName', 'conditionName is required for ConditionRecord');
-      if (nameError) errors.push(nameError);
       const status = rec['status'];
       if (typeof status !== 'string' || !VALID_CONDITION_STATUSES.has(status)) {
         errors.push({
@@ -339,27 +315,6 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
           severity: 'error',
         });
       }
-      break;
-    }
-
-    case 'AllergyRecord': {
-      const allergenError = requiredString(rec, 'allergen', 'allergen is required for AllergyRecord');
-      if (allergenError) errors.push(allergenError);
-      break;
-    }
-
-    case 'LabResultRecord': {
-      const testNameError = requiredString(rec, 'testName', 'testName is required for LabResultRecord');
-      if (testNameError) errors.push(testNameError);
-      if (!hasField(rec, 'resultValue')) {
-        errors.push({
-          field: 'resultValue',
-          message: 'resultValue is required for LabResultRecord',
-          severity: 'error',
-        });
-      }
-      const resultUnitError = requiredString(rec, 'resultUnit', 'resultUnit is required for LabResultRecord');
-      if (resultUnitError) errors.push(resultUnitError);
       break;
     }
 
@@ -378,14 +333,10 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
         'value is required for VitalSign and must be a number',
       );
       if (valueError) errors.push(valueError);
-      const unitError = requiredString(rec, 'unit', 'unit is required for VitalSign');
-      if (unitError) errors.push(unitError);
       break;
     }
 
     case 'ImmunizationRecord': {
-      const vaccineNameError = requiredString(rec, 'vaccineName', 'vaccineName is required for ImmunizationRecord');
-      if (vaccineNameError) errors.push(vaccineNameError);
       const status = rec['status'];
       if (status !== undefined && typeof status === 'string' && !VALID_IMMUNIZATION_STATUSES.has(status)) {
         errors.push({
@@ -394,21 +345,6 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
           severity: 'error',
         });
       }
-      break;
-    }
-
-    case 'CoverageRecord':
-    case 'InsurancePlan': {
-      const providerNameError = requiredString(rec, 'providerName', 'providerName is required for Coverage records');
-      if (providerNameError) errors.push(providerNameError);
-      break;
-    }
-
-    case 'PatientProfile': {
-      const givenNameError = requiredString(rec, 'givenName', 'givenName is required for PatientProfile');
-      if (givenNameError) errors.push(givenNameError);
-      const familyNameError = requiredString(rec, 'familyName', 'familyName is required for PatientProfile');
-      if (familyNameError) errors.push(familyNameError);
       break;
     }
 
