@@ -1,8 +1,14 @@
 import type { CascadeEntity, ProvenanceType } from '../models/common.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
-import { allTerms, termFor } from '../terms/index.js';
-import { childPredicateFor, ruleFor, severityFor, undeclaredChildKeys } from '../terms/term.js';
-import type { Severity } from '../terms/term.js';
+import {
+  allTerms,
+  childPredicateFor,
+  ruleFor,
+  severityFor,
+  termFor,
+  undeclaredChildKeys,
+} from '../terms/index.js';
+import type { Severity } from '../terms/index.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 

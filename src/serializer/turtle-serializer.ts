@@ -19,8 +19,13 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
-import { predicateFor, termFor } from '../terms/index.js';
-import { childPredicateFor, childPredicatesIn, ruleFor } from '../terms/term.js';
+import {
+  childPredicateFor,
+  childPredicatesIn,
+  predicateFor,
+  ruleFor,
+  termFor,
+} from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';

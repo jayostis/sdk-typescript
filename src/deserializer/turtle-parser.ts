@@ -25,9 +25,14 @@ import {
   TYPE_TO_MAPPING_KEY,
   buildReversePredicateMap,
 } from '../vocabularies/namespaces.js';
-import { blankNodeTermKeys, termFor, termSpellings } from '../terms/index.js';
-import { DEFAULT_NESTED_PREFIX, childPredicateFor } from '../terms/term.js';
-import type { FieldRule } from '../terms/term.js';
+import {
+  DEFAULT_NESTED_PREFIX,
+  blankNodeTermKeys,
+  childPredicateFor,
+  termFor,
+  termSpellings,
+} from '../terms/index.js';
+import type { FieldRule } from '../terms/index.js';
 import { BLANK_NODE_PREDICATE_PREFIXES } from '../serializer/turtle-serializer.js';
 import type { CascadeEntity } from '../models/common.js';
 
