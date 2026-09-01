@@ -33,8 +33,8 @@
  * @see spec/ontologies/clinical/v1/clinical.shapes.ttl clinical:VitalSignShape
  */
 
-import { defineTerm } from './term.js';
-import { requirePredicate } from './predicate.js';
+import { defineTerm } from '../term.js';
+import { requirePredicate } from '../predicate.js';
 
 export const interpretationSourceCode = defineTerm({
   key: 'interpretationSourceCode',

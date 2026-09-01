@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { unbarrelled } from './registry.js';
 
-const TERMS_DIR = fileURLToPath(new URL('../../src/terms/', import.meta.url));
+const TERMS_DIR = fileURLToPath(new URL('../../src/terms/definitions/', import.meta.url));
 const BARREL = join(TERMS_DIR, 'index.ts');
 
 describe('unbarrelled', () => {

@@ -24,43 +24,27 @@ export * from './term.js';
 import type { Term } from './types.js';
 import { childPredicatesOf } from './children.js';
 import { writesBlankNode } from './rule.js';
-import { address } from './address.js';
-import { biologicalSex } from './biological-sex.js';
-import { clinicalSummary } from './clinical-summary.js';
-import { dateOfBirth } from './date-of-birth.js';
-import { interpretation } from './interpretation.js';
-import { dataAbsentReason } from './data-absent-reason.js';
-import { emergencyContact } from './emergency-contact.js';
-import { interpretationSourceCode } from './interpretation-source-code.js';
-import { preferredPharmacy } from './preferred-pharmacy.js';
-import { resultValue } from './result-value.js';
+import * as definitions from './definitions/index.js';
 
 /**
- * Every term module, one line each. Add the import above and the name here in
- * the same edit; the barrel-completeness check names any file left out.
+ * Every term, derived from the manifest rather than listed a second time.
  *
- * Imported, never re-exported. A term is data this module reads, not a symbol
- * anything outside it has a reason to hold: `termFor` is the whole surface, and
- * re-exporting `dataAbsentReason` would let a caller reach a rule while
- * bypassing the map that decides which rule applies. The import alone satisfies
- * the completeness check, which reads the specifier and not the export.
+ * `src/terms/definitions/index.ts` is the one hand-kept list; this reads its
+ * exports. A term left out of the manifest is absent here too, which is what
+ * makes the completeness check in `tests/terms/registry.test.ts` mean
+ * something: it compares the directory against that file alone.
  *
- * A term is only reachable once it is listed HERE. `termFor` reads this array,
- * so a term left out of it is dead code whose field goes on taking the
- * serializer's type-driven default.
+ * Imported as a namespace, never re-exported. A term is data this module
+ * reads, not a symbol anything outside has a reason to hold — `termFor` is the
+ * whole surface, and reaching `dataAbsentReason` directly means reaching a rule
+ * while bypassing the map that decides which rule applies.
+ *
+ * ORDER IS ALPHABETICAL BY EXPORT NAME, not source order: a module namespace
+ * has sorted string keys. Nothing may depend on it — every consumer filters or
+ * builds a map — and `allTerms()` returning them in a different order than the
+ * old array did is the one observable change from that.
  */
-const TERMS: readonly Term[] = Object.freeze([
-  address,
-  biologicalSex,
-  clinicalSummary,
-  dateOfBirth,
-  interpretation,
-  dataAbsentReason,
-  emergencyContact,
-  interpretationSourceCode,
-  preferredPharmacy,
-  resultValue,
-]);
+const TERMS: readonly Term[] = Object.freeze(Object.values(definitions));
 
 /**
  * Built with an explicit loop rather than `new Map(TERMS.map(...))`, which

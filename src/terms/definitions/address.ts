@@ -29,8 +29,8 @@
  * @see spec/ontologies/core/v1/core.ttl  cascade:Address
  */
 
-import { defineTerm } from './term.js';
-import { requirePredicate } from './predicate.js';
+import { defineTerm } from '../term.js';
+import { requirePredicate } from '../predicate.js';
 
 export const address = defineTerm({
   key: 'address',

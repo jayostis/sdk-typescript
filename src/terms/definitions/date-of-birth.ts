@@ -17,8 +17,8 @@
  * @see spec/ontologies/core/v1/core.shapes.ttl  cascade:PatientProfileShape
  */
 
-import { defineTerm } from './term.js';
-import { requirePredicate } from './predicate.js';
+import { defineTerm } from '../term.js';
+import { requirePredicate } from '../predicate.js';
 
 export const dateOfBirth = defineTerm({
   key: 'dateOfBirth',
