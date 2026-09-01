@@ -38,6 +38,7 @@ import { serialize } from '../../src/serializer/turtle-serializer.js';
 import { deserializeOne } from '../../src/deserializer/turtle-parser.js';
 import { toJsonLd, fromJsonLd } from '../../src/jsonld/index.js';
 import { validate } from '../../src/validator/index.js';
+import type { ValidationResult } from '../../src/validator/index.js';
 import type { CascadeRecord } from '../../src/models/common.js';
 
 import type { Fixture } from './fixtures.js';
@@ -105,6 +106,27 @@ export function unreportedViolations(
       return validatorFields.includes(field) ? null : `${path} -> ${field}`;
     })
     .filter((entry): entry is string => entry !== null);
+}
+
+/**
+ * Every field the shipped validator SPOKE ABOUT, whatever grade it gave.
+ *
+ * Question 7 asks whether a rule the vocabulary states is VISIBLE to the only
+ * validator that ships — not whether it is fatal. Those are different
+ * questions, and question 6 already owns the second one.
+ *
+ * All three buckets, because `report.results` has all three severities in it.
+ * `sh:Warning` and `sh:Info` are grades this SDK deliberately models —
+ * `interpretation` declares `severityByType: { VitalSign: 'warning' }`,
+ * `address` and `preferredPharmacy` declare `'info'` — and `verdictOf` files
+ * each in its own array. Reading `errors` alone would compare a three-grade
+ * report against a one-grade answer: a warning-graded rule the validator
+ * caught and reported would come back as "unreported", and the only validator
+ * able to satisfy question 7 would be one that grades everything `error` —
+ * exactly the verdict flip `severityFor` exists to prevent.
+ */
+export function reportedFields(result: ValidationResult): string[] {
+  return [...result.errors, ...result.warnings, ...result.info].map((finding) => finding.field);
 }
 
 /**
@@ -191,7 +213,7 @@ export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp):
     const paths = report.results.map((result) => result.path?.value ?? null);
 
     expect(
-      unreportedViolations(paths, validate(fixture.input).errors.map((e) => e.field), fields),
+      unreportedViolations(paths, reportedFields(validate(fixture.input)), fields),
     ).toEqual([]);
   });
 }

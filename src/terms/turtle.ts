@@ -203,16 +203,3 @@ export function outputsForMember(
       ];
   }
 }
-
-/**
- * Build a term from its declaration.
- *
- * `outputsFor` closes over the spec rather than reading `this`, so a
- * destructured `outputsFor` still works; the spread leaves `key`, `predicate`
- * and `rule` on the object as plain data, so the table stays dumpable and
- * diffable against `spec`'s shapes.
- *
- * @throws when a `predicateByType` value is not a re-prefixing of the
- * registered predicate. Checked HERE, at declaration, so a bad override takes
- * its own module down at load time rather than writing bad Turtle at runtime.
- */

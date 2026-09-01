@@ -194,9 +194,20 @@ export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
     }
 
     // Check if key is a full IRI
+    //
+    // THE SAME FORK AGAIN, and it has to be. A full IRI and the short field
+    // name are two spellings of one document — expansion is what a JSON-LD
+    // processor emits, and `fromJsonLd` documents both as supported — so a
+    // reading rule that reaches only the short branch lets the spelling the
+    // caller happened to receive decide what they get back. What `jsonLdFor`
+    // stamped on the way out (a nested node's `@type`) comes off here too;
+    // without it the `@type` survives as a record field, `NESTED_SKIP` does not
+    // hold it, and `serialize` writes it as the predicate `cascade:@type` —
+    // not a PN_LOCAL, and so a document no parser accepts.
     const jsonKey = REVERSE_PREDICATE_MAP.get(key);
     if (jsonKey) {
-      record[jsonKey] = value;
+      const iriTerm = termFor(jsonKey);
+      record[jsonKey] = iriTerm ? iriTerm.fromJsonLdValue(value, resolvedType) : value;
       continue;
     }
   }

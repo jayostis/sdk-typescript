@@ -16,7 +16,9 @@
 import { describe, it, expect } from 'vitest';
 
 import { cascade, health } from './graph.js';
-import { unreportedViolations } from './fixture-contract.js';
+import { unreportedViolations, reportedFields } from './fixture-contract.js';
+import { validate } from '../../src/validator/index.js';
+import type { CascadeEntity } from '../../src/models/common.js';
 
 const dateOfBirth = cascade.dateOfBirth.value;
 const testName = health.testName.value;
@@ -83,5 +85,80 @@ describe('unreportedViolations', () => {
     expect(unreportedViolations([testName], ['testName'], [[cascade.testName, 'testName']])).toEqual(
       [`${testName} (unmapped)`],
     );
+  });
+});
+
+describe('reportedFields', () => {
+  // THE OTHER HALF OF QUESTION 7'S TRANSLATION, and the half that was missing.
+  //
+  // `unreportedViolations` compares two lists; the tests above prove it
+  // compares them correctly. This proves the SECOND list is the right list.
+  // Question 7 used to build it from `validate(...).errors` alone, while its
+  // first list came from all of `report.results` — every SHACL severity. A
+  // rule the vocabulary grades `sh:Warning` was therefore caught by the
+  // shipped validator, reported by the shipped validator, and still counted
+  // as one the shipped validator missed.
+
+  it('names a field the validator graded `warning`', () => {
+    // `clinical:VitalSignShape` binds the 74-code interpretation list at
+    // `sh:Warning`, and this SDK models that grade rather than flattening it:
+    // `interpretation` declares `severityByType: { VitalSign: 'warning' }`
+    // (`src/terms/definitions/interpretation.ts`). An off-list code is a
+    // reported finding and a valid record, both.
+    const verdict = validate({
+      id: 'urn:uuid:vital-off-list',
+      type: 'VitalSign',
+      dataProvenance: 'PatientReported',
+      schemaVersion: '1.3',
+      vitalType: 'HeartRate',
+      value: 72,
+      interpretation: 'NOT-A-VOCABULARY-CODE',
+    } as unknown as CascadeEntity);
+
+    // The premise, asserted rather than assumed: this really is a finding the
+    // validator made, and really is not in `errors`. If the grade ever moved,
+    // this test would be proving nothing and should say so out loud.
+    expect(verdict.warnings.map((finding) => finding.field)).toContain('interpretation');
+    expect(verdict.errors.map((finding) => finding.field)).not.toContain('interpretation');
+
+    expect(reportedFields(verdict)).toContain('interpretation');
+  });
+
+  it('names a field the validator graded `info`', () => {
+    // `cascade:PatientProfileShape` caps `address` at one and grades the cap
+    // `sh:Info` (core.shapes.ttl:136) — a suggestion, so two addresses are
+    // reported and the profile stays valid. `info` is its own bucket in
+    // `ValidationResult` precisely so it is not reachable only by filtering an
+    // array named for something else, which is exactly what reading `errors`
+    // alone did to it.
+    const verdict = validate({
+      id: 'urn:uuid:profile-two-addresses',
+      type: 'PatientProfile',
+      dataProvenance: 'PatientReported',
+      schemaVersion: '1.3',
+      address: [{ addressCity: 'Boston' }, { addressCity: 'Cambridge' }],
+    } as unknown as CascadeEntity);
+
+    expect(verdict.info.map((finding) => finding.field)).toContain('address');
+    expect(verdict.errors.map((finding) => finding.field)).not.toContain('address');
+
+    expect(reportedFields(verdict)).toContain('address');
+  });
+
+  it('still names the errors it always named', () => {
+    // The widening must not have come at the cost of the bucket question 7
+    // already read. A helper that returned only the two new buckets would pass
+    // both tests above and break every fixture in the corpus.
+    const verdict = validate({
+      id: 'urn:uuid:vital-no-type',
+      type: 'VitalSign',
+      dataProvenance: 'PatientReported',
+      schemaVersion: '1.3',
+    } as unknown as CascadeEntity);
+
+    expect(verdict.errors.length).toBeGreaterThan(0);
+    for (const finding of verdict.errors) {
+      expect(reportedFields(verdict)).toContain(finding.field);
+    }
   });
 });

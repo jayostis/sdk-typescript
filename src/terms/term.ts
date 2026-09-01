@@ -27,6 +27,19 @@ import { outputsForMember } from './turtle.js';
 import { members, present } from './value.js';
 import type { Output, Term, TermSpec } from './types.js';
 
+/**
+ * Build a term from its declaration.
+ *
+ * `outputsFor` closes over the spec rather than reading `this`, so a
+ * destructured `outputsFor` still works; the spread leaves `key`, `predicate`
+ * and `rule` on the object as plain data, so the table stays dumpable and
+ * diffable against `spec`'s shapes.
+ *
+ * The checks below all throw at DECLARATION rather than at write time, so a bad
+ * override takes its own module down at load rather than writing bad Turtle at
+ * runtime. Each states its own contract where it throws — see
+ * {@link requireOverridePredicate} and {@link requireChildPredicate}.
+ */
 export function defineTerm(spec: TermSpec): Term {
   const { key, predicateByType } = spec;
 

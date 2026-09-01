@@ -608,3 +608,18 @@ pots=1.4
 #   it — there is no check comparing a `Maps to` comment against what the
 #   serializer emits, which is why an inversion could land inside a change whose
 #   subject was those very comments.
+
+# 2026-09-01 — NO BUMP. Review followup on #63; no vocabulary changed.
+#   The src/jsonld/ edit fixes the READER, not the vocabulary. toJsonLd has
+#   stamped a nested node's class since the term became the source for both
+#   formats (see the core-v2.2 note above), and fromJsonLd took it back off —
+#   but only on the branch keyed by the short field name. A document that
+#   arrived EXPANDED, which is what a JSON-LD processor emits and what
+#   fromJsonLd documents as supported, took the full-IRI branch and kept @type
+#   as a record field. NESTED_SKIP holds `type` and `id`, not `@type`, so
+#   serialize() then wrote it as the predicate cascade:@type — not a PN_LOCAL,
+#   so a document no parser accepts rather than a wrong triple.
+#   The classes and predicates involved are unchanged and have been in core
+#   since v2.2; what moved is that both of fromJsonLd's key spellings now go
+#   through the same term. Bumping a row would claim new support for something
+#   one of the two spellings already had.
