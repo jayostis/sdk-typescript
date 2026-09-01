@@ -13,11 +13,18 @@
 
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, isAbsolute } from 'node:path';
+import { join, dirname, isAbsolute, resolve } from 'node:path';
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
-import { specRoot, pathsFor, shapesGraph, parseManifest } from './spec-sources.js';
+import {
+  specRoot,
+  pathsFor,
+  shapesGraph,
+  parseManifest,
+  pinnedRevision,
+  assertAtPin,
+} from './spec-sources.js';
 
 /** A scratch spec checkout holding the files named, with any content. */
 function scratchSpec(files: string[]): string {
@@ -30,11 +37,21 @@ function scratchSpec(files: string[]): string {
 }
 
 const ENV = process.env.CASCADE_SPEC_DIR;
+const DRIFT = process.env.CASCADE_ALLOW_SPEC_DRIFT;
 
 afterEach(() => {
   if (ENV === undefined) delete process.env.CASCADE_SPEC_DIR;
   else process.env.CASCADE_SPEC_DIR = ENV;
+
+  if (DRIFT === undefined) delete process.env.CASCADE_ALLOW_SPEC_DRIFT;
+  else process.env.CASCADE_ALLOW_SPEC_DRIFT = DRIFT;
+
+  vi.restoreAllMocks();
 });
+
+/** Two revisions that are certainly not each other, spelled as spec's are. */
+const PINNED = '40e581f83faf19a41327d262108b439771efdff1';
+const ELSEWHERE = '5cc1be85c0848b6a87f28c60aeda8576990c2662';
 
 describe('specRoot', () => {
   it('names the path it looked for and both ways to change it', () => {
@@ -56,6 +73,38 @@ describe('specRoot', () => {
     expect(() => specRoot(notSpec)).toThrow(notSpec);
   });
 
+  it('ignores an empty override rather than reading it as the cwd', () => {
+    // `??` falls back only on null/undefined, so an empty string survives to
+    // `resolve('')`, which is the cwd. The cwd is a directory, so nothing
+    // downstream notices; the next name in the order is simply never consulted.
+    const elsewhere = scratchSpec(['ontologies/core/v1/core.ttl']);
+    process.env.CASCADE_SPEC_DIR = elsewhere;
+
+    expect(specRoot('')).toBe(elsewhere);
+  });
+
+  it('never answers with the cwd when a name in the order is empty', () => {
+    // An exported-but-empty `CASCADE_SPEC_DIR=` is what any shell or CI that
+    // passes an unset input straight through produces, and it is not a choice
+    // of directory. Read as one it names THIS repository — a path nobody set,
+    // with a perfectly good sibling sitting unconsulted — and the refusal sends
+    // its reader to look for a spec checkout in the SDK.
+    //
+    // Asserted as "not the cwd" rather than as a path, because the sibling is
+    // present on a developer's machine and absent in CI: resolving to it and
+    // refusing to find it are both correct, and landing on the cwd is not.
+    process.env.CASCADE_SPEC_DIR = '';
+
+    let landed: string;
+    try {
+      landed = specRoot();
+    } catch (error) {
+      landed = (error as Error).message;
+    }
+
+    expect(landed).not.toContain(resolve(process.cwd()));
+  });
+
   it('takes CASCADE_SPEC_DIR over the sibling', () => {
     // The order two upstream repositories document, asserted as an order
     // rather than as "a path resolved": with no sibling in play the sibling
@@ -64,6 +113,92 @@ describe('specRoot', () => {
     process.env.CASCADE_SPEC_DIR = elsewhere;
 
     expect(specRoot()).toBe(elsewhere);
+  });
+});
+
+/** A pin file naming one revision, written where nothing else will read it. */
+function scratchPin(commit: string): string {
+  const pin = join(mkdtempSync(join(tmpdir(), 'spec-pin-')), 'SPEC_PIN');
+  writeFileSync(
+    pin,
+    `# old pin ${ELSEWHERE} : 136 passed\nrepo=https://example.invalid/spec\ncommit=${commit}\n`,
+    'utf-8',
+  );
+  return pin;
+}
+
+/** A directory that is certainly not a git clone, so no revision can be read off it. */
+const notAClone = (): string => mkdtempSync(join(tmpdir(), 'spec-not-a-clone-'));
+
+describe('pinnedRevision', () => {
+  it('reads the revision the pin names, not one the prose quotes', () => {
+    // The pin carries eighty lines of prose about why it last moved, and
+    // several of those lines quote OLDER revisions. Anchoring to the scalar's
+    // own line is what keeps `# old pin <sha>` from being read as the pin.
+    expect(pinnedRevision(scratchPin(PINNED))).toBe(PINNED);
+  });
+
+  it('answers undefined, not a throw, when there is no pin to read', () => {
+    // A spec checkout with no conformance sibling beside it is a layout, not a
+    // fault. The caller keeps "cannot tell" apart from "no drift"; throwing
+    // here would collapse the two.
+    expect(pinnedRevision(join(tmpdir(), 'no-such-pin-file'))).toBeUndefined();
+  });
+});
+
+describe('assertAtPin', () => {
+  it('refuses a checkout that is not at the pinned revision, naming both', () => {
+    // The failure this replaces is silent and green: a developer's ../spec is
+    // whatever they last pulled and CI clones the pin, so a local run can judge
+    // records against constraints CI will never see and report a pass. Both
+    // revisions are in the message because neither alone tells the reader which
+    // way to move, and the escape hatch is there because the alternative to
+    // naming it is someone deleting the check to get past it.
+    const refuse = (): void => assertAtPin('/somewhere/spec', scratchPin(PINNED), ELSEWHERE);
+
+    expect(refuse).toThrow(PINNED);
+    expect(refuse).toThrow(ELSEWHERE);
+    expect(refuse).toThrow('/somewhere/spec');
+    expect(refuse).toThrow('CASCADE_ALLOW_SPEC_DRIFT');
+  });
+
+  it('takes a checkout that is at the pin', () => {
+    expect(() => assertAtPin('/somewhere/spec', scratchPin(PINNED), PINNED)).not.toThrow();
+  });
+
+  it('lets a deliberate drift through when CASCADE_ALLOW_SPEC_DRIFT is set', () => {
+    // The escape hatch the conformance runner spells --allow-spec-drift, for
+    // the case the pin file itself documents: testing against unreleased
+    // vocabulary on purpose. It warns rather than passing quietly, because a
+    // run judging against an unpinned spec has to say so in its own output.
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.CASCADE_ALLOW_SPEC_DRIFT = '1';
+
+    expect(() => assertAtPin('/somewhere/spec', scratchPin(PINNED), ELSEWHERE)).not.toThrow();
+    expect(warned).toHaveBeenCalled();
+  });
+
+  it('warns rather than refusing when the checkout is not a git clone', () => {
+    // Cannot-tell is not no-drift. A spec checkout does not have to be a clone
+    // — an unpacked tarball judges records exactly as well — so an unreadable
+    // revision cannot be a refusal. Arranged as the real condition rather than
+    // by passing undefined, which a default parameter would swallow: this
+    // exercises `checkedOutRevision` too, and it is the only case here that
+    // does.
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(() => assertAtPin(notAClone(), scratchPin(PINNED))).not.toThrow();
+    expect(warned).toHaveBeenCalledOnce();
+  });
+
+  it('warns rather than refusing when there is no pin to read', () => {
+    // Silence is not available here either: "no difference" out of a check
+    // that never ran reads exactly like a pass, which is the reading this
+    // whole module exists to refuse.
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(() => assertAtPin('/somewhere/spec', join(tmpdir(), 'no-pin'), ELSEWHERE)).not.toThrow();
+    expect(warned).toHaveBeenCalledOnce();
   });
 });
 
