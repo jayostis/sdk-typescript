@@ -1,5 +1,457 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`sh:minLength` is enforced, on the term that owns the predicate.** It had
+  been declarable on a validator's constraints table and read by nothing, so a
+  required field was satisfied by `""` — a rule the shapes state and
+  `validate()` did not apply. Measured before it was placed: 30 `sh:property`
+  blocks across the four vendored shape files declare an `sh:minLength`, over 28
+  distinct predicates, and **every one is 1**, including the two predicates that
+  appear in more than one shape. Invariant per predicate, so it is a fact about
+  a predicate and lives on the term beside `sh:maxCount`, not per record type.
+  Six terms carry it: `allergen`, `conditionName`, `medicationName`,
+  `providerName`, `testName`, `vaccineName`; `relationship` makes seven.
+  **CHARACTERS, NOT CONTENT** — SHACL measures the value node converted to
+  string, so `"  "` is length 2 and conforms, and the check does not trim. A
+  whitespace-only name is a real defect and `sh:pattern` is the constraint that
+  would state it; no shape declares one, and rejecting it here would refuse
+  records `pyshacl` accepts. (#51)
+- **Per-record-type validators.** `CascadeEntityValidator` is an abstract class
+  whose `Constraints<T>` is driven by the model interface: every non-optional
+  own field must be declared with a `minCount`, and omitting one is a **compile
+  error naming the field**. `validate()` forks on `record.type` — a type with a
+  validator is judged entirely by it, a type without one takes the previous path
+  unchanged — so the hardcoded `validateTypeSpecific` switch can be retired one
+  record type at a time. `MedicationRecord` is migrated. This is the structure
+  that makes a rule impossible to declare in a model and forget in a validator,
+  which is how `givenName` came to be required by a switch, declared by a model,
+  and required by no shape at all. (#51)
+- **Three terms for published caps nothing was reading.** `clinical:unit` has
+  `sh:maxCount 1` on `clinical:VitalSignShape`, `clinical:LabResultShape` and —
+  as `health:unit` — `health:DailyVitalReadingShape`; `health:resultUnit` has it
+  on `health:LabResultRecordShape`; `clinical:relationship` has it, plus an
+  `sh:minCount 1` and an `sh:minLength 1`, on `health:FamilyHistoryRecordShape`.
+  None was claimed by a term, so a record carrying two of any of them — which is
+  what the faithful reader returns for a document with two such triples —
+  validated clean. (#51)
+
+
+- **`ValidationResult.info`** — findings the vocabulary grades `sh:Info`, in
+  their own array rather than folded into `warnings`. The array is how a caller
+  reads a verdict: everything in `errors` says `'error'` and everything in
+  `warnings` says `'warning'`, so a third grade inside the second would be
+  reachable only by filtering an array named for something else. `valid` is
+  unchanged and still means "no errors"; code reading the two existing arrays is
+  unaffected, except that an Info-graded finding stops arriving in `errors`.
+- **`Severity`** — `'error' | 'warning' | 'info'`, matching SHACL's three, and
+  the type of both `ValidationError.severity` and `TermSpec.severityByType`.
+  `sh:Info` appears 59 times across the vendored shapes.
+
+### Fixed
+
+- **A coverage record with no `providerName` is no longer accepted.**
+  `coverage:InsurancePlanShape` declares `sh:minCount 1` on
+  `coverage:providerName` and judges records typed `CoverageRecord` as well as
+  `InsurancePlan`, because both serialize to `a coverage:InsurancePlan` (#26).
+  Only the `InsurancePlan` spelling was transcribed, so `validate()` returned
+  `valid: true` where `pyshacl` returns `conforms: false` with "Insurance
+  provider name is required". `src/models/coverage.ts` had declared the field
+  non-optional all along; the validator was the only one of the three that
+  disagreed. (#51)
+- **A family history record is judged on both of its required fields.**
+  `health:FamilyHistoryRecordShape` requires `health:conditionName` **and**
+  `clinical:relationship`, each `sh:minCount 1` at `sh:Violation`. Only the
+  first was enforced. (#51)
+- **Five `Maps to` comments in the models named the wrong predicate.**
+  `daily-snapshot.ts` `date` (twice), `family-history.ts` `relationship`,
+  `procedure.ts` `cptCode` and `procedureStatus`. Documentation only — the
+  serializer was correct throughout — but a wrong one sends a reader querying a
+  predicate that is never written. (#51)
+
+
+- **An insurance plan is `coverage:InsurancePlan`, written in the coverage
+  vocabulary.** `TYPE_MAPPING` resolved both `InsurancePlan` and
+  `CoverageRecord` to `rdfType: 'clinical:CoverageRecord'`, so this SDK could not
+  emit a `coverage:InsurancePlan` subject at all and had written the deprecated
+  class for every coverage record in every release since v1.3.0.
+  **Eleven defects, not one, and they had to move together.** The class was one.
+  Eight were predicates — `providerName`, `memberId`, `groupNumber`,
+  `planName`, `planType`, `coverageType` and `subscriberId` written
+  `clinical:` where the corpus says `coverage:`, and `sourceRecordId` written
+  `health:`. Two were datatypes: `effectiveStart` and `effectiveEnd` carried
+  `xsd:dateTime` where `coverage.ttl` ranges `xsd:date`, so the time component
+  was a midnight-UTC placeholder. Fixing only the class would have been worse
+  than the bug: `coverage:InsurancePlanShape` declares `sh:minCount 1` at
+  `sh:Violation` on `coverage:providerName`, `coverage:memberId` and
+  `coverage:coverageType`, so retyping the subject while still writing
+  `clinical:` makes the shape see these records for the first time and report
+  three violations plus two datatype violations, on records whose data is
+  correct. All four `coverage-` conformance fixtures now match their
+  `expectedOutput` graph in full. (#26)
+- **Coverage records stop validating vacuously.** `coverage:InsurancePlanShape`
+  is `sh:targetClass coverage:InsurancePlan`, so a subject typed
+  `clinical:CoverageRecord` matched no target and every constraint the shape
+  holds was skipped in silence — the four-value `sh:in` on `coverage:status`
+  included. A plan with `status: "banana"` conformed. The same subject also
+  entailed a class the document never declared: coverage v1.5 gives
+  `coverage:status` `rdfs:domain coverage:InsurancePlan`, and asserting a
+  property asserts its domain. `coverage.shapes.ttl` is vendored into
+  `tests/shapes/` so the verdict is checkable at all. (#26)
+- **The eight `coverage:` spellings are read as well as written.** They join
+  the deserializer’s reverse mappings against the same JSON keys the
+  `clinical:` and `health:` spellings already resolve to, so a plan written by
+  this release reads back in full and `coverage:status` stops being a one-way
+  trip. Without them the writer would have looked innocent while the round trip
+  lost the record’s data at the other end. (#26)
+- **`clinical:payorName` does NOT move, and that is load-bearing.** Coverage
+  has no payor property distinct from `coverage:providerName`, which is
+  `sh:maxCount 1`, so it is a legitimate clinical predicate on a plan.
+  `coverage-001` expects it under `clinical:` on a `coverage:InsurancePlan`
+  subject; a blanket “`clinical:` → `coverage:` on a plan” rewrite passes
+  `coverage-002` and `-003` and breaks it. The eight that DO move are named
+  individually in `TYPE_PREDICATE_OVERRIDES.InsurancePlan` for the same reason
+  `sourceRecordId` could not be remapped globally: 35 fixtures across other
+  record types carry it and keep `health:sourceRecordId`. (#26)
+- **A patient profile's emergency contact, address and preferred pharmacy are
+  written.** They never were. The three keys had a blank-node rule
+  (`BLANK_NODE_TYPES` named them) and no entry in `PROPERTY_PREDICATES`, so
+  `getPredicateForField` returned `undefined` and `emitField` exited at
+  `if (!pred) return;` before any rule was consulted. Eighteen predicates and
+  three nested nodes were absent from every profile this SDK has ever
+  serialized — no error, no warning, no partial output. Everything else in
+  `profile-002` serialized correctly, which is what kept it quiet. (#27)
+- **They are read back as nested objects.** `emergencyContact`, `address` and
+  `preferredPharmacy` join `NESTED_BLANK_NODE_FIELDS`, and their twelve child
+  predicates join the deserializer's reverse mappings. Both halves in one
+  change: three fields without the child spellings would have rebuilt each
+  structure as `{}`, every child dropped in silence.
+- **The JSON-LD path no longer empties the three structures.** `getContext()`
+  is built from `PROPERTY_PREDICATES`, which deliberately holds no entry for a
+  blank node's children, so the generated context defined `emergencyContact` /
+  `address` / `preferredPharmacy` and none of their twelve children. Before
+  this change `toJsonLd` hit `if (!pred) continue` and omitted the three
+  fields; with them registered it emitted
+  `"emergencyContact": { "contactName": "Maria Rivera", ... }` — a document
+  that expands to `cascade:emergencyContact` pointing at a node with zero
+  triples. The TTL path carried the data and the JSON-LD path lost it in
+  silence. The twelve children are now defined in the context as top-level
+  terms, matching `spec/contexts/v1/cascade.jsonld` exactly. (#27)
+- **A scalar where a blank node is declared is an error rather than a silent
+  drop.** `outputsForMember`'s `blankNode` case returned `[]` for anything
+  that was not a nested object, so
+  `serialize({ type: 'PatientProfile', address: '742 Evergreen Terrace' })`
+  returned a document with no address triple — no error, no partial output. The
+  flat form is a shape spec describes (`cascade:addressText`,
+  `cascade:pharmacyAddress`) and TypeScript does not stop a JS caller reaching
+  for it. It now throws, naming the field and the predicate. Thrown per member,
+  so a mixed array fails rather than serializing its object members and
+  discarding its scalar ones.
+- **A declared blank-node child no longer stringifies an object into the
+  graph.** `nestedOutputs` returns `[]` for a child object rather than stamping
+  `[object Object]` into a literal, and a child with a DECLARED rule never
+  reached it: `{ form: 'literal' }` did `String(member)`, so
+  `address: { addressLine: { street: 'x' } }` wrote
+  `cascade:addressLine "[object Object]"` — a literal that reads as data, is
+  not, and that no shape can tell from a real one. An object under a scalar rule
+  now throws, naming the field and the predicate: it is the mirror of the
+  scalar-under-a-node case above and gets the same answer, per member, so a
+  mixed array fails rather than half-writing.
+- **The reader rebuilds every inline blank node, not the first.**
+  `triplesToRecord` took `predTriples[0]`, so a document carrying two
+  `cascade:emergencyContact` nodes came back with one. That field is the one
+  `cascade:PatientProfileShape` declares UNCAPPED — a patient may name more than
+  one person to call — and the writer already wrote both, so a pod this SDK
+  produced could not be read back whole. What is lost that way cannot be caught
+  downstream either: `validate()` judges what reached the record, so a truncated
+  read returns `valid: true` on incomplete data. The arity stays the graph's —
+  one node is still a bare object, N are an N-element array — and a capped field
+  is not special-cased: two `cascade:address` nodes now come back as two and are
+  REPORTED rather than quietly halved.
+- **`clinicalSummary` writes all thirteen counts `RecordSummary` declares, not
+  eight.** Declaring `children` made the term authoritative over the node, and
+  the guard that drops an UNDECLARED key dropped a MISSING one just as quietly:
+  `supplementCount`, `heartRateDays`, `bloodPressureDays`, `activityDays` and
+  `sleepDays` are on the `RecordSummary` model, in `PROPERTY_PREDICATES`, in
+  `INTEGER_FIELDS` and on `cascade:RecordSummaryShape`, and were dropped with no
+  error. A manifest read in with `sleepDays` and re-serialized lost it.
+- **The flat IRI form of `clinicalSummary` works again.**
+  `ExportManifest.clinicalSummary` is typed `string` and documented "IRI of the
+  `RecordSummary`", and `URI_FIELDS` has written
+  `cascade:clinicalSummary <urn:uuid:...>` since core v3.4. The blank-node rule
+  turned that type-correct call into a throw, while `wellnessSummary` beside it —
+  typed identically — went on accepting it. A rule may now declare a
+  `scalarRule` for the flat form of an object property; a field that has only
+  the nested form keeps the throw.
+- **`cascade:addressType` is written.** `cascade:AddressShape` declares it
+  beside the six, with `sh:in ( "postal" "physical" "both" )`, and
+  `spec/contexts/v1/cascade.jsonld` has always defined it. Undeclared as a child
+  it was DROPPED rather than written, since a declared `children` writes nothing
+  else. Added to the term, to the `Address` model, and — by derivation from the
+  term — to the generated JSON-LD context and the deserializer's reverse map.
+- **A nested child a term does not declare is written, and reported.**
+  `childrenOf` filtered on the `children` map, so an undeclared key was dropped
+  by the writer: the caller's value vanished with no error and the record
+  reached `validate()` with nothing left to violate. It stopped the triple and
+  not the defect. Every present key is now written — a declared child by its
+  rule's form, an undeclared one by runtime type — and `validate()` reports it
+  as `clinicalSummary.supplementTally`, naming the child and the predicate it
+  went out under. Nothing in `tests/shapes/` is `sh:closed`, so SHACL returns
+  `conforms: true` on such a graph and `validate()` is the only judge that can
+  see it; `spec` issue jayostis/spec#2 asks for the shape to close. (#37)
+- **`RecordSummary.dataProvenance` is written.** `cascade:RecordSummaryShape`
+  declares it (`core.shapes.ttl:1085`) and `RecordSummary` reaches it through
+  `CascadeEntity`, so a caller building a summary off the model had it dropped.
+  Declared as `prefixedEnum` so a nested summary writes `cascade:EHRVerified`
+  like the top-level writer, rather than the plain literal the pre-term nested
+  path wrote.
+- **`cascade:AddressShape`'s five simplified aliases are declared.** `city`,
+  `state`, `country`, `postalCode` and `streetAddress`, which the shape accepts
+  in as many words — *"Accepts both simplified aliases (city, state) and
+  FHIR-aligned properties (addressCity, addressState)"*. With the term read as
+  the legal set, an address carrying `city` would otherwise have been rejected:
+  the SDK refusing what spec permits.
+- **The reader returns a nested child no term declares.** `triplesToNestedObject`
+  skipped every predicate missing from the reverse map, so this SDK could write
+  a document it could not read back, and a read-modify-write deleted the key
+  from somebody else's pod with nothing raised. The key is the local name where
+  the writer would put that exact predicate back, and the full IRI otherwise —
+  written in angle brackets, because `cascade:odd(name)` does not parse and
+  abbreviating a foreign namespace into `cascade:` would write a different
+  predicate. This reverses #27's decision to drop `cascade:contactEmail` on
+  read: that reasoning turned on nothing reporting it, and `validate()` now
+  does. The same drop at TOP level is untouched and filed as #38.
+- **A term's rules are reported at the severity its shape declares.**
+  `clinical:VitalSignShape` binds `interpretation`'s 74 codes at
+  `sh:severity sh:Warning` where the two lab shapes leave them at SHACL's
+  `sh:Violation` default — deliberately, because emitted vital data carries
+  `"elevated"` and core v3.5's ratchet reports such a value rather than
+  rejecting it. `validate()` emitted `error` for all three, and `valid` counts
+  errors alone, so a vital sign spec accepts-with-a-warning came back
+  `valid: false`. (#37)
+- **A nested child keeps the namespace it was read in.** `health:notes` inside a
+  `cascade:emergencyContact` node came back as `notes` and went out as
+  `cascade:notes` — a different property, under a vocabulary that never declared
+  it, with `@prefix health:` dropped from the header. `recoverableChildKey` was
+  written to prevent exactly that and ran only on the branch that did not need
+  it: `REVERSE_PREDICATE_MAP` was consulted first, so any predicate it
+  recognised skipped the check. A short key is now usable only if the writer,
+  asked what it would emit for that key on this node, returns the predicate that
+  was read. (#37)
+- **`sh:Info` is no longer reported as an error.** `cascade:address` and
+  `cascade:preferredPharmacy` are `sh:maxCount 1` at `sh:severity sh:Info`
+  (`core.shapes.ttl:136`, `:146`) — *"A postal address is helpful for care
+  coordination"* — and `validate()` rejected a profile carrying two. Both terms
+  now declare the grade their shape gives them.
+- **Three terms carry the `sh:maxCount 1` their shape declares.**
+  `cascade:dateOfBirth` and `cascade:biologicalSex` each declare it in the same
+  `sh:property` block as the `sh:minCount 1` that got them termed
+  (`core.shapes.ttl:42-43`, `:54`), and `health:interpretation` declares it on
+  all three shapes that bind its 74 codes (`health.shapes.ttl:956`,
+  `clinical.shapes.ttl:1087`, `:1561`). Only the minCount and the value set had
+  been carried, so `validate()` reported a profile with NO date of birth and
+  accepted one with two: `hasField` sees the field present, and with no cap
+  nothing counted. The value set does not cover this and cannot —
+  `biologicalSex: ['male', 'female']` and `interpretation: ['H', 'L']` are
+  admitted members throughout, so every member passes the list and the record's
+  only defect is how many there are. That is the vacuous pass this branch exists
+  to close, and it was still open on three fields the branch had just termed.
+  The writer is unchanged and still writes every value. (#37)
+- **A blank node reachable only through `ruleByType` is readable.**
+  `childPredicatesOf` and `blankNodeTermKeys` read `spec.rule` alone while
+  `defineTerm` validates children across both, so such a node would have been
+  written correctly and come back as the bare identifier `"_:b0"` with every
+  child lost. Latent — no term declares a `ruleByType` — and closed before the
+  first one does.
+
+### Changed
+
+- **`validate()` accepts records it previously rejected**, which is the only
+  loosening in this release and the one thing a consumer may notice. A
+  `LabResultRecord` with no `resultValue` or no `resultUnit`, and a `VitalSign`
+  with no `unit`, are now valid. **No shape ever required them**: `pyshacl`
+  returns zero results of any kind on those graphs, and the conformance corpus
+  marks `absent-001`, `lab-011` and `lab-012` `shouldAccept: true` while this
+  SDK refused all three. The requirement came from a hardcoded `switch` case and
+  had no source in the vocabulary. Callers depending on `validate()` to catch a
+  missing lab unit should not — it was never a Cascade rule. The `sh:maxCount 1`
+  that sat in the same property block is still enforced, now off a term. (#3)
+
+
+
+- **`Coverage['type']` narrows from `'CoverageRecord' | 'InsurancePlan'` to
+  `'InsurancePlan'`, and `clinical:CoverageRecord` is now READ AND NEVER
+  WRITTEN.** The class has been deprecated in favour of
+  `coverage:InsurancePlan` since clinical v1.5 (`clinical.ttl:187`) and was
+  retained for backward compatibility with existing EHR import data — for
+  READING it. It joins `DEPRECATED_TYPE_ALIASES` beside the four classes
+  clinical v1.13 deprecated, so `deserialize()` accepts a pod typed either way
+  and nothing in `TYPE_MAPPING` can produce the old spelling. The pods that
+  need the read side are the ones this SDK wrote, which is why refusing them
+  was never an option. `'CoverageRecord'` also stays in `TYPE_TO_MAPPING_KEY`
+  so a caller still holding the old JSON spelling can name it to
+  `deserialize()`; it resolves to `coverage:InsurancePlan` like the other.
+  **A caller who typed a record `'CoverageRecord'` gets a type error and a
+  differently-classed document; that is the fix, not a side effect.** (#26)
+- `PatientProfile.emergencyContact` widens from `EmergencyContact` to
+  `MultiValue<EmergencyContact>`. **The type now describes what the SDK
+  produces.** `cascade:PatientProfileShape` declares no `sh:maxCount` for this
+  field where `address` and `preferredPharmacy` beside it are both capped at
+  one, the writer has always written one node per member of an array, and the
+  reader now returns every one. A profile carrying a single contact still reads
+  back as a bare object, so nothing that handles one contact changes shape.
+
+### Removed
+
+- `contactPhone: 'vcard:hasTelephone'` and `contactEmail: 'vcard:hasEmail'` from
+  `PROPERTY_PREDICATES`. **Not a behaviour change: neither row has ever been
+  reachable.** Both are nested-only keys, and a blank node's children are built
+  from the node's prefix and the JSON key rather than looked up in that table —
+  no fixture, no serializer path and no record type has ever written either. A
+  contact's phone is `cascade:contactPhone`, which is what `profile-002` expects
+  and what `src/models/patient-profile.ts` documents. `cascade:contactEmail` is
+  not resolved on read either: no ontology in `spec/` declares it — core.ttl
+  gives `cascade:EmergencyContact` three properties and an email is not among
+  them — and because `childrenOf` writes every key of a rebuilt object back
+  out, reading one would make this SDK a WRITER of a predicate with no domain,
+  no range and no shape. The `vcard` namespace declaration stays.
+- The three now-dead `BLANK_NODE_TYPES` entries. `emitField` returns before that
+  table for a field a term module owns, so the `rdf:type` of each node is stated
+  once, in `src/terms/`.
+
+### Internal
+
+- `emergencyContact`, `address` and `preferredPharmacy` are declared as term
+  modules — the first use of `{ form: 'blankNode' }`, and the first terms whose
+  outputs nest. None declares a `nestedPrefix`: `childrenOf` defaults to
+  `cascade` and this fixture family's child keys are already disambiguated in
+  the JSON.
+- `TermSpec.severityByType` — recordType to `'error'` / `'warning'`, defaulting
+  to `'error'`. Per record type like `predicateByType` beside it, and NOT per
+  rule: `sh:severity` belongs to the property shape, so one block's
+  `sh:datatype`, `sh:maxCount` and `sh:in` all report at that block's severity
+  (measured — a vital sign breaking all three returns three Warnings), and this
+  governs every rule the term declares for the type.
+- `validate()` partitions findings by `severity` rather than by which function
+  produced them. Those four sources were positional — whatever `validateWarnings`
+  returned was a warning — which a term reading severity off its shape breaks,
+  since one walk now raises both. No existing finding changes bucket.
+- `tests/terms/children-complete.test.ts` asserts that every `sh:path` on a
+  termed blank node's shape is declared as a child of that term, resolving the
+  shape from the term's own `rdfType` via `sh:targetClass`. With the children
+  map read as the legal set, a term falling behind its shape stopped being a
+  silent drop and became a false rejection; this is what catches it. Three such
+  gaps were found by hand before it existed.
+
+## [3.1.0] - 2026-08-28
+
+Vocabulary sync: core 3.6 to 3.7, health 2.7 to 2.8, clinical 1.15 to 1.16,
+coverage 1.4 to 1.5. 24 new terms.
+
+**Minor, not major: purely additive.** No published type narrows, no record type
+changes what it serializes to, and every graph this SDK wrote before still reads
+back identically.
+
+Every term here comes from a field-coverage measurement against real FHIR R4
+exports: each one is an element a conformant server sends that the vocabulary
+had nowhere to put, so an importer dropped it.
+
+### Added
+
+Clinical v1.16 — encounters:
+- `encounterClassDisplay` and `encounterClassSystem`, the other two parts of the
+  `Encounter.class` Coding. The code stays in `encounterClass` for round-trip;
+  because the binding is only extensible, a local code such as `"5"` is
+  unreadable without its display and unmappable without its system.
+  `encounterClassSystem` is written as a plain string literal — the ontology
+  ranges it `xsd:anyURI`, and the shape accepts `anyURI` OR `string` via `sh:or`
+  precisely because serializers differ on which they write.
+- `encounterReason` (0..*), `admitSource` and `dischargeDisposition`. None
+  carries a value set: FHIR binds `reasonCode` and `admitSource` only PREFERRED
+  and `dischargeDisposition` only EXAMPLE. The presence of `admitSource` is the
+  structured signal separating an admission from an office visit, which was
+  unrecoverable from a pod through v1.15.
+- `EncounterParticipant` and `hasParticipant` (0..*), with `participantName`,
+  `participantRole`, `participantRoleCode` (0..*) and `participantSpecialty`.
+  Each participation serializes as an INLINE BLANK NODE, following the core
+  v3.4 `clinicalSummary` / `wellnessSummary` precedent;
+  `clinical:EncounterParticipantShape` omits `sh:nodeKind sh:IRI` so a
+  serializer may write one for a structural sub-node. A visit routinely carries
+  several participants in the same role, which the rejected flat
+  role-qualified-predicate design could not represent at all.
+
+Clinical v1.16 — identity and documents:
+- `businessIdentifier` (0..*), typed on `CascadeEntity` because the ontology
+  deliberately declares no `rdfs:domain`. Values are the FHIR token form
+  `"{system}|{value}"` where the source states a system; this SDK round-trips
+  the string verbatim and never splits, parses or invents one. Distinct from
+  `sourceRecordId`, which holds the server-assigned logical id: the two id
+  spaces do not join.
+- `documentReferenceStatus`, `documentAuthorName` (0..*) and
+  `authenticatorName`, registered as PREDICATES ONLY — their domain is
+  `clinical:ClinicalDocument`, a class this SDK does not model, the same
+  position the core v3.4 device-source terms are in. `DocumentReferenceStatus`
+  is exported as a type.
+
+Core v3.7 — pod attachments:
+- `Attachment` model and the seven properties `hasAttachment` (0..*),
+  `attachmentPath`, `attachmentMediaType`, `contentHash`, `hashAlgorithm`,
+  `byteSize` and `attachmentTitle`.
+- **An attachment is a subject with its own IRI, not a sub-node.**
+  `cascade:HasAttachmentEdgeShape` declares `sh:nodeKind sh:IRI` so a record and
+  its attachment can live in different files, so `hasAttachment` is an IRI edge.
+  This is the one point on which core v3.7 and clinical v1.16 rule oppositely.
+- This SDK models the metadata node only: it neither reads, writes, hashes nor
+  verifies attachment bytes.
+
+Coverage v1.5:
+- `coverage:status` and the `CoverageStatus` type, closed to the four
+  `fm-status` codes because the FHIR binding is REQUIRED and the shape
+  constrains the value at `sh:Violation`. Written via a record-type override
+  because the `status` key already resolves to `health:status`, and declared for
+  `InsurancePlan` only — `coverage:status` has `rdfs:domain
+  coverage:InsurancePlan`.
+
+Health v2.8:
+- SHACL only; no term for this SDK to model. The row moves because the version
+  moved.
+
+Core v3.8:
+- `PatientReported` added to `ProvenanceType` and to the validator's
+  `VALID_PROVENANCE_TYPES`. The second is the one that mattered: a value absent
+  from that set is rejected at runtime, so bumping the row alone would have left
+  this SDK failing a conformant record. No term modelled in this release
+  changes.
+- `PatientReported` is distinct from the existing `SelfReported` on the axis of
+  who keyed the data in, not who it came from: `SelfReported` is the patient
+  entering data directly, `PatientReported` is their own account recorded by
+  another party or system (history related to a clinician, imported
+  questionnaire responses). It is a direct subclass of `cascade:DataProvenance`
+  under neither `ClinicalGenerated` nor `ConsumerGenerated`, since a patient's
+  report reaches records through either setting.
+
+### Fixed
+
+- Blank-node labels are minted from a monotonic counter instead of
+  `Date.now()` plus four random base-36 characters. The old scheme collides for
+  two nodes created in the same millisecond, which was survivable when the only
+  inline blank nodes were one summary per manifest, and is not now that an
+  encounter carries several participations at once: a collision merged two
+  participations, attributing one clinician's role to another's name.
+
+### Known gaps
+
+- `TYPE_MAPPING` resolves both `InsurancePlan` and `CoverageRecord` to
+  `clinical:CoverageRecord`, so this SDK still cannot emit a
+  `coverage:InsurancePlan` subject and coverage's own shapes never see these
+  records. `coverage:status` is therefore a one-way trip: the class is lost on
+  read, so re-serializing what came back writes `health:status`. Pinned by test
+  rather than fixed, because retargeting the class is a migration.
+- No conformance fixture exercises any of these 24 terms, so cross-implementation
+  agreement with `sdk-python` and `cascade-cli` is unverified.
+
 ## [3.0.0] - 2026-08-15
 
 Vocabulary sync: core 3.5 to 3.6, health 2.6 to 2.7, clinical 1.14 to 1.15.

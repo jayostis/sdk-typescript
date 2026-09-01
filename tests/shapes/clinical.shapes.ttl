@@ -1,0 +1,2805 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# SHACL Shapes for Cascade Protocol Clinical Documents
+# ============================================================================
+#
+# These shapes validate clinical documents imported from EHR systems via
+# Apple HealthKit. Shapes accept multiple provenance values to support
+# different data sources (EHR, device, patient-reported).
+#
+# Changelog:
+# v1.19 (2026-08-30): Added clinical:CoverageTypeVocabularyShape, checking the
+#     VALUE of clinical:coverageType against the value set FHIR R4 binds
+#     Coverage.type to, at sh:Warning. The list is
+#     coverage:CoverageTypeVocabularyShape's, copied unchanged, because
+#     clinical:coverageType and coverage:coverageType are the deprecated and the
+#     current spelling of one field. Corrects v1.18, which left the value
+#     unconstrained on the grounds that the ontology comment and the corpus
+#     disagreed -- the disagreement had already been settled by coverage v1.4,
+#     which lists the corpus's value "primary" by name, and v1.18 had not looked
+#     there. Three of the comment's five values are accepted nowhere in this
+#     specification at all.
+# v1.18 (2026-08-30): Added clinical:CoverageRecordShape, targeting the
+#     deprecated-and-retained clinical:CoverageRecord. Until now that class was
+#     the only deprecated class in this repository with no shape, so every
+#     record in the spelling all pre-migration EHR coverage data uses validated
+#     conforms:true because nothing looked at it. NOT strictly widening, and the
+#     distinction is the point: records move from unexamined to examined, so a
+#     malformed one can now be rejected rather than passing unread. No existing
+#     shape is touched and no record that was ever actually checked changes
+#     verdict. Mirrors coverage:InsurancePlanShape except in three places
+#     documented at the shape, where the retained corpus differs from what the
+#     migrated spelling assumes.
+# v1.17 (2026-08-28): Stop sh:node from escalating a nested sh:Warning into a
+#     sh:Violation. Strictly widening: no graph that validated under v1.16 stops
+#     validating, and six document classes stop being REJECTED for a value
+#     v1.16 said would only be reported.
+#
+#     THE DEFECT. SHACL defines conformance as an EMPTY validation result
+#     (https://www.w3.org/TR/shacl/#conformance-checking), and that definition
+#     does not read severities: a nested sh:Warning is a result, so the value
+#     node does not conform, so the referring sh:node constraint fires — at ITS
+#     OWN severity, which with nothing declared is sh:Violation. v1.16 put the
+#     clinical:status and clinical:documentReferenceStatus warnings ON
+#     clinical:ClinicalDocumentShape, which is exactly the shape the six
+#     document subtypes reach through sh:node. So the ratchet v1.16 wrote down
+#     held for clinical:ClinicalDocument and was inverted for
+#     clinical:LaboratoryReport, clinical:ProgressNote,
+#     clinical:DischargeSummary, clinical:ConsultationNote,
+#     clinical:ImagingReport and clinical:VisitSummary: an out-of-set status
+#     rejected the record. Confirmed on two independent engines (pyshacl and
+#     rdf-validate-shacl); on clinical:ProgressNote the underlying warning was
+#     not even reported, only an opaque sh:NodeConstraintComponent naming no
+#     field.
+#
+#     THE FIX, AND WHY IT IS NOT sh:severity ON THE sh:node CONSTRAINT.
+#     Declaring sh:severity sh:Warning next to the sh:node reference would demote
+#     the WHOLE referenced shape: a discharge summary missing clinical:sourceEHR,
+#     or carrying a malformed cascade:schemaVersion, would stop being rejected
+#     too. sh:severity is a property of the shape a constraint belongs to and
+#     cannot be applied to one nested result. The escalation is therefore removed
+#     at the source instead: a shape that is used as an sh:node referent carries
+#     Violation-severity constraints ONLY, and every non-Violation constraint is
+#     declared on a shape that TARGETS the classes it applies to. Warnings then
+#     reach a document subtype the same way they reach clinical:ClinicalDocument,
+#     by sh:targetClass, and are reported as themselves.
+#
+#     1. clinical:ClinicalDocumentShape loses its two Warning property shapes
+#        (clinical:status, clinical:documentReferenceStatus). It keeps every
+#        Violation-severity constraint and stays the sh:node referent for the
+#        six subtypes, which is now sound because it carries no non-Violation
+#        constraint.
+#     2. NEW clinical:DocumentReferenceStatusShape: the
+#        clinical:documentReferenceStatus binding, verbatim from v1.16, at
+#        sh:Warning, targeting all SEVEN document classes.
+#     3. NEW clinical:DocumentStatusShape: the clinical:status binding, verbatim
+#        from v1.16, at sh:Warning, targeting all SEVEN document classes.
+#     4. clinical:LaboratoryReportShape loses the clinical:status restatement
+#        v1.16 put on it. Its value set was the same ten codes, so nothing it
+#        enforced is lost; it kept only a lab-specific message, and that message
+#        is now folded into the shared one, which names DiagnosticReport
+#        explicitly. It could NOT be kept as a lab-only shape beside
+#        clinical:DocumentStatusShape: SHACL class targets follow
+#        rdfs:subClassOf* wherever the axioms are in the validated graph, and
+#        the conformance harness loads them, so two shapes binding
+#        clinical:status would report a laboratory report's status twice there
+#        and once under a validator that omits the axioms. Measured during this
+#        fix, not assumed. The full argument, and what it means for the
+#        composition-status ratchet, is at clinical:DocumentStatusShape.
+#     5. clinical:LaboratoryReportShape keeps its documentDate constraint and
+#        the sh:node reference, both unchanged.
+#
+#     GUARD. scripts/check-nested-severity.py fails any sh:node or
+#     sh:qualifiedValueShape reference into a shape carrying sh:Warning or
+#     sh:Info, against a baseline in scripts/known-severity-escalations.json that
+#     can only shrink. No existing check could see this class: it is not an
+#     entailment question, so check-shape-targets.py is silent on it, and spec
+#     runs no SHACL validator (see the root backlog on that).
+#
+#     DOC FIX. Item 4 of the v1.16 entry below said "the nine encounter facts"
+#     and then listed seven property shapes. The encounter group is eleven terms
+#     (ten properties and clinical:EncounterParticipant); seven of them are
+#     property shapes on clinical:EncounterShape. Corrected in place; no
+#     constraint changes.
+#
+# v1.16 (2026-08-27): Describe the facts the records now carry. Additive and
+#     strictly widening: nothing that validated under v1.15 stops validating,
+#     and every new finding on an existing predicate is at sh:Warning.
+#
+#     1. clinical:status is declared, with a per-class FHIR value set, on the
+#        shapes whose records carry it. Through v1.15 it was written onto five
+#        record types and declared on none of them, so nothing was closed and
+#        nothing was checked: the value set was unenforced and validation passed
+#        in silence. The sets are verbatim from the FHIR R4 value set each
+#        record type's source resource binds:
+#          clinical:VitalSignShape          Observation.status, 8 codes
+#          clinical:LaboratoryReportShape   DiagnosticReport.status, 10 codes
+#          clinical:ClinicalDocumentShape   see the note on that shape
+#          health:LabResultRecordShape      Observation.status, 8 codes
+#          health:AllergyRecordShape        AllergyIntolerance.clinicalStatus,
+#                                           3 codes
+#        The last two are in health.shapes.ttl v1.5, which is where those two
+#        shapes live. All five are sh:Warning, per the core v3.5 ratchet: a
+#        value existing data carries is reported, not rejected, and the severity
+#        is raised only after a release in which the warning is observably
+#        absent from conforming output.
+#     2. ClinicalDocumentShape's status set is the ten-code diagnostic-report
+#        set rather than the four-code composition set that DocumentReference.
+#        docStatus is bound to. clinical:LaboratoryReportShape reaches this
+#        shape through sh:node, and a lab report converted from a
+#        DiagnosticReport legitimately carries "partial", "corrected" or
+#        "appended". composition-status is a strict subset of
+#        diagnostic-report-status, so the wider set is the only one correct for
+#        every class under this shape. The full argument, and the ratchet step
+#        that would tighten it, are stated at the constraint.
+#     3. NEW property shapes on clinical:ClinicalDocumentShape for
+#        clinical:documentReferenceStatus (sh:in current | superseded |
+#        entered-in-error, FHIR R4 DocumentReference.status, required binding),
+#        clinical:documentAuthorName (repeatable, NO maxCount — the
+#        sh:maxCount 1 on clinical:providerName is what was discarding every
+#        author past the first), clinical:authenticatorName (0..1) and
+#        clinical:businessIdentifier (repeatable).
+#     4. NEW property shapes on clinical:EncounterShape for seven of the facts
+#        clinical v1.16 defines: encounterClassDisplay,
+#        encounterClassSystem, encounterReason (repeatable), admitSource,
+#        dischargeDisposition, hasParticipant (repeatable) and the domain-free
+#        businessIdentifier (repeatable). The encounter group itself is eleven
+#        terms — ten properties and clinical:EncounterParticipant — and the four
+#        it does not list here are the participation sub-properties, constrained
+#        by clinical:EncounterParticipantShape in item 5.
+#        None of the source-text properties
+#        carries a value set: FHIR binds reasonCode and admitSource PREFERRED
+#        and dischargeDisposition EXAMPLE, and an enum over an example-strength
+#        binding rejects conformant data by construction.
+#        clinical:sourceRecordId keeps sh:maxCount 1 and now says why: it holds
+#        one logical id, and the 0..* business identifiers have their own
+#        predicate.
+#     5. NEW clinical:EncounterParticipantShape, targeting the new
+#        clinical:EncounterParticipant class. Constrains cardinality and
+#        datatype only. It requires no field, because FHIR makes every
+#        sub-element of Encounter.participant optional, and it binds no role
+#        vocabulary, because that binding is extensible at source. It does not
+#        require sh:nodeKind sh:IRI: unlike an Encounter, nothing references a
+#        participation from another file.
+#
+# v1.15 (2026-08-14): Check what was unchecked, keep what was being dropped, and
+#     stop failing records that carry the thing they are failing for missing.
+#     Additive and strictly widening: no graph that validated under v1.14 stops
+#     validating, and the only new finding anywhere is at sh:Warning.
+#
+#     1. clinical:VitalSignShape's clinical:interpretation is bound to the same
+#        value set the lab shapes use, at sh:Warning. v1.14 put the sh:in on the
+#        LAB shapes only, so the identical predicate was checked on a lab result
+#        and unchecked on a vital sign. sh:Warning first and sh:Violation in a
+#        later version is the ratchet core v3.5 wrote down for a value that
+#        existing data carries. See the long note above the property.
+#     2. Both interpretation value sets gain the fourteen data-absent-reason
+#        codes they did not carry. v1.14 accepted "unknown" alone, so every
+#        reason for an absent interpretation was the same reason; C-CDA
+#        nullFlavor NASK, ASKU and NAV are three different clinical facts.
+#        Still byte-identical to health:interpretation.
+#     3. NEW property shapes for clinical:interpretationSourceCode on the lab
+#        and vital shapes: a single string, no value set and no pattern, holding
+#        a source code that is in neither bound value set, verbatim.
+#     4. clinical:ProcedureShape's name requirement becomes an sh:or over
+#        clinical:procedureName and health:procedureName, plus the new
+#        warning-severity clinical:ProcedureNameSpellingShape. A C-CDA import
+#        path writes the name to the health: spelling on records typed
+#        clinical:Procedure, so every converted procedure failed the name
+#        requirement while carrying a name, on a predicate no shape targeted.
+#        This is a MIGRATION WINDOW and both halves are removed together in a
+#        later version; the rationale is on clinical:procedureName in
+#        clinical.ttl.
+#
+# v1.14 (2026-08-08): Align to ratified standards; add the missing Encounter
+#     shape. Shapes-only, and strictly widening apart from the new shape: every
+#     graph that validated before still validates.
+#
+#     Motivation: real-world Epic FHIR exports, and C-CDA documents through the
+#     same pipeline, fail validation on records that are correct at source.
+#
+#     1. clinical:interpretation is now bound to the HL7 v3
+#        ObservationInterpretation code system,
+#        http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation
+#        (version 3.0.0) — 49 selectable codes, abstract concepts excluded —
+#        plus the data-absent-reason code "unknown"
+#        (http://terminology.hl7.org/CodeSystem/data-absent-reason) and the ten
+#        retained legacy words. The previous five-member list was invented here
+#        and had no standards basis. Kept identical to health:interpretation.
+#     2. clinical:snomedCode (4 shapes) and clinical:icd10Code are now
+#        multi-valued: FHIR R4 CodeableConcept.coding is 0..*
+#        (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept).
+#     3. clinical:cptCode accepted only five digits, which is Category I only.
+#        The AMA CPT code set also defines Category II (four digits + F),
+#        Category III (four digits + T) and Proprietary Laboratory Analyses
+#        (four digits + U) codes, all five characters. Pattern widened to
+#        "^[0-9]{4}[0-9FTU]$".
+#     4. Date properties carried over from a source document —
+#        clinical:encounterDate, clinical:documentDate, clinical:onsetDate,
+#        clinical:procedureDate — now accept xsd:date as well as xsd:dateTime.
+#        FHIR's dateTime primitive is explicitly partial-precision ("YYYY,
+#        YYYY-MM, YYYY-MM-DD or YYYY-MM-DDThh:mm:ss+zz:zz",
+#        https://build.fhir.org/datatypes.html) and C-CDA effectiveTime is
+#        commonly date-precision, so demanding an instant forced importers to
+#        invent a midnight the source never stated. Timestamps Cascade itself
+#        generates (clinical:importedAt, the derived episode dates) are
+#        unchanged and still require xsd:dateTime.
+#     5. NEW clinical:EncounterShape + clinical:EncounterTemporalShape.
+#        clinical:Encounter has existed since v1.7 with no shape, so encounters
+#        validated to PASS without a single constraint being evaluated. The new
+#        shape is deliberately minimal — cardinality, datatype, provenance, and
+#        an IRI requirement implied by the clinical:hasEncounter edge. See the
+#        long note above the shape for what is deliberately NOT constrained.
+#
+#     Deliberately NOT changed: no sh:pattern is introduced on snomedCode or
+#     icd10Code. SNOMED CT identifiers are 6-18 digit integers and ICD-10-CM
+#     permits a letter in any character position (ICD-10-CM Official Guidelines
+#     for Coding and Reporting, Section I.A.2), so a pattern would reject valid
+#     codes without catching anything a code system lookup would not.
+#
+# v1.10 (2026-07-16): Add open-world PropertyShapes for the three record-to-record
+#     edges introduced in clinical v1.10 (hasEncounter, indicationReference,
+#     linkedCondition). Each targets the subjects that use the predicate, checks
+#     only that the object is an IRI (plus its class where the range is
+#     committed), asserts no minCount, and reports at sh:Warning severity so no
+#     pod, current or future, fails validation on account of these edges.
+# v1.9 (2026-06-17): Add cascade:AIExtracted to every dataProvenance sh:in enum.
+#     AIExtracted (a ClinicalGenerated subclass, core v3.3) was defined and
+#     referenced by the v3.0 AI-extraction infrastructure, but the validation
+#     enums omitted it — so a record carrying the correct provenance for
+#     AI-extracted clinical data failed validation. Clinical records may now be
+#     AIExtracted (e.g. from the Workbench's document-extraction pipeline).
+#
+# ============================================================================
+
+# ============================================================================
+# Shape: Clinical Document (Base)
+# ============================================================================
+
+clinical:ClinicalDocumentShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    rdfs:label "Clinical Document Shape"@en ;
+    rdfs:comment "Validation constraints for clinical documents imported from EHR"@en ;
+
+    # Required: importedAt timestamp
+    sh:property [
+        sh:path clinical:importedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Imported At"@en ;
+        sh:message "Clinical document must have exactly one importedAt timestamp"@en
+    ] ;
+
+    # Required: sourceEHR name
+    sh:property [
+        sh:path clinical:sourceEHR ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:maxLength 100 ;
+        sh:name "Source EHR"@en ;
+        sh:message "Clinical document must specify the source EHR system"@en
+    ] ;
+
+    # Optional: sourceBundleId (iOS bundle identifier pattern)
+    sh:property [
+        sh:path clinical:sourceBundleId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[a-zA-Z][a-zA-Z0-9.-]*$" ;
+        sh:name "Source Bundle ID"@en ;
+        sh:message "Bundle ID must be a valid iOS bundle identifier"@en
+    ] ;
+
+    # Required: fhirResourceId
+    sh:property [
+        sh:path clinical:fhirResourceId ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "FHIR Resource ID"@en ;
+        sh:message "Clinical document must have a FHIR resource ID"@en
+    ] ;
+
+    # Required: fhirResourceType
+    sh:property [
+        sh:path clinical:fhirResourceType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "FHIR Resource Type"@en ;
+        sh:message "Clinical document must specify FHIR resource type"@en
+    ] ;
+
+    # Optional: displayName
+    sh:property [
+        sh:path clinical:displayName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:maxLength 500 ;
+        sh:name "Display Name"@en
+    ] ;
+
+    # Optional: narrativeText (unbounded length for clinical notes)
+    sh:property [
+        sh:path clinical:narrativeText ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Narrative Text"@en ;
+        sh:description "Plain text content extracted from FHIR narrative"@en
+    ] ;
+
+    # Optional: narrativeXHTML
+    sh:property [
+        sh:path clinical:narrativeXHTML ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Narrative XHTML"@en
+    ] ;
+
+    # Optional: rawFHIRData (base64 encoded)
+    sh:property [
+        sh:path clinical:rawFHIRData ;
+        sh:datatype xsd:base64Binary ;
+        sh:maxCount 1 ;
+        sh:name "Raw FHIR Data"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Clinical documents must have valid provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Schema version must be in format major.minor"@en
+    ] ;
+
+    # Optional: sections
+    sh:property [
+        sh:path clinical:hasSection ;
+        sh:class clinical:ClinicalSection ;
+        sh:name "Sections"@en
+    ] ;
+
+    # ------------------------------------------------------------------
+    # v1.16: the two attribution axes
+    # ------------------------------------------------------------------
+    #
+    # THE TWO STATUS AXES ARE NOT HERE, AND MUST NOT BE MOVED HERE. v1.16
+    # declared clinical:status and clinical:documentReferenceStatus on this
+    # shape, at sh:Warning. Six subtype shapes reach this shape through sh:node,
+    # and SHACL defines conformance as an EMPTY result set, so a nested Warning
+    # made the node non-conforming and the sh:node constraint fired at its own
+    # default severity: every one of those six classes REJECTED a status value
+    # this vocabulary says should only be reported. From v1.17 the two bindings
+    # live on clinical:DocumentStatusShape and
+    # clinical:DocumentReferenceStatusShape, which reach the same classes by
+    # sh:targetClass instead. Everything declared on THIS shape is a
+    # sh:Violation for that reason, and scripts/check-nested-severity.py fails
+    # the build if a non-Violation constraint is added to it.
+
+    # Repeatable by design: DocumentReference.author is 0..*, and the
+    # sh:maxCount 1 on clinical:providerName is what was discarding every author
+    # after the first. NO maxCount is asserted here.
+    sh:property [
+        sh:path clinical:documentAuthorName ;
+        sh:datatype xsd:string ;
+        sh:name "Document Author Name"@en ;
+        sh:message "Each document author name must be a string"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # DocumentReference.authenticator is 0..1.
+    sh:property [
+        sh:path clinical:authenticatorName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Authenticator Name"@en ;
+        sh:message "A document has at most one authenticator, matching FHIR R4 DocumentReference.authenticator 0..1"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # FHIR .identifier is 0..* on every resource; no maxCount.
+    sh:property [
+        sh:path clinical:businessIdentifier ;
+        sh:datatype xsd:string ;
+        sh:name "Business Identifier"@en ;
+        sh:message "Each business identifier must be a string"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Shape: Clinical Section
+# ============================================================================
+
+clinical:ClinicalSectionShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalSection ;
+    rdfs:label "Clinical Section Shape"@en ;
+    rdfs:comment "Validation constraints for clinical document sections"@en ;
+
+    # Required: sectionTitle
+    sh:property [
+        sh:path clinical:sectionTitle ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:maxLength 200 ;
+        sh:name "Section Title"@en ;
+        sh:message "Section must have a title"@en
+    ] ;
+
+    # Required: sectionContent
+    sh:property [
+        sh:path clinical:sectionContent ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:name "Section Content"@en ;
+        sh:message "Section must have content"@en
+    ] ;
+
+    # Optional: sectionCode (LOINC format: 5 digits, dash, 1 digit)
+    sh:property [
+        sh:path clinical:sectionCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]{4,5}-[0-9]$" ;
+        sh:name "Section Code"@en ;
+        sh:message "Section code must be a valid LOINC code (e.g., 10154-3)"@en
+    ] ;
+
+    # Optional: sectionOrder
+    sh:property [
+        sh:path clinical:sectionOrder ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Section Order"@en
+    ] .
+
+# ============================================================================
+# Shape: Progress Note (extends ClinicalDocument)
+# ============================================================================
+
+clinical:ProgressNoteShape a sh:NodeShape ;
+    sh:targetClass clinical:ProgressNote ;
+    rdfs:label "Progress Note Shape"@en ;
+    rdfs:comment "Additional constraints for progress notes"@en ;
+
+    # Inherits all ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Progress notes should have encounterDate
+    sh:property [
+        sh:path clinical:encounterDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Date"@en ;
+        sh:message "Progress notes must specify the encounter date"@en
+    ] .
+
+# ============================================================================
+# Shape: Discharge Summary
+# ============================================================================
+
+clinical:DischargeSummaryShape a sh:NodeShape ;
+    sh:targetClass clinical:DischargeSummary ;
+    rdfs:label "Discharge Summary Shape"@en ;
+    rdfs:comment "Additional constraints for discharge summaries"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Discharge summaries should have document date
+    sh:property [
+        sh:path clinical:documentDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Document Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Document Date"@en ;
+        sh:message "Discharge summary must have a document date"@en
+    ] .
+
+# ============================================================================
+# Shape: Consultation Note (v1.13)
+# ============================================================================
+#
+# clinical:ConsultationNote is rdfs:subClassOf clinical:ClinicalDocument, and
+# its five sibling subclasses (ProgressNote, DischargeSummary,
+# LaboratoryReport, ImagingReport, VisitSummary) each carry an explicit
+# sh:targetClass. This one did not, and a subclass axiom alone does not
+# inherit a shape: SHACL resolves sh:targetClass over SHACL-instances in the
+# DATA graph, so an axiom that lives only in clinical.ttl does not expand the
+# target set. Consultation notes were therefore validating vacuously while
+# every other document type was checked, and nothing reported the difference.
+
+clinical:ConsultationNoteShape a sh:NodeShape ;
+    sh:targetClass clinical:ConsultationNote ;
+    rdfs:label "Consultation Note Shape"@en ;
+    rdfs:comment "Additional constraints for specialist consultation notes"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Consultation notes should record when the consultation happened
+    sh:property [
+        sh:path clinical:encounterDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Date"@en ;
+        sh:message "Consultation note must not carry more than one encounter date"@en
+    ] .
+
+# ============================================================================
+# Shape: Laboratory Report
+# ============================================================================
+
+clinical:LaboratoryReportShape a sh:NodeShape ;
+    sh:targetClass clinical:LaboratoryReport ;
+    rdfs:label "Laboratory Report Shape"@en ;
+    rdfs:comment "Additional constraints for laboratory reports"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Lab reports should have documentDate (when results were finalized)
+    sh:property [
+        sh:path clinical:documentDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Document Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:minCount 1 ;
+        sh:name "Document Date"@en ;
+        sh:message "Lab reports must have a document date"@en
+    ] .
+
+# NOTE (v1.17): the clinical:status binding v1.16 restated here is gone, and
+# must not be restored. It cannot live on this shape, because this shape is an
+# sh:node referent and a nested sh:Warning would be reported as a sh:Violation
+# on the referring shape. It cannot live on a lab-only shape beside
+# clinical:DocumentStatusShape either, because SHACL class targets follow
+# rdfs:subClassOf* wherever the axioms are present, so both shapes would match a
+# laboratory report and report its status twice. The single binding over all
+# seven document classes, with a message that names DiagnosticReport, is at
+# clinical:DocumentStatusShape below; its value set is the same ten codes this
+# restatement carried.
+
+# ============================================================================
+# Shape: Imaging Report
+# ============================================================================
+
+clinical:ImagingReportShape a sh:NodeShape ;
+    sh:targetClass clinical:ImagingReport ;
+    rdfs:label "Imaging Report Shape"@en ;
+    rdfs:comment "Additional constraints for imaging/radiology reports"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Imaging reports should have document date
+    sh:property [
+        sh:path clinical:documentDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Document Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:minCount 1 ;
+        sh:name "Document Date"@en ;
+        sh:message "Imaging reports must have a document date"@en
+    ] .
+
+# ============================================================================
+# Shape: Visit Summary
+# ============================================================================
+
+clinical:VisitSummaryShape a sh:NodeShape ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Visit Summary Shape"@en ;
+    rdfs:comment "Additional constraints for after-visit summaries"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Visit summaries should have encounter date
+    sh:property [
+        sh:path clinical:encounterDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Date"@en ;
+        sh:message "Visit summary must specify the encounter date"@en
+    ] .
+
+# ============================================================================
+# Shapes: the two document status axes (v1.17)
+# ============================================================================
+#
+# WHY THESE ARE SEPARATE SHAPES WITH THEIR OWN sh:targetClass, RATHER THAN
+# PROPERTY SHAPES ON clinical:ClinicalDocumentShape.
+#
+# The six subtype shapes above reach clinical:ClinicalDocumentShape through
+# sh:node. SHACL defines conformance as an empty validation result
+# (https://www.w3.org/TR/shacl/#conformance-checking); the definition does not
+# consult severity, so a nested sh:Warning is enough to make the value node
+# non-conforming, and the sh:node constraint then reports at the severity of the
+# shape it is written on — sh:Violation, none being declared. A Warning
+# published on the referenced shape is therefore a Violation on every class that
+# references it. That is what v1.16 shipped, and it inverted the ratchet it had
+# just written down.
+#
+# Declaring sh:severity sh:Warning beside the sh:node reference is not the fix.
+# Severity attaches to a shape, not to one nested result, so it would demote the
+# entire referenced shape: a document missing clinical:sourceEHR or carrying a
+# malformed cascade:schemaVersion would stop being rejected. The referenced
+# shape keeps only Violation-severity constraints, and anything softer is
+# targeted directly at the classes it applies to, as here.
+#
+# The invariant is machine-checked: scripts/check-nested-severity.py fails any
+# sh:node or sh:qualifiedValueShape reference into a shape carrying sh:Warning
+# or sh:Info.
+
+# FHIR R4 DocumentReference.status, required binding, verbatim.
+# A DIFFERENT fact from clinical:status: this is whether the pod's POINTER to
+# the document is current, and "entered-in-error" here means the reference was
+# filed in error, not that the clinical content is repudiated. It applies to
+# every document class, laboratory reports included, because the pointer exists
+# independently of what the document is.
+clinical:DocumentReferenceStatusShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    sh:targetClass clinical:ProgressNote ;
+    sh:targetClass clinical:DischargeSummary ;
+    sh:targetClass clinical:ConsultationNote ;
+    sh:targetClass clinical:LaboratoryReport ;
+    sh:targetClass clinical:ImagingReport ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Document Reference Status Shape"@en ;
+    rdfs:comment "Advisory binding of clinical:documentReferenceStatus to FHIR R4 DocumentReferenceStatus, on every document class. Warning severity, per the core v3.5 ratchet."@en ;
+
+    sh:property [
+        sh:path clinical:documentReferenceStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("current" "superseded" "entered-in-error") ;
+        sh:name "Document Reference Status"@en ;
+        sh:message "Document reference status should be one of the FHIR R4 DocumentReferenceStatus codes: current, superseded, entered-in-error"@en ;
+        sh:severity sh:Warning
+    ] .
+
+# WHY THE STATUS SET HERE IS THE DIAGNOSTIC-REPORT SET AND NOT THE COMPOSITION
+# SET. On a DocumentReference-derived record clinical:status carries
+# DocumentReference.docStatus, whose required binding is composition-status:
+# preliminary | final | amended | entered-in-error. composition-status is a
+# strict SUBSET of diagnostic-report-status, so the ten-code set is the union of
+# the two value sets a document-class record can draw from, and binding the
+# four-code set to a class that may carry "partial", "corrected" or "appended"
+# would report conformant data as out of set. It is bound here verbatim from
+# https://hl7.org/fhir/R4/valueset-diagnostic-report-status.html
+#
+# WHY ONE SHAPE OVER ALL SEVEN CLASSES, AND NOT A PER-CLASS SPLIT. The obvious
+# alternative was two shapes with disjoint targets, so that a laboratory report
+# could carry a message naming DiagnosticReport and the note/summary subtypes
+# one naming DocumentReference. It does not work, and the reason is the same
+# entailment question validation/index.md is about, seen from the other side:
+# SHACL's class targets are resolved over SHACL-instances, and that relation
+# follows rdfs:subClassOf* wherever the axioms are present in the graph being
+# validated. The conformance harness loads exactly those axioms. A shape
+# targeting clinical:ClinicalDocument therefore ALSO reaches every subtype
+# there, so a second shape binding clinical:status to clinical:LaboratoryReport
+# reports the same field twice under an axiom-loading validator and once under
+# one that omits them. Measured, not assumed: the split emitted two warnings on
+# a laboratory report and one on a progress note. One shape, one property shape,
+# every class named explicitly — so the target set is stated rather than
+# inferred, and the same node is reported exactly once either way.
+#
+# The narrower composition-status binding for the five note/summary subtypes is
+# still the next step here and is deliberately NOT taken in this version: what
+# is missing is a measurement of what those records actually carry, and per the
+# core v3.5 ratchet a constraint is added once conforming output is observed.
+# Whoever takes it should read the paragraph above first — the narrowing cannot
+# be a second shape laid over a subset of these classes, for exactly that reason.
+clinical:DocumentStatusShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    sh:targetClass clinical:ProgressNote ;
+    sh:targetClass clinical:DischargeSummary ;
+    sh:targetClass clinical:ConsultationNote ;
+    sh:targetClass clinical:LaboratoryReport ;
+    sh:targetClass clinical:ImagingReport ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Document Status Shape"@en ;
+    rdfs:comment "Advisory binding of clinical:status on every document class. The value set is the ten-code diagnostic-report-status, which is the union of the two sets a document-class record can draw from, since composition-status is a strict subset of it. Warning severity, per the core v3.5 ratchet."@en ;
+
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "partial" "preliminary" "final" "amended" "corrected"
+               "appended" "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Document status should be one of the FHIR R4 codes a document-class record can carry: the four composition-status codes (preliminary, final, amended, entered-in-error) that DocumentReference.docStatus is bound to, or the ten diagnostic-report-status codes (registered, partial, preliminary, final, amended, corrected, appended, cancelled, entered-in-error, unknown) that a DiagnosticReport-derived report such as a laboratory report carries"@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
+# Structured Record Shapes
+# ============================================================================
+
+# ============================================================================
+# Shape: Medication
+# ============================================================================
+
+clinical:MedicationShape a sh:NodeShape ;
+    sh:targetClass clinical:Medication ;
+    rdfs:label "Medication Shape"@en ;
+    rdfs:comment "Validation constraints for medication records"@en ;
+
+    # Required: drugName
+    sh:property [
+        sh:path clinical:drugName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Drug Name"@en ;
+        sh:message "Medication must have a drug name"@en
+    ] ;
+
+    # Optional: dosage
+    sh:property [
+        sh:path clinical:dosage ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dosage"@en
+    ] ;
+
+    # Optional: route
+    sh:property [
+        sh:path clinical:route ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Route"@en
+    ] ;
+
+    # Optional: frequency
+    sh:property [
+        sh:path clinical:frequency ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Frequency"@en
+    ] ;
+
+    # Optional: status
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Status"@en
+    ] ;
+
+    # Optional: rxNormCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:rxNormCode ;
+        sh:maxCount 1 ;
+        sh:name "RxNorm Code"@en
+    ] ;
+
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Medication records must have valid provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] ;
+
+    # Optional: prescriber
+    sh:property [
+        sh:path clinical:prescriber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Prescriber"@en
+    ] ;
+
+    # Optional: indication
+    sh:property [
+        sh:path clinical:indication ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Indication"@en
+    ] ;
+
+    # Optional: courseOfTherapyType
+    sh:property [
+        sh:path clinical:courseOfTherapyType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("acute" "continuous" "unknown") ;
+        sh:severity sh:Warning ;
+        sh:name "Course of Therapy Type"@en ;
+        sh:message "courseOfTherapyType should be acute, continuous, or unknown"@en
+    ] ;
+
+    # Optional: asNeeded (PRN)
+    sh:property [
+        sh:path clinical:asNeeded ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "As Needed (PRN)"@en
+    ] ;
+
+    # Optional: medicationForm
+    sh:property [
+        sh:path clinical:medicationForm ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Medication Form"@en
+    ] ;
+
+    # Optional: activeIngredient
+    sh:property [
+        sh:path clinical:activeIngredient ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Active Ingredient"@en
+    ] ;
+
+    # Optional: ingredientStrength
+    sh:property [
+        sh:path clinical:ingredientStrength ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Ingredient Strength"@en
+    ] ;
+
+    # Optional: provenanceClass
+    sh:property [
+        sh:path clinical:provenanceClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("healthKitFHIR" "userTracked" "pharmacyClaim" "imported") ;
+        sh:name "Provenance Class"@en
+    ] ;
+
+    # Optional: sourceFhirResourceType
+    sh:property [
+        sh:path clinical:sourceFhirResourceType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("MedicationRequest" "MedicationStatement" "MedicationDispense" "MedicationAdministration") ;
+        sh:name "Source FHIR Resource Type"@en
+    ] ;
+
+    # Optional: clinicalIntent
+    sh:property [
+        sh:path clinical:clinicalIntent ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("reportedUse" "prescribed" "dispensed" "administered") ;
+        sh:name "Clinical Intent"@en
+    ] ;
+
+    # Optional: refillsAllowed
+    sh:property [
+        sh:path clinical:refillsAllowed ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Refills Allowed"@en
+    ] ;
+
+    # Optional: supplyDurationDays
+    sh:property [
+        sh:path clinical:supplyDurationDays ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Supply Duration Days"@en
+    ] ;
+
+    # Optional: dispensedQuantity
+    sh:property [
+        sh:path clinical:dispensedQuantity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dispensed Quantity"@en
+    ] ;
+
+    # Optional: prescriptionCategory
+    sh:property [
+        sh:path clinical:prescriptionCategory ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("community" "inpatient" "discharge") ;
+        sh:name "Prescription Category"@en
+    ] .
+
+# ============================================================================
+# Shape: Allergy
+# ============================================================================
+
+clinical:AllergyShape a sh:NodeShape ;
+    sh:targetClass clinical:Allergy ;
+    rdfs:label "Allergy Shape"@en ;
+    rdfs:comment "Validation constraints for allergy/intolerance records"@en ;
+
+    # Required: allergen
+    sh:property [
+        sh:path clinical:allergen ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Allergen"@en ;
+        sh:message "Allergy must specify the allergen"@en
+    ] ;
+
+    # Optional: reaction
+    sh:property [
+        sh:path clinical:reaction ;
+        sh:datatype xsd:string ;
+        sh:name "Reaction"@en
+    ] ;
+
+    # Optional: severity (constrained values)
+    sh:property [
+        sh:path clinical:severity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("mild" "moderate" "severe") ;
+        sh:name "Severity"@en ;
+        sh:message "Severity must be mild, moderate, or severe"@en
+    ] ;
+
+    # Optional: criticality
+    sh:property [
+        sh:path clinical:criticality ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("low" "high" "unable-to-assess") ;
+        sh:name "Criticality"@en
+    ] ;
+
+    # Optional: category (allergy category)
+    sh:property [
+        sh:path clinical:category ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("food" "medication" "environment" "biologic") ;
+        sh:name "Allergy Category"@en
+    ] ;
+
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Lab Result
+# ============================================================================
+
+clinical:LabResultShape a sh:NodeShape ;
+    sh:targetClass clinical:LabResult ;
+    rdfs:label "Lab Result Shape"@en ;
+    rdfs:comment "Validation constraints for laboratory result records"@en ;
+
+    # Required: testName
+    sh:property [
+        sh:path clinical:testName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Test Name"@en ;
+        sh:message "Lab result must have a test name"@en
+    ] ;
+
+    # Optional: value (can be string or numeric)
+    sh:property [
+        sh:path clinical:value ;
+        sh:maxCount 1 ;
+        sh:name "Value"@en
+    ] ;
+
+    # Optional: unit
+    sh:property [
+        sh:path clinical:unit ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Unit"@en
+    ] ;
+
+    # Optional: referenceRange
+    sh:property [
+        sh:path clinical:referenceRange ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Reference Range"@en
+    ] ;
+
+    # Optional: interpretation
+    #
+    # Bound to the HL7 v3 ObservationInterpretation code system, the code system
+    # FHIR R4 binds Observation.interpretation to. This list is the 49
+    # SELECTABLE codes of
+    # http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation
+    # (version 3.0.0), verbatim; the eight abstract (notSelectable) hierarchy
+    # concepts are excluded because they are not values. Deprecated codes are
+    # accepted: historical results carry them.
+    #
+    # Plus ALL FIFTEEN codes of
+    # http://terminology.hl7.org/CodeSystem/data-absent-reason (v1.15; v1.14
+    # accepted only "unknown"), for a source Observation whose interpretation
+    # element was absent or null-flavoured, and the ten words of the previous
+    # enum, retained so data written against earlier clinical versions keeps
+    # validating.
+    #
+    # Kept byte-identical to the health:interpretation list in
+    # health.shapes.ttl. These are two spellings of one record (clinical:LabResult
+    # is deprecated in favour of health:LabResultRecord since clinical v1.13) and
+    # letting them drift is how one spelling silently becomes the lenient one.
+    sh:property [
+        sh:path clinical:interpretation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("EX" "HM" "OBX" "CAR" "Carrier" "B" "D" "U" "W"
+               "<" ">" "AC" "IE" "QCF" "TOX"
+               "A" "N" "I" "MS" "NCL" "NS" "R" "S" "VS"
+               "AA" "H" "L" "HH" "LL" "HX" "LX" "H>" "HU" "E" "L<" "LU"
+               "ND" "IND" "NEG" "POS" "EXP" "UNE" "DET"
+               "SYN-R" "NR" "RR" "WR" "SDD" "SYN-S"
+               "unknown" "asked-unknown" "temp-unknown" "not-asked"
+               "asked-declined" "masked" "not-applicable" "unsupported"
+               "as-text" "error" "not-a-number" "negative-infinity"
+               "positive-infinity" "not-performed" "not-permitted"
+               "normal" "high" "low" "abnormal" "critical"
+               "Normal" "High" "Low" "Abnormal" "Critical") ;
+        sh:name "Interpretation"@en ;
+        sh:message "Interpretation must be a code from the HL7 v3 ObservationInterpretation code system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), a code from http://terminology.hl7.org/CodeSystem/data-absent-reason, or one of the retained legacy words. A source code in none of those is carried verbatim on clinical:interpretationSourceCode."@en
+    ] ;
+
+    # v1.15: the verbatim escape hatch. Single string, no value set, no pattern.
+    sh:property [
+        sh:path clinical:interpretationSourceCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Interpretation Source Code"@en ;
+        sh:message "Interpretation source code must be a single string: the source's verbatim code, unmodified"@en
+    ] ;
+
+    # Optional: loincCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:loincCode ;
+        sh:maxCount 1 ;
+        sh:name "LOINC Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Condition
+# ============================================================================
+
+clinical:ConditionShape a sh:NodeShape ;
+    sh:targetClass clinical:Condition ;
+    rdfs:label "Condition Shape"@en ;
+    rdfs:comment "Validation constraints for condition/diagnosis records"@en ;
+
+    # Required: conditionName
+    sh:property [
+        sh:path clinical:conditionName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Condition Name"@en ;
+        sh:message "Condition must have a name"@en
+    ] ;
+
+    # Optional: clinicalStatus
+    sh:property [
+        sh:path clinical:clinicalStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("active" "recurrence" "relapse" "inactive" "remission" "resolved") ;
+        sh:name "Clinical Status"@en
+    ] ;
+
+    # Optional: verificationStatus
+    sh:property [
+        sh:path clinical:verificationStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("unconfirmed" "provisional" "differential" "confirmed" "refuted" "entered-in-error") ;
+        sh:name "Verification Status"@en
+    ] ;
+
+    # Optional: onsetDate
+    sh:property [
+        sh:path clinical:onsetDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Onset Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Onset Date"@en
+    ] ;
+
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Optional: icd10Code (string or URI reference). Repeatable for the same
+    # reason as snomedCode above; problem-list entries are routinely dual coded.
+    # No sh:pattern: ICD-10-CM permits a letter in any character position
+    # (C4A, D3A and M1A are ordinary categories), per the ICD-10-CM Official
+    # Guidelines for Coding and Reporting, Section I.A.2.
+    sh:property [
+        sh:path clinical:icd10Code ;
+        sh:name "ICD-10 Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Immunization
+# ============================================================================
+
+clinical:ImmunizationShape a sh:NodeShape ;
+    sh:targetClass clinical:Immunization ;
+    rdfs:label "Immunization Shape"@en ;
+    rdfs:comment "Validation constraints for immunization records"@en ;
+
+    # Required: vaccineName
+    sh:property [
+        sh:path clinical:vaccineName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Vaccine Name"@en ;
+        sh:message "Immunization must have a vaccine name"@en
+    ] ;
+
+    # Optional: cvxCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:cvxCode ;
+        sh:maxCount 1 ;
+        sh:name "CVX Code"@en
+    ] ;
+
+    # Optional: lotNumber
+    sh:property [
+        sh:path clinical:lotNumber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Lot Number"@en
+    ] ;
+
+    # Optional: site
+    sh:property [
+        sh:path clinical:site ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Site"@en
+    ] ;
+
+    # Optional: doseQuantity
+    sh:property [
+        sh:path clinical:doseQuantity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dose Quantity"@en
+    ] ;
+
+    # Optional: manufacturer
+    sh:property [
+        sh:path clinical:manufacturer ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Manufacturer"@en
+    ] ;
+
+    # Optional: status
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("completed" "entered-in-error" "not-done") ;
+        sh:name "Status"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Procedure
+# ============================================================================
+
+clinical:ProcedureShape a sh:NodeShape ;
+    sh:targetClass clinical:Procedure ;
+    rdfs:label "Procedure Shape"@en ;
+    rdfs:comment "Validation constraints for procedure records"@en ;
+
+    # Required: a name, in either spelling (v1.15 RULING).
+    #
+    # Through v1.14 this was a bare sh:minCount 1 on clinical:procedureName. A
+    # C-CDA import path writes the name to health:procedureName instead, on
+    # records it types clinical:Procedure, so every converted procedure failed
+    # this constraint WHILE CARRYING A NAME, and carried it on a predicate no
+    # shape targets, so the name itself was validated by nothing. Measured 2 of
+    # 2, 7 of 7 and 1 of 1 across three public sample documents.
+    #
+    # This is a MIGRATION WINDOW, not a ratified dual spelling. The health:
+    # vocabulary defines neither health:procedureName nor a procedure class, and
+    # the record is typed clinical:Procedure, so clinical:procedureName is the
+    # only defined spelling and the only one a producer may write. The full
+    # rationale, and what a consumer must re-query, is on clinical:procedureName
+    # in clinical.ttl.
+    #
+    # The requirement moves to a node-level sh:or so that a Pod already holding
+    # the health: triples stops failing without any data being rewritten. The
+    # form follows health:DailyVitalReadingShape, which requires a timestamp in
+    # either of two spellings the same way. Per-spelling datatype, length and
+    # cardinality constraints stay below, so neither spelling is unchecked.
+    #
+    # BOTH the sh:or alternative and ProcedureNameSpellingShape below are removed
+    # in a later clinical version, once the warning is observably absent from
+    # conforming output, restoring a bare sh:minCount 1 on clinical:procedureName.
+    sh:or (
+        [ sh:property [ sh:path clinical:procedureName ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path health:procedureName ; sh:minCount 1 ] ]
+    ) ;
+    sh:message "Procedure must have a name, as clinical:procedureName (canonical) or health:procedureName (deprecated import spelling, accepted during the clinical v1.15 migration window)"@en ;
+
+    sh:property [
+        sh:path clinical:procedureName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Procedure Name"@en ;
+        sh:message "Procedure name must be a single non-empty string"@en
+    ] ;
+
+    sh:property [
+        sh:path health:procedureName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Procedure Name (deprecated spelling)"@en ;
+        sh:message "Procedure name must be a single non-empty string"@en
+    ] ;
+
+    # Optional: procedureDate
+    sh:property [
+        sh:path clinical:procedureDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Procedure Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Procedure Date"@en
+    ] ;
+
+    # Optional: bodySite
+    sh:property [
+        sh:path clinical:bodySite ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Body Site"@en
+    ] ;
+
+    # Optional: performer
+    sh:property [
+        sh:path clinical:performer ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Performer"@en
+    ] ;
+
+    # Optional: status
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("preparation" "in-progress" "not-done" "on-hold" "stopped" "completed" "entered-in-error" "unknown") ;
+        sh:name "Status"@en
+    ] ;
+
+    # Optional: cptCode
+    #
+    # Every CPT code is five characters, but only Category I codes are five
+    # DIGITS. The AMA CPT code set also defines Category II codes (four digits
+    # followed by the letter F), Category III codes (four digits followed by the
+    # letter T) and Proprietary Laboratory Analyses codes (four digits followed
+    # by the letter U). "^[0-9]{5}$" rejected all three of those, so an ordinary
+    # emerging-technology or performance-measurement procedure failed validation.
+    # See https://www.ama-assn.org/practice-management/cpt/cpt-code-set-overview
+    sh:property [
+        sh:path clinical:cptCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]{4}[0-9FTU]$" ;
+        sh:name "CPT Code"@en ;
+        sh:message "CPT code must be five characters: five digits (Category I), or four digits followed by F (Category II), T (Category III) or U (Proprietary Laboratory Analyses)"@en
+    ] ;
+
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# The migration signal for the procedure-name spelling (clinical v1.15).
+#
+# Kept in its own shape so that its severity is unambiguous: this is sh:Warning,
+# while ProcedureShape's own constraints stay at the default sh:Violation. It
+# targets the SUBJECTS OF the deprecated predicate rather than the class, so it
+# fires exactly once per record that carries the health: spelling and never on a
+# record that does not, whatever that record is typed.
+#
+# It exists so that the sh:or above cannot quietly become permanent. The window
+# closes when this warning is observably absent from conforming output; at that
+# point this shape and the health: branch of the sh:or are both removed and
+# clinical:procedureName goes back to a bare sh:minCount 1.
+clinical:ProcedureNameSpellingShape a sh:NodeShape ;
+    sh:targetSubjectsOf health:procedureName ;
+    rdfs:label "Procedure Name Spelling Shape"@en ;
+    rdfs:comment "Warns that a record carries the deprecated health:procedureName spelling. Accepted during the clinical v1.15 migration window; removed with the window."@en ;
+
+    sh:property [
+        sh:path health:procedureName ;
+        sh:maxCount 0 ;
+        sh:name "Procedure Name (deprecated spelling)"@en ;
+        sh:message "Procedure name is written on health:procedureName, which no Cascade vocabulary defines. Write clinical:procedureName instead: it is the property whose domain is clinical:Procedure and the one clinical:ProcedureShape names. Accepted during the clinical v1.15 migration window; this becomes a VIOLATION when the window closes."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
+# Shape: Vital Sign
+# ============================================================================
+
+clinical:VitalSignShape a sh:NodeShape ;
+    sh:targetClass clinical:VitalSign ;
+    rdfs:label "Vital Sign Shape"@en ;
+    rdfs:comment "Validation constraints for vital sign observations"@en ;
+
+    # Required: vitalType (accepts display names, snake_case, and camelCase)
+    sh:property [
+        sh:path clinical:vitalType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("Heart Rate" "Blood Pressure" "Respiratory Rate" "Body Temperature" "Oxygen Saturation" "Body Weight" "Body Height" "BMI" "heart_rate" "blood_pressure" "respiratory_rate" "body_temperature" "oxygen_saturation" "body_weight" "body_height" "bmi" "heartRate" "bloodPressure" "bloodPressureSystolic" "bloodPressureDiastolic" "respiratoryRate" "temperature" "oxygenSaturation" "bodyWeight" "bodyHeight" "bodyMassIndex") ;
+        sh:name "Vital Type"@en ;
+        sh:message "Vital sign must have a valid type"@en
+    ] ;
+
+    # Optional: value (can be string or numeric)
+    sh:property [
+        sh:path clinical:value ;
+        sh:maxCount 1 ;
+        sh:name "Value"@en
+    ] ;
+
+    # Optional: unit
+    sh:property [
+        sh:path clinical:unit ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Unit"@en
+    ] ;
+
+    # Optional: component values (for blood pressure, etc.)
+    sh:property [
+        sh:path clinical:component1Value ;
+        sh:maxCount 1 ;
+        sh:name "Component 1 Value"@en
+    ] ;
+
+    sh:property [
+        sh:path clinical:component2Value ;
+        sh:maxCount 1 ;
+        sh:name "Component 2 Value"@en
+    ] ;
+
+    # Optional: interpretation
+    #
+    # v1.15 RULING: the lab value set now applies here too, at sh:Warning.
+    #
+    # Through v1.14 this property shape carried sh:datatype and sh:maxCount and
+    # no sh:in, while the two LAB shapes (clinical:LabResultShape and
+    # health:LabResultRecordShape) bound the identical predicate to the 49
+    # selectable HL7 v3 ObservationInterpretation codes. So the same
+    # interpretation string was checked on a lab result and unchecked on a vital
+    # sign, and the vital path was the one an importer could write anything to.
+    # clinical.ttl v1.13 recorded that gap as intentional, because emitted vital
+    # data uses "elevated", which is in neither ratified set, and a Violation
+    # here would have rejected records that already exist.
+    #
+    # That reasoning justified not making it a VIOLATION. It never justified
+    # leaving the property unchecked. So the binding is applied at sh:Warning,
+    # which is exactly the ratchet core v3.5 wrote down for this situation: a
+    # value existing data carries is REPORTED, not rejected, and the severity is
+    # raised to sh:Violation in a later clinical version only after a release in
+    # which the warning is observably absent from conforming output. Each step
+    # is its own vocabulary version, so this is not a judgement call later.
+    #
+    # The migration for the affected records is not "pick a different word": it
+    # is clinical:interpretation "H" plus clinical:interpretationSourceCode
+    # "elevated", which states the ratified reading AND keeps what the source
+    # said. That is the whole reason the source-code property is in the same
+    # release.
+    #
+    # The list is byte-identical to the one on clinical:LabResultShape above and
+    # to health:interpretation in health.shapes.ttl. Three copies of one value
+    # set is a drift hazard and is accepted deliberately: SHACL has no value-set
+    # include, and the alternative (a shared shape reached by sh:node) would
+    # bring the lab shape's Violation severity with it, which is the one thing
+    # this constraint must not do on vitals yet.
+    sh:property [
+        sh:path clinical:interpretation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("EX" "HM" "OBX" "CAR" "Carrier" "B" "D" "U" "W"
+               "<" ">" "AC" "IE" "QCF" "TOX"
+               "A" "N" "I" "MS" "NCL" "NS" "R" "S" "VS"
+               "AA" "H" "L" "HH" "LL" "HX" "LX" "H>" "HU" "E" "L<" "LU"
+               "ND" "IND" "NEG" "POS" "EXP" "UNE" "DET"
+               "SYN-R" "NR" "RR" "WR" "SDD" "SYN-S"
+               "unknown" "asked-unknown" "temp-unknown" "not-asked"
+               "asked-declined" "masked" "not-applicable" "unsupported"
+               "as-text" "error" "not-a-number" "negative-infinity"
+               "positive-infinity" "not-performed" "not-permitted"
+               "normal" "high" "low" "abnormal" "critical"
+               "Normal" "High" "Low" "Abnormal" "Critical") ;
+        sh:name "Interpretation"@en ;
+        sh:message "Interpretation should be a code from the HL7 v3 ObservationInterpretation code system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), a code from http://terminology.hl7.org/CodeSystem/data-absent-reason, or one of the retained legacy words. Carry a code the value sets do not contain verbatim on clinical:interpretationSourceCode and put the nearest ratified reading here. WARNING in clinical v1.15; this becomes a VIOLATION in a later version."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # v1.15: the verbatim escape hatch, same as on the lab shape. sh:Violation
+    # (the shape's default) rather than sh:Warning, because unlike the value set
+    # above there is no existing data to be lenient toward: the property is new
+    # in this version, so the only records carrying it are records written
+    # against this version.
+    sh:property [
+        sh:path clinical:interpretationSourceCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Interpretation Source Code"@en ;
+        sh:message "Interpretation source code must be a single string: the source's verbatim code, unmodified"@en
+    ] ;
+
+    # Optional: deviceName
+    sh:property [
+        sh:path clinical:deviceName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Device Name"@en
+    ] ;
+
+    # Optional: loincCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:loincCode ;
+        sh:maxCount 1 ;
+        sh:name "LOINC Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # v1.16: FHIR R4 Observation.status, required binding, verbatim and in the
+    # value set's own order
+    # (https://hl7.org/fhir/R4/valueset-observation-status.html). A vital sign
+    # is converted from an Observation, so this is the value set its
+    # clinical:status is drawn from. sh:Warning, not sh:Violation: this is a
+    # newly bound value set on a predicate existing pods already carry, and the
+    # core v3.5 ratchet is that such a value is reported, never rejected, until
+    # a release in which the warning is observably absent from conforming
+    # output.
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "preliminary" "final" "amended" "corrected"
+               "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Vital sign status should be one of the FHIR R4 ObservationStatus codes: registered, preliminary, final, amended, corrected, cancelled, entered-in-error, unknown"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Longitudinal Record Shapes (v1.2)
+# ============================================================================
+
+# ============================================================================
+# Shape: Medication Use Episode
+# ============================================================================
+
+clinical:MedicationUseEpisodeShape a sh:NodeShape ;
+    sh:targetClass clinical:MedicationUseEpisode ;
+    rdfs:label "Medication Use Episode Shape"@en ;
+    rdfs:comment "Validation constraints for longitudinal medication episodes. Ensures source linkage and explainable status inference per Cascade Protocol requirements."@en ;
+
+    # REQUIRED: canonicalName (normalized drug name)
+    sh:property [
+        sh:path clinical:canonicalName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Canonical Name"@en ;
+        sh:message "Episode must have a canonical drug name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: episodeFirstSeenDate (earliest CLINICAL date from sources)
+    sh:property [
+        sh:path clinical:episodeFirstSeenDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "First Seen Date"@en ;
+        sh:message "Episode must have a first seen date (earliest clinical date from source records)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: episodeLastSeenDate (most recent CLINICAL date from sources)
+    sh:property [
+        sh:path clinical:episodeLastSeenDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Last Seen Date"@en ;
+        sh:message "Episode must have a last seen date (most recent clinical date from source records)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: sourceRecordIds (Task 7.3 - must link to all contributing records)
+    sh:property [
+        sh:path clinical:derivedFromRecord ;
+        sh:minCount 1 ;
+        sh:name "Derived From Record"@en ;
+        sh:message "Episode MUST link to at least one source MedicationRecord (sourceRecordIds required per Cascade Protocol)"@en ;
+        sh:description "Every episode must trace back to its source records for explainability"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: inferredStatus (Task 7.4 - must have explainable status)
+    sh:property [
+        sh:path clinical:inferredStatus ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("active" "inactive") ;
+        sh:name "Inferred Status"@en ;
+        sh:message "Episode MUST have an inferred status (active or inactive)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: statusReason (Task 7.4 - must explain why we think this status)
+    sh:property [
+        sh:path clinical:statusReason ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("explicitStatus" "hasRecentEndDate" "noRecentActivity" "inferredFromRefills" "userOverride") ;
+        sh:name "Status Reason"@en ;
+        sh:message "Episode MUST have a status reason explaining WHY system thinks this status (per No Silent Inference policy)"@en ;
+        sh:description "Enables answering: 'Why does system think this medication is active?'"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: statusConfidence
+    sh:property [
+        sh:path clinical:statusConfidence ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("high" "medium" "low") ;
+        sh:name "Status Confidence"@en ;
+        sh:message "Episode must declare confidence level for status inference"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: conceptUri (stable URI for the medication concept)
+    sh:property [
+        sh:path clinical:conceptUri ;
+        sh:maxCount 1 ;
+        sh:name "Concept URI"@en ;
+        sh:description "Stable URI for the medication concept (RxNorm URI or minted Cascade URI)"@en
+    ] ;
+
+    # Optional: currentDose
+    sh:property [
+        sh:path clinical:currentDose ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Current Dose"@en
+    ] ;
+
+    # Optional: currentFrequency
+    sh:property [
+        sh:path clinical:currentFrequency ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Current Frequency"@en
+    ] ;
+
+    # Optional: currentRoute
+    sh:property [
+        sh:path clinical:currentRoute ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Current Route"@en
+    ] ;
+
+    # Optional: usePattern
+    sh:property [
+        sh:path clinical:usePattern ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("chronic" "shortCourse" "oneTime" "asNeeded" "unknown") ;
+        sh:name "Use Pattern"@en
+    ] ;
+
+    # Optional: therapeuticClass
+    sh:property [
+        sh:path clinical:therapeuticClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Therapeutic Class"@en
+    ] ;
+
+    # Optional: hasUnresolvedConflicts flag
+    sh:property [
+        sh:path clinical:hasUnresolvedConflicts ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Has Unresolved Conflicts"@en ;
+        sh:description "Flag indicating episode has data conflicts requiring user attention"@en
+    ] ;
+
+    # Optional: durationDays
+    sh:property [
+        sh:path clinical:durationDays ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Duration Days"@en
+    ] ;
+
+    # Required: provenance
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:Reconciled cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Episode must have valid provenance (typically Reconciled for derived episodes)"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Supplement (SDK-level)
+# ============================================================================
+
+clinical:SupplementShape a sh:NodeShape ;
+    sh:targetClass clinical:Supplement ;
+    rdfs:label "Supplement Shape"@en ;
+    rdfs:comment "Validation constraints for supplement records. Ensures regulatory status is always explicit per Cascade Protocol requirements."@en ;
+
+    # REQUIRED: supplementName
+    sh:property [
+        sh:path clinical:supplementName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Supplement Name"@en ;
+        sh:message "Supplement must have a name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: regulatoryStatus (Task 7.5 - explicit regulatory distinction)
+    sh:property [
+        sh:path clinical:regulatoryStatus ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("dietarySupplement" "otcDrug" "homeopathic" "herbalRemedy" "unknown") ;
+        sh:name "Regulatory Status"@en ;
+        sh:message "Supplement MUST have explicit regulatory status to distinguish from FDA-approved medications"@en ;
+        sh:description "Required per Cascade Protocol to avoid implying clinical equivalence with prescription medications"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: dose
+    sh:property [
+        sh:path clinical:dose ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dose"@en
+    ] ;
+
+    # Optional: frequency
+    sh:property [
+        sh:path clinical:frequency ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Frequency"@en
+    ] ;
+
+    # Optional: brand
+    sh:property [
+        sh:path clinical:brand ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Brand"@en
+    ] ;
+
+    # Optional: form
+    sh:property [
+        sh:path clinical:form ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("capsule" "tablet" "softgel" "liquid" "powder" "gummy" "spray" "patch" "tea" "tincture" "other") ;
+        sh:name "Form"@en
+    ] ;
+
+    # Optional: evidenceStrength
+    sh:property [
+        sh:path clinical:evidenceStrength ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("strongEvidence" "moderateEvidence" "limitedEvidence" "traditionalUse" "noEvidence" "unknown") ;
+        sh:name "Evidence Strength"@en ;
+        sh:description "Level of clinical evidence supporting supplement use"@en
+    ] ;
+
+    # Optional: isActive
+    sh:property [
+        sh:path clinical:isActive ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Is Active"@en
+    ] ;
+
+    # Optional: dsldId (NIH Dietary Supplement Label Database)
+    sh:property [
+        sh:path clinical:dsldId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "DSLD ID"@en ;
+        sh:description "NIH Dietary Supplement Label Database identifier"@en
+    ] ;
+
+    # Optional: upc (barcode)
+    sh:property [
+        sh:path clinical:upc ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "UPC"@en
+    ] ;
+
+    # Optional: cascadeUri (stable identifier)
+    sh:property [
+        sh:path clinical:cascadeUri ;
+        sh:maxCount 1 ;
+        sh:name "Cascade URI"@en ;
+        sh:description "Stable Cascade Protocol identifier (minted when no external ID exists)"@en
+    ] ;
+
+    # Optional: reasonForUse
+    sh:property [
+        sh:path clinical:reasonForUse ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Reason For Use"@en
+    ] ;
+
+    # Required: provenance
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Social History Record (v1.8)
+# ============================================================================
+
+clinical:SocialHistoryRecordShape a sh:NodeShape ;
+    sh:targetClass clinical:SocialHistoryRecord ;
+    rdfs:label "Social History Record Shape"@en ;
+
+    # Required: socialHistoryCategory (must be one of defined values)
+    sh:property [
+        sh:path clinical:socialHistoryCategory ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("smokingStatus" "alcoholUse" "substanceUse" "occupation" "exercise" "diet" "sexualHistory" "other") ;
+        sh:severity sh:Violation ;
+        sh:name "Social History Category"@en ;
+        sh:message "SocialHistoryRecord requires a socialHistoryCategory from the defined value set"@en
+    ] ;
+
+    # Optional: packsPerYear
+    sh:property [
+        sh:path clinical:packsPerYear ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:severity sh:Warning ;
+        sh:name "Packs Per Year"@en
+    ] ;
+
+    # Optional: alcoholDrinksPerWeek
+    sh:property [
+        sh:path clinical:alcoholDrinksPerWeek ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:severity sh:Warning ;
+        sh:name "Alcohol Drinks Per Week"@en
+    ] ;
+
+    # Optional: occupationTitle
+    sh:property [
+        sh:path clinical:occupationTitle ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Occupation Title"@en
+    ] .
+
+# ============================================================================
+# Shape: Encounter (v1.14)
+# ============================================================================
+#
+# clinical:Encounter has existed since clinical v1.7 and until now had NO shape,
+# so every encounter a pod contained was imported and stored unvalidated:
+# validating a file of encounters checked nothing and returned PASS. This shape
+# closes that hole. It is deliberately minimal.
+#
+# WHY IT IS MINIMAL, STATED SO IT IS NOT "TIGHTENED" LATER BY MISTAKE
+# -------------------------------------------------------------------
+# Encounters vary more than any other record here: a same-day telephone note, a
+# three-week inpatient admission, a planned appointment that has no period at
+# all, and a historical visit reconstructed from a summary document are all
+# legitimately clinical:Encounter. So this shape constrains SHAPE, not content:
+# cardinality and datatype on the properties importers actually write, the
+# standard Cascade provenance pair, and nothing else at Violation severity.
+#
+# In particular:
+#   - clinical:encounterClass carries NO sh:in. FHIR R4 binds Encounter.class
+#     EXTENSIBLY to the v3-ActCode ActEncounterCode value set, and servers send
+#     either the abbreviation (AMB, EMER, IMP, HH) or a display string. An enum
+#     here would reject conformant data in both directions.
+#   - clinical:encounterStatus DOES carry an sh:in, because FHIR R4 binds
+#     Encounter.status with REQUIRED strength, and the list below is that value
+#     set verbatim (https://hl7.org/fhir/R4/valueset-encounter-status.html).
+#     It is sh:Warning, not sh:Violation: an unrecognised status is worth
+#     surfacing but is not a reason to reject the record and lose the visit.
+#   - Dates accept xsd:date as well as xsd:dateTime. FHIR's dateTime primitive
+#     is explicitly partial-precision ("YYYY, YYYY-MM, YYYY-MM-DD or
+#     YYYY-MM-DDThh:mm:ss+zz:zz", https://build.fhir.org/datatypes.html) and
+#     C-CDA effectiveTime is commonly date-precision, so requiring an instant
+#     would force importers to invent a midnight that the source never stated.
+#
+# WHAT THE clinical:hasEncounter EDGE IMPLIES, AND WHAT IT DOES NOT
+# -----------------------------------------------------------------
+# clinical:hasEncounter is the panel-to-visit edge: a lab result, medication,
+# condition, procedure or report points at the visit it happened in.
+# HasEncounterEdgeShape (below) already requires that object to be an IRI. Two
+# consequences are carried here:
+#   1. sh:nodeKind sh:IRI on the Encounter itself. An edge can only resolve to a
+#      node that HAS an IRI, so a blank-node encounter is unreachable by the very
+#      edge the class exists to serve.
+#   2. An encounter should be placeable in time, since grouping events "by visit"
+#      is only meaningful if the visit has one. That is expressed as a
+#      sh:Warning requiring a start, an end or an encounter date — NOT a
+#      Violation, because FHIR R4 Encounter.period is 0..1 and a planned or
+#      referenced-only encounter legitimately has none.
+# What is deliberately NOT added is an sh:class check back along the edge; see
+# the v1.11 note under HasEncounterEdgeShape for why that produced only false
+# positives under per-file validation.
+
+clinical:EncounterShape a sh:NodeShape ;
+    sh:targetClass clinical:Encounter ;
+    sh:nodeKind sh:IRI ;
+    rdfs:label "Encounter Shape"@en ;
+    rdfs:comment "Minimal validation constraints for clinical encounters (visits). Constrains cardinality, datatype and provenance; deliberately does not constrain what kind of visit an encounter may be."@en ;
+    sh:message "A clinical:Encounter must be identified by an IRI so that clinical:hasEncounter edges can resolve to it"@en ;
+
+    # Optional: encounterClass. No enum — FHIR R4 binds Encounter.class
+    # extensibly to v3-ActCode ActEncounterCode and servers send codes or
+    # display strings.
+    sh:property [
+        sh:path clinical:encounterClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Class"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: encounterStatus. FHIR R4 EncounterStatus, verbatim.
+    sh:property [
+        sh:path clinical:encounterStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("planned" "arrived" "triaged" "in-progress" "onleave" "finished"
+               "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Encounter Status"@en ;
+        sh:message "Encounter status should be one of the FHIR R4 EncounterStatus codes: planned, arrived, triaged, in-progress, onleave, finished, cancelled, entered-in-error, unknown"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Optional: encounterType (display name from a SNOMED CT / FHIR code)
+    sh:property [
+        sh:path clinical:encounterType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Type"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: encounterStart / encounterEnd. Date precision accepted.
+    sh:property [
+        sh:path clinical:encounterStart ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Start must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Start"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:encounterEnd ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter End must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Encounter End"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: snomedCode for the encounter type. Repeatable and unpatterned,
+    # for the reasons given on the other snomedCode shapes above.
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:name "SNOMED Code"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: who and where.
+    sh:property [
+        sh:path clinical:providerName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Provider Name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:facilityName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Facility Name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # v1.16: the rest of the Encounter.class Coding. The CODE keeps its
+    # unconstrained sh:datatype above; these two carry the display and the code
+    # system, without which a local class code is unreadable and cannot be told
+    # apart from a ratified ActEncounterCode. No enum on either, for the same
+    # reason the code carries none.
+    sh:property [
+        sh:path clinical:encounterClassDisplay ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Class Display"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:encounterClassSystem ;
+        sh:or ( [ sh:datatype xsd:anyURI ] [ sh:datatype xsd:string ] ) ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Class System"@en ;
+        sh:message "Encounter Class System must be a single xsd:anyURI (an xsd:string is accepted, because serializers differ on which of the two they write for a URI-valued literal)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # v1.16: why the visit happened, and the admission signals. All three are
+    # verbatim source text and NONE carries a value set: FHIR binds reasonCode
+    # and admitSource only PREFERRED and dischargeDisposition only EXAMPLE, and
+    # an enum on an example-strength binding rejects conformant data by
+    # construction. encounterReason is repeatable because Encounter.reasonCode
+    # is 0..*; the hospitalization fields are 0..1 in the source.
+    sh:property [
+        sh:path clinical:encounterReason ;
+        sh:datatype xsd:string ;
+        sh:name "Encounter Reason"@en ;
+        sh:message "Each encounter reason must be a string"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:admitSource ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Admit Source"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:dischargeDisposition ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Discharge Disposition"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # v1.16: participations. Repeatable, and no sh:class on the object: the
+    # v1.11 note under HasEncounterEdgeShape explains why a class check across
+    # a per-file validation boundary produced only false positives, and while a
+    # participant is written into the same file as its encounter today, that is
+    # a serializer's choice and not something a shape should require. The node
+    # itself is constrained by clinical:EncounterParticipantShape below.
+    sh:property [
+        sh:path clinical:hasParticipant ;
+        sh:name "Has Participant"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: source linkage back to the record this was converted from.
+    #
+    # sourceRecordId stays sh:maxCount 1 because it holds ONE thing: the
+    # server-assigned logical id of the resource this record was converted
+    # from. The visit's business identifiers, which are 0..* in FHIR and are
+    # what a cross-transport join keys on, go to clinical:businessIdentifier
+    # below. Through v1.15 both were written to this single-valued predicate,
+    # which is why a second identifier had nowhere to go.
+    sh:property [
+        sh:path clinical:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record ID"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:businessIdentifier ;
+        sh:datatype xsd:string ;
+        sh:name "Business Identifier"@en ;
+        sh:message "Each business identifier must be a string; FHIR Encounter.identifier is 0..* so no maximum is asserted"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:sourceEHR ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:maxLength 100 ;
+        sh:name "Source EHR"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Encounter must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# An encounter should be placeable in time, because grouping clinical events
+# "by visit" is only useful if the visit has a position in the timeline. Kept in
+# its own shape so that its severity is unambiguous: this is sh:Warning, while
+# EncounterShape's own constraints (including sh:nodeKind sh:IRI) stay at the
+# default sh:Violation. It is not a Violation because FHIR R4 Encounter.period
+# is 0..1 and a planned or merely referenced encounter legitimately has none.
+clinical:EncounterTemporalShape a sh:NodeShape ;
+    sh:targetClass clinical:Encounter ;
+    rdfs:label "Encounter Temporal Shape"@en ;
+    sh:or (
+        [ sh:path clinical:encounterStart ; sh:minCount 1 ]
+        [ sh:path clinical:encounterEnd ; sh:minCount 1 ]
+        [ sh:path clinical:encounterDate ; sh:minCount 1 ]
+    ) ;
+    sh:message "Encounter should carry a start, an end or an encounter date so that records linked to it can be placed in time"@en ;
+    sh:severity sh:Warning .
+
+# ============================================================================
+# Shape: Encounter Participant (v1.16)
+# ============================================================================
+#
+# One participation in a visit: a name together with the role it was played in.
+# Constrains SHAPE only, for the same reason clinical:EncounterShape does.
+#
+# NO VALUE SET on the role code, deliberately. FHIR R4 binds
+# Encounter.participant.type EXTENSIBLY to encounter-participant-type, which
+# draws twelve concepts from v3-ParticipationType and the FHIR participant-type
+# code system; an extensible binding means a server may send a local code and
+# still be conformant, and rejecting it here would discard the participant along
+# with the code.
+#
+# NO REQUIRED FIELD, deliberately. FHIR makes every sub-element of
+# Encounter.participant optional: participant.type is 0..*, participant.individual
+# is 0..1, and a participation carrying only a period is legal. A minCount here
+# would fail conformant source data. The shape's value is in constraining
+# cardinality and datatype so that a participation cannot carry two names or two
+# specialties, which is where a merge of two records silently corrupts one.
+#
+# The node is NOT constrained to sh:nodeKind sh:IRI. Unlike clinical:Encounter,
+# nothing points at a participation from another file, so requiring an IRI would
+# forbid the blank node a serializer may reasonably write for a structural
+# sub-node.
+
+clinical:EncounterParticipantShape a sh:NodeShape ;
+    sh:targetClass clinical:EncounterParticipant ;
+    rdfs:label "Encounter Participant Shape"@en ;
+    rdfs:comment "Validation constraints for one participation in an encounter. Mirrors FHIR R4 Encounter.participant: constrains cardinality and datatype, and deliberately constrains neither the role vocabulary (extensibly bound at source) nor the presence of any single field (every sub-element is optional at source)."@en ;
+
+    sh:property [
+        sh:path clinical:participantName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Participant Name"@en ;
+        sh:message "A participation names at most one individual, matching FHIR R4 Encounter.participant.individual 0..1"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:participantRole ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Participant Role"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Repeatable: Encounter.participant.type is 0..*.
+    sh:property [
+        sh:path clinical:participantRoleCode ;
+        sh:datatype xsd:string ;
+        sh:name "Participant Role Code"@en ;
+        sh:message "Each participant role code must be a string; no value set is enforced because FHIR R4 binds Encounter.participant.type extensibly"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:participantSpecialty ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Participant Specialty"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Graph Edge Property Shapes (v1.10)
+# Open-world, non-required constraints for the record-to-record edges added in
+# clinical v1.10. Each targets the subjects that USE the predicate (so nothing
+# fires unless the edge is present) and checks only that the object is an IRI.
+# Nothing is sh:closed, no minCount is asserted, and severity is sh:Warning, so
+# existing pods that carry none of these predicates validate exactly as before.
+#
+# v1.11: the sh:class checks on HasEncounterEdgeShape and LinkedConditionEdgeShape
+# were REMOVED. Cascade pods store records partitioned into per-type files and
+# the reference validator validates each file independently, so an edge whose
+# target record lives in a sibling file (a lab result in lab-results.ttl pointing
+# at an encounter in encounters.ttl) could never satisfy sh:class — it produced a
+# Warning on every well-formed, fully-resolving edge and none on a malformed one.
+# The constraint therefore only generated false positives. sh:nodeKind sh:IRI is
+# retained (it catches a genuinely malformed non-IRI object); the target class is
+# guaranteed at import time (edges are written only when they resolve to a real
+# record of the right type) and can be re-checked by a pod-wide validator later.
+# This mirrors IndicationReferenceEdgeShape, whose range was always left open.
+# ============================================================================
+
+clinical:HasEncounterEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:hasEncounter ;
+    sh:path clinical:hasEncounter ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:hasEncounter should reference a clinical:Encounter by IRI"@en ;
+    sh:name "Has Encounter Edge"@en .
+
+clinical:IndicationReferenceEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:indicationReference ;
+    sh:path clinical:indicationReference ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:indicationReference should reference the reason record (a Condition or Observation) by IRI"@en ;
+    sh:name "Indication Reference Edge"@en .
+
+clinical:LinkedConditionEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:linkedCondition ;
+    sh:path clinical:linkedCondition ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:linkedCondition should reference a clinical:Condition by IRI"@en ;
+    sh:name "Linked Condition Edge"@en .
+
+clinical:ParsedIndicationReferenceEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:parsedIndicationReference ;
+    sh:path clinical:parsedIndicationReference ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:parsedIndicationReference should reference the matched reason record (a Condition or Observation) by IRI"@en ;
+    sh:name "Parsed Indication Reference Edge"@en .
+
+# ============================================================================
+# Shape: Coverage Record (DEPRECATED CLASS, RETAINED AND NOW JUDGED) — v1.18
+# ============================================================================
+#
+# clinical:CoverageRecord is deprecated in favour of coverage:InsurancePlan and
+# is RETAINED: clinical.ttl states "this class remains for backward
+# compatibility with existing EHR import pipeline data". Until clinical v1.18 it
+# was the only deprecated class in this repository with no shape, so every
+# record in that spelling — which is all EHR-imported coverage data written
+# before the migration — validated conforms:true because nothing looked at it.
+# A vacuous pass is indistinguishable from a real one, which is the whole defect.
+#
+# THE PRECEDENT. clinical v1.13 deprecated clinical:LabResult, clinical:Condition,
+# clinical:Allergy and clinical:Immunization on the same terms and all four kept
+# their shapes; both spellings are judged. This shape brings CoverageRecord into
+# line with its own vocabulary's practice.
+#
+# WHAT THIS SHAPE IS FOR, AND WHY IT IS NOT A COPY OF InsurancePlanShape.
+# coverage:InsurancePlanShape governs the spelling new data is WRITTEN in and can
+# constrain it to what the vocabulary intends. This shape governs a spelling that
+# is only READ: the records it judges were written years ago by an import path
+# that no longer runs, and it cannot ask them to change. So where the two
+# disagree, this one follows the data that exists. TWO places where it does, each
+# marked below at the constraint it applies to:
+#
+#   FIRST DEPARTURE   clinical:relationship  — this vocabulary's five values, not
+#                     the seven-code HL7 SubscriberPolicyholder set.
+#   SECOND DEPARTURE  clinical:effectivePeriodStart / effectivePeriodEnd — the
+#                     xsd:dateTime the importer emitted is accepted alongside the
+#                     declared xsd:date range.
+#
+# A THIRD DIVERGENCE HAS NO CONSTRAINT TO BE MARKED AT, so it is recorded here.
+# coverage:InsurancePlanShape binds coverage:status to the four FHIR R4 fm-status
+# codes at sh:Violation. This shape binds nothing, because the deprecated spelling
+# has no status property to bind: clinical:status is cross-class and carries no
+# rdfs:domain, none of the ten properties clinical.ttl does domain to
+# clinical:CoverageRecord is a status, and coverage:status itself did not exist
+# until coverage v1.5 — long after this class was deprecated. There is nothing
+# here to relax and nothing to enforce. Adding a status binding would be inventing
+# a field for a corpus that never had one.
+#
+# WHAT IS NOT A DEPARTURE, though earlier revisions of this header said so:
+#
+#   clinical:coverageType is judged by coverage:CoverageTypeVocabularyShape's
+#   value set, copied UNCHANGED, since v1.19 — see
+#   clinical:CoverageTypeVocabularyShape below. v1.18 listed it as a departure;
+#   that was the failure to look which v1.19 corrected, and the two spellings of
+#   the field are now judged identically, which is the opposite of a departure.
+#
+#   clinical:payorName is an EXTRA property this spelling carries and coverage:
+#   never gave a distinct name to. Constraining a field the other shape does not
+#   have is not a place the two disagree about a shared field.
+#
+# NOT sh:closed. Records in this spelling also carry health:sourceRecordId and
+# other cross-vocabulary predicates; closing the shape would reject them.
+
+clinical:CoverageRecordShape a sh:NodeShape ;
+    sh:targetClass clinical:CoverageRecord ;
+    rdfs:label "Coverage Record Shape"@en ;
+    rdfs:comment "Validation constraints for EHR-imported insurance coverage records in the deprecated clinical:CoverageRecord spelling. Retained-and-read, not written: coverage:InsurancePlan is the spelling for new data. Mirrors coverage:InsurancePlanShape's severities and cardinalities except where the legacy data demonstrably differs, which is documented per constraint."@en ;
+
+    # ------------------------------------------------------------------
+    # REQUIRED (sh:Violation) — mirrors coverage:InsurancePlanShape
+    # ------------------------------------------------------------------
+
+    # Required: providerName — the insurer. Without it the record identifies no
+    # coverage and cannot be reconciled against a claim.
+    #
+    # Note the property is cross-class from clinical v1.16, which dropped its
+    # rdfs:domain because it is written on encounters and documents too. That is
+    # exactly why the domain-specific meaning is stated here in SHACL rather than
+    # in the ontology: clinical.ttl's own comment says so.
+    sh:property [
+        sh:path clinical:providerName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Provider Name"@en ;
+        sh:message "Insurance provider name is required on a coverage record"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: memberId
+    sh:property [
+        sh:path clinical:memberId ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Member ID"@en ;
+        sh:message "Member ID is required for claims processing"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: coverageType. PRESENCE is required here; the VALUE is checked
+    # separately, at sh:Warning, by clinical:CoverageTypeVocabularyShape below.
+    # The split exists because one sh:property block carries one severity and
+    # these two facts do not share one -- the same reason
+    # coverage:CoverageTypeVocabularyShape is split out of
+    # coverage:InsurancePlanShape.
+    #
+    # WHICH VALUE SET, AND WHY NOT THE ONE IN clinical.ttl. The rdfs:comment on
+    # clinical:coverageType says "medical, dental, vision, prescription,
+    # mental_health". Three of those five -- medical, prescription,
+    # mental_health -- are accepted nowhere else in this specification: not by
+    # FHIR's coverage-type value set, not by coverage:CoverageTypeVocabularyShape,
+    # not by any other shape or ontology here. That comment is an unenforced
+    # prose line written when the class was created and never reconciled with the
+    # vocabulary that superseded it. It is not the authority and is not followed.
+    sh:property [
+        sh:path clinical:coverageType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Coverage Type"@en ;
+        sh:message "Coverage type is required"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # ------------------------------------------------------------------
+    # WARNING (sh:Warning) — mirrors coverage:InsurancePlanShape
+    # ------------------------------------------------------------------
+
+    # Warning: groupNumber
+    sh:property [
+        sh:path clinical:groupNumber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Group Number"@en ;
+        sh:message "Group number helps verify coverage"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Warning: planType. The value set is clinical.ttl's own and matches
+    # coverage:planType's exactly, so unlike coverageType above there is no
+    # conflict to resolve.
+    sh:property [
+        sh:path clinical:planType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("hmo" "ppo" "epo" "pos" "hdhp" "medicare" "medicaid" "tricare" "other") ;
+        sh:name "Plan Type"@en ;
+        sh:message "Plan type should be hmo, ppo, epo, pos, hdhp, medicare, medicaid, tricare, or other"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Warning: relationship — FIRST DEPARTURE. This is the deprecated spelling of
+    # what coverage:subscriberRelationship carries. The list here is clinical.ttl's
+    # five values, NOT the seven-code HL7 SubscriberPolicyholder set that
+    # coverage v1.4 completed: this vocabulary never accepted "common" or
+    # "injured", so no record in this spelling can carry one, and adding them
+    # would describe a corpus that does not exist. The full code system is
+    # available in the spelling that new data is written in.
+    sh:property [
+        sh:path clinical:relationship ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("self" "spouse" "child" "parent" "other") ;
+        sh:name "Relationship"@en ;
+        sh:message "Relationship should be self, spouse, child, parent, or other"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Warning: effectivePeriodStart — SECOND DEPARTURE. clinical.ttl declares
+    # rdfs:range xsd:date, and the EHR-imported records carry xsd:dateTime with a
+    # midnight-UTC placeholder time. conformance's coverage-001 is the worked
+    # example: "2020-01-01T00:00:00Z"^^xsd:dateTime.
+    #
+    # A shape that judges retained data has to judge the data that was written.
+    # sh:datatype xsd:date alone would report a violation on every coverage
+    # record in the corpus for a mismatch introduced by the importer years ago
+    # and never emitted since. Both are accepted, and the ontology range is left
+    # untouched — correcting a range is a vocabulary change with a version bump
+    # and a downstream sync behind it, not something a shape should do quietly.
+    #
+    # The migrated spelling resolved this the other way: coverage:effectiveStart
+    # is xsd:date and the reference pod dropped the placeholder time, because the
+    # time component carried no information. New data should use that.
+    sh:property [
+        sh:path clinical:effectivePeriodStart ;
+        sh:or (
+            [ sh:datatype xsd:date ]
+            [ sh:datatype xsd:dateTime ]
+        ) ;
+        sh:maxCount 1 ;
+        sh:name "Effective Period Start"@en ;
+        sh:message "Coverage effective start must be xsd:date, or the xsd:dateTime the EHR import path emitted"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # ------------------------------------------------------------------
+    # INFO (sh:Info) — mirrors coverage:InsurancePlanShape
+    # ------------------------------------------------------------------
+
+    # Info: effectivePeriodEnd. Same datatype latitude as the start date above.
+    sh:property [
+        sh:path clinical:effectivePeriodEnd ;
+        sh:or (
+            [ sh:datatype xsd:date ]
+            [ sh:datatype xsd:dateTime ]
+        ) ;
+        sh:maxCount 1 ;
+        sh:name "Effective Period End"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: planName
+    sh:property [
+        sh:path clinical:planName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Plan Name"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: subscriberId
+    sh:property [
+        sh:path clinical:subscriberId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Subscriber ID"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: payorName — NOT A DEPARTURE, despite what this comment said through
+    # v1.19. coverage: has no payor property distinct from coverage:providerName,
+    # which is sh:maxCount 1, so records migrating to InsurancePlan retain this
+    # predicate under its original clinical: name. That makes it an EXTRA property
+    # live in both spellings and constrained here for both — not a place where the
+    # two shapes judge one shared field differently, which is what the numbered
+    # departures above are.
+    sh:property [
+        sh:path clinical:payorName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Payor Name"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # ------------------------------------------------------------------
+    # Standard Cascade metadata
+    # ------------------------------------------------------------------
+
+    # Required: provenance. The list is the one every clinical record shape
+    # carries, including cascade:AIExtracted — an insurance card read by a
+    # document-extraction pipeline is one of the most likely paths to a record in
+    # this spelling, and coverage v1.6 had to add it to InsurancePlanShape for
+    # exactly that reason.
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Coverage record must have valid provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Schema version must be in format major.minor"@en
+    ] .
+
+# ============================================================================
+# Shape: Coverage Type vocabulary, deprecated spelling (advisory) -- v1.19
+# ============================================================================
+#
+# Split out of clinical:CoverageRecordShape so that the REQUIREMENT (a coverage
+# type is present) and the RECOMMENDATION (it comes from the value set FHIR
+# names) can carry different severities, which a single sh:property cannot do.
+#
+# The list is coverage:CoverageTypeVocabularyShape's, copied unchanged, and
+# deliberately so: clinical:coverageType and coverage:coverageType are the
+# deprecated and the current spelling of ONE field, and a record should not be
+# judged differently for which spelling it happens to be written in.
+#
+# WHY THIS LIST AND NOT THE ONE IN clinical.ttl. v1.18 left this value
+# unconstrained, reasoning that the ontology comment ("medical, dental, vision,
+# prescription, mental_health") and the corpus ("primary") disagreed and neither
+# could be preferred without evidence. That was wrong, and the evidence was
+# already in this repository: coverage v1.4 ratified a value set for this exact
+# field, grounded in the FHIR binding, and it lists "primary" BY NAME as a
+# retained Cascade value. Meanwhile "medical", "prescription" and
+# "mental_health" appear nowhere in this specification as accepted values of
+# anything. The disagreement was already settled; v1.18 had not looked in the
+# right file.
+#
+# Severity is sh:Warning because the FHIR binding is EXTENSIBLE: alternate codes
+# MAY be used where the value set does not cover the concept
+# (https://hl7.org/fhir/R4/terminologies.html#extensible). A payer's local code
+# is worth flagging for review and is not grounds for rejecting the record. That
+# is the rule coverage v1.4 established, and this accepts the same consequence it
+# did: because SHACL conformance is an empty result set and does not read
+# severity, an out-of-set value does make the record non-conforming. Applying the
+# rule to only one of the two spellings would have been the inconsistency.
+#
+# S5: this shape reaches its class by sh:targetClass and nothing references it
+# with sh:node, which is what makes a sh:Warning safe to publish on it.
+
+clinical:CoverageTypeVocabularyShape a sh:NodeShape ;
+    sh:targetClass clinical:CoverageRecord ;
+    rdfs:label "Coverage Type Vocabulary Shape (deprecated spelling)"@en ;
+    rdfs:comment "Advisory check that clinical:coverageType comes from the value set FHIR R4 binds Coverage.type to. Warning severity, because that binding is extensible. The list is coverage:CoverageTypeVocabularyShape's, unchanged: the two properties are the deprecated and current spellings of one field."@en ;
+
+    sh:property [
+        sh:path clinical:coverageType ;
+        sh:in (
+            # Retained Cascade values (v1.0-v1.3). "primary" and "secondary" are
+            # the FHIR Coverage.order sense rather than Coverage.type; the
+            # conflation is historical and both are kept for compatibility.
+            "primary" "secondary" "dental" "vision"
+            # v3-ActCode coverage types.
+            "EHCPOL" "HSAPOL" "AUTOPOL" "COL" "UNINSMOT" "PUBLICPOL"
+            "DENTPRG" "DISEASEPRG" "CANPRG" "ENDRENAL" "HIVAIDS" "MANDPOL"
+            "MENTPRG" "SAFNET" "SUBPRG" "SUBSIDIZ" "SUBSIDMC" "SUBSUPP"
+            "WCBPOL" "DENTAL" "DISEASE" "DRUGPOL" "HIP" "LTC" "MCPOL"
+            "POS" "HMO" "PPO" "MENTPOL" "SUBPOL" "VISPOL"
+        ) ;
+        sh:name "Coverage Type Vocabulary"@en ;
+        sh:message "Coverage type should come from the value set FHIR R4 binds Coverage.type to (http://hl7.org/fhir/ValueSet/coverage-type), or one of the retained Cascade values primary, secondary, dental, vision. That binding is extensible, so a payer-local code is acceptable where no listed code applies."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.12 (2026-07-20)
+# - Added ParsedIndicationReferenceEdgeShape for the new
+#   clinical:parsedIndicationReference subproperty. Warning-only and
+#   nodeKind-only, matching IndicationReferenceEdgeShape: the target class is
+#   deliberately NOT constrained, both because FHIR permits a Condition or an
+#   Observation as the reason and because cascade-cli validates each per-type
+#   pod file independently, so a cross-file sh:class check produces false
+#   positives (the v1.11 rationale,).
+#
+# Version 1.11 (2026-07-16)
+# - Removed the sh:class constraint from HasEncounterEdgeShape (clinical:Encounter)
+#   and LinkedConditionEdgeShape (clinical:Condition). Cascade stores records in
+#   per-type files and the reference validator checks each file independently, so
+#   an edge to a sibling-file target could never satisfy sh:class: it warned on
+#   every well-formed, fully-resolving edge (e.g. all 181 hasEncounter edges of
+#   the Synthea specimen) and never caught a real error. sh:nodeKind sh:IRI is
+#   kept. Target class is enforced at import (edges written only on resolution)
+#   and can be re-checked by a future pod-wide validator. Aligns these two shapes
+#   with IndicationReferenceEdgeShape. Paired with the R3 edge importer.
+#
+# Version 1.10 (2026-07-16)
+# - Added HasEncounterEdgeShape, IndicationReferenceEdgeShape, and
+#   LinkedConditionEdgeShape: open-world PropertyShapes (sh:targetSubjectsOf)
+#   for the v1.10 record-to-record edges. IRI nodeKind, class where committed,
+#   no minCount, sh:Warning severity. Purely additive.
+#
+# Version 1.8 (2026-03-28)
+# - Added SocialHistoryRecordShape for EHR-extracted social history records
+#   - REQUIRED: socialHistoryCategory (enumerated value set)
+#   - OPTIONAL: packsPerYear, alcoholDrinksPerWeek, occupationTitle
+#
+# Version 1.2 (2026-01-15)
+# - Added MedicationUseEpisodeShape for longitudinal medication tracking
+#   - REQUIRED: canonicalName, episodeFirstSeenDate, episodeLastSeenDate
+#   - REQUIRED: derivedFromRecord (sourceRecordIds) for source linkage (Task 7.3)
+#   - REQUIRED: inferredStatus, statusReason, statusConfidence (Task 7.4)
+#   - Ensures every episode answers "why does system think this?"
+# - Added SupplementShape for dietary supplements and OTC products
+#   - REQUIRED: supplementName, regulatoryStatus (Task 7.5)
+#   - Explicit regulatory distinction from medications
+# - Added cascade:Reconciled to valid provenance values for derived episodes
+#
+# Version 1.1 (2026-01-01)
+# - Added shapes for all structured clinical record types
+#
+# Version 1.0 (2025-12-26)
+# - Initial release with document shapes
+#

@@ -16,10 +16,10 @@
 #   non-ratified ones. The two SDKs disagree about vitals in opposite directions
 #   and should be fixed together.
 #
-core=3.6
-health=2.7
-clinical=1.15
-coverage=1.4
+core=3.8
+health=2.8
+clinical=1.16
+coverage=1.5
 checkup=3.3
 pots=1.4
 # coverage=1.3: ClaimRecord, BenefitStatement, DenialNotice, AppealRecord interfaces added
@@ -154,7 +154,12 @@ pots=1.4
 #     was never registered here, so the INGESTION axis could not round-trip
 #     while ORIGIN could.
 # health=2.7 / clinical=1.15: interpretationSourceCode registered in BOTH
-#     spellings (health: on labs, clinical: on vitals) and typed on VitalSign.
+#     spellings (health: on labs, clinical: on vitals) and typed on VitalSign
+#     AND on LabResult, as MultiValue<string>. The arity is the writer's and the
+#     reader's: a triple per value out, every triple back, so a model saying
+#     `string` described data this SDK does not produce and a caller's
+#     `.trim()` typechecked and threw. sh:maxCount 1 on both shapes is a rule
+#     about validating a graph, not about what a reader may find in one.
 #     LAB_INTERPRETATION_VALUES moves 60 to 74 (the 14 data-absent-reason codes
 #     it lacked) and the checksum is re-pinned. VitalSign.interpretation
 #     narrows from `VitalInterpretation | string`, which TypeScript collapsed
@@ -162,3 +167,459 @@ pots=1.4
 #     that justified the union is gone. Procedure records retarget onto
 #     clinical:Procedure / clinical:procedureName, with health:procedureName
 #     registered so a name carried only on the deprecated spelling survives.
+
+# ── 2026-08-27 wave-4 sync: core 3.7, health 2.8, clinical 1.16,
+#    coverage 1.5. All 24 terms implemented. ──
+#
+# core=3.7: pod attachments. cascade:Attachment plus all seven properties
+#     (hasAttachment, attachmentPath, attachmentMediaType, contentHash,
+#     hashAlgorithm, byteSize, attachmentTitle), a model, a TYPE_MAPPING entry,
+#     full serialize/deserialize and JSON-LD context coverage.
+#     AN ATTACHMENT IS A SUBJECT WITH ITS OWN IRI, NOT AN INLINE SUB-NODE.
+#     cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI, so the record
+#     and the attachment can live in different files; a blank node would fail
+#     the shape. hasAttachment is therefore an IRI edge (URI_FIELDS +
+#     IRI_ARRAY_FIELDS), 0..*, and its context term is @type: @id with
+#     @container: @set. byteSize is the only typed literal (xsd:integer).
+#     THE BYTES ARE NOT MODELLED. Cascade stores them as an ordinary
+#     content-addressed file and this SDK touches only the metadata node: it
+#     neither reads, writes, hashes nor verifies attachment bytes, and does not
+#     validate that attachmentPath is pod-relative or that contentHash is
+#     lowercase hex. Those are sh:Violation constraints in core.shapes.ttl and
+#     this package validates no lexical patterns.
+# clinical=1.16: fifteen terms. The eight flat encounter facts
+#     (encounterClassDisplay, encounterClassSystem, encounterReason 0..*,
+#     admitSource, dischargeDisposition) and the participation structure
+#     (EncounterParticipant, hasParticipant, participantName, participantRole,
+#     participantRoleCode 0..*, participantSpecialty) are on the Encounter
+#     model; businessIdentifier is on CascadeEntity because the ontology
+#     deliberately declares no rdfs:domain for it.
+#     A PARTICIPATION IS AN INLINE BLANK NODE — the opposite ruling from
+#     core v3.7's attachment, and deliberately so.
+#     clinical:EncounterParticipantShape omits sh:nodeKind sh:IRI precisely so
+#     a serializer may write one for a structural sub-node, since nothing points
+#     at a participation from another file. Modelled on the core v3.4
+#     clinicalSummary / wellnessSummary precedent (BLANK_NODE_TYPES plus
+#     reconstruction on read), extended in two ways that precedent did not need:
+#     the edge REPEATS, so an array of blank nodes is written and every one is
+#     rebuilt on read; and the nested predicates are qualified per parent field
+#     (BLANK_NODE_PREDICATE_PREFIXES), because the writer hardcoded cascade:.
+#     A blanket PROPERTY_PREDICATES lookup was rejected: a `name` inside an
+#     emergencyContact is cascade:name while the top-level `name` is foaf:name,
+#     so it would have silently rewritten stable output.
+#     encounterClassSystem is written as a PLAIN STRING LITERAL although the
+#     ontology ranges it xsd:anyURI; clinical:EncounterShape accepts anyURI OR
+#     string via sh:or, explicitly because serializers differ on which they
+#     write for a URI-valued literal.
+#     businessIdentifier values are the FHIR token form "{system}|{value}" where
+#     the source states a system. This SDK round-trips the string verbatim and
+#     does NOT split, parse or validate it, and cannot invent a system.
+# clinical=1.16: the three document terms (documentReferenceStatus,
+#     documentAuthorName, authenticatorName) are registered as PREDICATES ONLY.
+#     Their rdfs:domain is clinical:ClinicalDocument, a class this SDK does not
+#     model, so there is nothing here to attach them to — the same position the
+#     core v3.4 device-source terms (sourceType, dataTypes, version) are in.
+#     They serialize and deserialize on whatever subject a caller writes them
+#     to; leaving them unregistered would have dropped them silently. A
+#     ClinicalDocument model is the follow-up.
+#     The two DOMAINS DROPPED in v1.16 (providerName off CoverageRecord,
+#     verificationStatus off Condition) and the ONE DEPRECATION
+#     (clinical:observationStatus) need no change here: this SDK encodes no
+#     domains, and observationStatus was never registered.
+# coverage=1.5: coverage:status, the four fm-status codes, typed as the closed
+#     union CoverageStatus. Closed rather than `CoverageStatus | string` for the
+#     reason clinical v1.15 closed VitalSign.interpretation: the FHIR binding is
+#     REQUIRED and the shape constrains the value at sh:Violation. Contrast
+#     coverageType, which stays open because Coverage.type is bound EXTENSIBLY.
+#     WRITTEN VIA A RECORD-TYPE OVERRIDE, not a PROPERTY_PREDICATES row: the
+#     `status` key already resolves to health:status. The override is declared
+#     for 'InsurancePlan' ONLY and not for 'CoverageRecord', because
+#     coverage:status has rdfs:domain coverage:InsurancePlan and asserting it on
+#     a clinical:CoverageRecord subject would entail to a reasoner that the
+#     subject is an InsurancePlan.
+#     KNOWN GAP, pre-existing and NOT introduced here: TYPE_MAPPING resolves
+#     both 'InsurancePlan' and 'CoverageRecord' to rdfType
+#     clinical:CoverageRecord, so this SDK cannot emit a coverage:InsurancePlan
+#     subject at all and coverage's own shapes never see these records. The
+#     practical consequence is that coverage:status is a ONE-WAY trip: the class
+#     is lost on read, so re-serializing what came back writes health:status.
+#     Pinned by test rather than fixed, because retargeting the class changes
+#     what every existing InsurancePlan record serializes as.
+# health=2.8: SHACL only; no class or property added, removed or renamed.
+#     health:LabResultRecordShape gains clinical:status bound to the 8 codes of
+#     Observation.status, and health:AllergyRecordShape gains clinical:status
+#     and clinical:verificationStatus bound to the AllergyIntolerance sets.
+#     This SDK validates no value sets, so the row is bumped because 2.8 adds no
+#     term this SDK is missing, not because code moved.
+#
+# core=3.8: cascade:PatientReported, the provenance individual core had been
+#     missing. Added to BOTH hardcoded provenance sets in this package, which is
+#     the whole of the work: the ProvenanceType union in src/models/common.ts
+#     and VALID_PROVENANCE_TYPES in src/validator/validator.ts. The second is
+#     the one that mattered — a value absent from it is REJECTED at runtime, so
+#     bumping only the row would have left this SDK failing a conformant record.
+#     No term modelled in this release changes.
+#     DISTINCT FROM cascade:SelfReported, and the axis is WHO KEYED IT IN rather
+#     than who it came from. Both originate with the patient: SelfReported is
+#     the patient entering data directly, while PatientReported is "information
+#     originating from the patient's own account and recorded by another party
+#     or system (history related to a clinician, imported questionnaire
+#     responses)". The intermediary may have summarized, paraphrased or
+#     mis-transcribed, so a consumer weighing how directly a claim is attested
+#     needs the two kept apart. Neither is a substitute for the other and this
+#     SDK maps neither onto the other.
+#     The individual is a DIRECT subclass of cascade:DataProvenance, under
+#     neither ClinicalGenerated nor ConsumerGenerated, because a patient's
+#     report reaches records through either setting. This SDK models no
+#     provenance hierarchy — both sets here are flat — so the placement costs
+#     nothing to represent, but a consumer that DOES reason over the hierarchy
+#     must not assume PatientReported implies either parent.
+#     (Definition read from spec PR #32 commit c856eb8, pending merge; the local
+#     spec sibling still reads core 3.7.)
+#
+# NOT COVERED BY CONFORMANCE FIXTURES. The conformance repo carries no fixture
+#     exercising any of these 24 terms (no attachment- family, and the existing
+#     encounter- fixtures predate v1.16), so every assertion in
+#     tests/vocab-2026-08-27-wave4.test.ts is written against this SDK's own
+#     round trip rather than against a ratified oracle. Fixtures are the
+#     follow-up; until they exist, cross-implementation agreement with
+#     sdk-python and cascade-cli on these terms is UNVERIFIED.
+
+# ── 2026-08-29: core 2.2's patient-profile sub-structures, ten releases late.
+#    NO ROW MOVES. ──
+#
+# core=2.2 (UNCHANGED at 3.8): cascade:emergencyContact, cascade:address and
+#     cascade:preferredPharmacy now actually serialize. Not a version this SDK
+#     was behind on — the predicates have been in core since v2.2, the three
+#     classes since v2.0, the interfaces have been on the PatientProfile model
+#     for as long, and the row has read 3.x throughout. The rows are not touched
+#     because nothing here implements a newer vocabulary; a long-claimed one
+#     stopped being a claim (#27).
+#     WHAT WAS BROKEN: the three keys had a blank-node RULE (BLANK_NODE_TYPES
+#     named them) and no PREDICATE. getPredicateForField returned undefined and
+#     emitField exited at `if (!pred) return;` four lines in, before any rule
+#     was consulted, so eighteen predicates and three nested nodes were absent
+#     from every profile this SDK has ever written — no error, no warning, no
+#     partial output. profile-002 declares all three and everything else in it
+#     serialized correctly, which is what kept the loss quiet.
+#     Registered in PROPERTY_PREDICATES and declared as three term modules
+#     (src/terms/address.ts, emergency-contact.ts, preferred-pharmacy.ts), each
+#     { form: 'blankNode' } with its rdfType and NO nestedPrefix: childrenOf
+#     defaults to cascade: and the fixture's child keys are already
+#     disambiguated in the JSON, so all twelve go straight through. The
+#     BLANK_NODE_TYPES rows are deleted rather than left beside the terms —
+#     emitField never reaches that table for a termed key, so keeping them would
+#     be a second copy of a fact src/terms/ now owns.
+#     THE CHILDREN ARE READ-ONLY MAPPINGS. The twelve child predicates are in
+#     the deserializer's ADDITIONAL_REVERSE_MAPPINGS, not PROPERTY_PREDICATES: a
+#     blank node's children are derived from the node's prefix and the JSON key
+#     and never looked up, so there is no write mapping to register, and adding
+#     one would conflate a nested key with a top-level key of the same name.
+#     THE TWELVE ARE THE DECLARED ONES, and the list stops there. cascade:
+#     contactEmail is NOT mapped: nothing in spec/ declares it — core.ttl gives
+#     cascade:EmergencyContact contactName, contactRelationship and contactPhone
+#     and its rdfs:comment names those three — and childrenOf writes every key
+#     of a rebuilt object straight back out, so resolving an undeclared spelling
+#     on read turns this SDK into a writer of it.
+#     TWO DEAD ROWS DELETED: contactPhone: 'vcard:hasTelephone' and
+#     contactEmail: 'vcard:hasEmail'. Both were unreachable by construction —
+#     nested-only keys, and the nested writer never consults PROPERTY_PREDICATES
+#     — and contactPhone was contradicted by its own model comment and by
+#     profile-002, which writes cascade:contactPhone. Left in place they would
+#     have become worse than dead once the reverse mappings landed: one JSON key
+#     with two read spellings, only one of which is ever written. The vcard
+#     namespace declaration itself stays; whether it earns its place is a
+#     separate question.
+#     THE JSON-LD SIDE NEEDS THE TWELVE TOO, and gets them from its own table.
+#     getContext() is built from PROPERTY_PREDICATES, so registering the three
+#     parents there and not their children gave a context that defined the three
+#     edges and none of what hangs off them: toJsonLd emitted the nested object
+#     and it expanded to a node with zero triples. NESTED_CHILD_PREDICATES in
+#     src/jsonld/context.ts defines all twelve as top-level terms, which is what
+#     spec/contexts/v1/cascade.jsonld does — the generated context now agrees
+#     with the published one on all fifteen names, parents included.
+#     THE READ SIDE MOVES WITH THE WRITE SIDE, in one change and deliberately:
+#     emergencyContact / address / preferredPharmacy are added to
+#     NESTED_BLANK_NODE_FIELDS, whose comment named them as the deliberate
+#     exclusion. Three entries without the twelve child spellings would rebuild
+#     each structure as {} — every child dropped by triplesToNestedObject's
+#     `if (!key) continue`, silently.
+#     VERIFIED against conformance fixture profile-002, whose expectedOutput has
+#     carried all three blank nodes since it was written: the three structures
+#     serialize with their rdf:type and every child, and deserializeOne reads
+#     them back off that document as nested objects rather than as blank-node
+#     identifiers or as {}.
+#
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/jsonld/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     The twelve cascade:EmergencyContact / cascade:Address / cascade:PharmacyInfo
+#     child predicates that #27 hand-listed in context.ts's NESTED_CHILD_PREDICATES
+#     and in the deserializer's ADDITIONAL_REVERSE_MAPPINGS are now GENERATED from
+#     the terms that write them. Same twelve predicates, same core v2.2, one copy
+#     instead of three — a term declares its children and both readers are built
+#     from that declaration.
+#     Nothing new is registered and nothing previously claimed is withdrawn, so
+#     bumping a row would claim support this package did not just gain.
+
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/models/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     Two core v2.2 fields the models did not describe accurately.
+#     cascade:addressType joins the Address interface: cascade:AddressShape has
+#     always declared it with an sh:in ( "postal" "physical" "both" ) and
+#     spec/contexts/v1/cascade.jsonld has always defined the term, but neither
+#     the model nor src/terms/address.ts carried it, so a declared `children`
+#     DROPPED the key rather than writing it.
+#     PatientProfile.emergencyContact widens to MultiValue<EmergencyContact>.
+#     cascade:PatientProfileShape declares NO sh:maxCount for that predicate
+#     where cascade:address and cascade:preferredPharmacy beside it are both
+#     capped at one, and the writer has always written one blank node per member
+#     of an array — the type was narrower than the data this SDK produces.
+#     Nothing new is registered and nothing previously claimed is withdrawn, so
+#     bumping a row would claim support this package did not just gain.
+
+# 2026-08-29 — NO VERSION MOVED. Recorded because src/jsonld/ changed and the
+#     pre-commit hook asks for this file whenever it does.
+#     A COMMENT CORRECTION AND ONE OPEN DEFECT NAMED. No term is registered,
+#     withdrawn or respelled, and getContext() returns exactly what it did.
+#     The comment beside getContext()'s collision rule read "No such collision
+#     exists today", which stopped being true when NESTED_CHILD_PREDICATES
+#     became generated from the terms: twenty of the twenty-one declared child
+#     keys are ALSO registered top-level fields, so the loop that overwrites
+#     them now fires twenty times per call instead of never.
+#     Twenty of those twenty agree about the predicate and the overwrite is a
+#     no-op. `notes` DISAGREES — cascade:notes as a RecordSummary child (spec's
+#     own spelling, which TYPE_PREDICATE_OVERRIDES forks the writer to) against
+#     health:notes as a health record's registered field — and this is the core
+#     v3.4 collision that entry above already flagged, arriving on the JSON-LD
+#     side.
+#     STILL BROKEN, deliberately not fixed here: a flat context term has one
+#     meaning and this key has two, so whichever way the loop falls, the other
+#     occurrence expands to a predicate the Turtle does not write. It falls to
+#     health:notes, which is right for a document's top level and leaves a
+#     nested notes inside a clinicalSummary / wellnessSummary expanding wrong.
+#     toJsonLd on an ExportManifest has the same split at TOP level, from
+#     TYPE_PREDICATE_OVERRIDES, and predates NESTED_CHILD_PREDICATES entirely.
+#     Closing either means changing the document toJsonLd emits — a local
+#     @context on the nested node object (JSON-LD 1.0 permits one; term-scoped
+#     contexts, which need @version 1.1, do not apply), or 1.1 scoping — which
+#     is a decision about public output rather than a comment fix.
+#     Pinned by tests/rules/context-collision.test.ts, including an assertion
+#     labelled OPEN DEFECT that goes RED when this is fixed.
+
+# ── 2026-08-31 — NO VERSION MOVED. An insurance plan is finally
+#    coverage:InsurancePlan, in the coverage vocabulary (#26). ──
+#
+# coverage=1.5 (UNCHANGED). Not a version this SDK was behind on: v1.6 and
+#     v1.7 are SHACL-ONLY and add no term — v1.6 widens
+#     coverage:InsurancePlanShape's cascade:dataProvenance list to include
+#     cascade:AIExtracted, v1.7 gives coverage:sourceRecordId the sh:path it
+#     never had, and coverage.ttl changes in neither beyond its changelog. This
+#     package validates neither value sets nor datatypes, so neither version
+#     asks anything of this code and claiming them would claim support it did
+#     not gain. The row stays at 1.5 and the drift against spec is real.
+#     What DID change is that a coverage shape can now see a record this SDK
+#     wrote at all; until this release every one of them was unreachable by
+#     construction.
+#
+# THE GAP THE coverage=1.5 ENTRY ABOVE RECORDED IS CLOSED. That entry called
+#     it "KNOWN GAP, pre-existing and NOT introduced here": TYPE_MAPPING
+#     resolved both 'InsurancePlan' and 'CoverageRecord' to rdfType
+#     clinical:CoverageRecord, so this SDK could not emit a
+#     coverage:InsurancePlan subject at all and coverage's own shapes never saw
+#     these records. coverage:status was therefore a one-way trip — written
+#     correctly, the class lost on read, health:status written on the way back
+#     out. TYPE_MAPPING.insurance now carries rdfType coverage:InsurancePlan
+#     and namePred coverage:providerName, and the round trip holds in both
+#     directions.
+#
+# ELEVEN DEFECTS, NOT ONE, and they had to move together. The class was one of
+#     them. Eight were predicates: providerName, memberId, groupNumber,
+#     planName, planType, coverageType and subscriberId were written clinical:
+#     where the corpus says coverage:, and sourceRecordId was written health:.
+#     Two were datatypes: effectiveStart and effectiveEnd carried xsd:dateTime
+#     where coverage.ttl:93,99 ranges xsd:date and coverage.shapes.ttl:146
+#     declares sh:datatype xsd:date, so the time component was a midnight-UTC
+#     placeholder.
+#     FIXING ONLY THE CLASS WOULD HAVE BEEN WORSE THAN THE BUG.
+#     coverage:InsurancePlanShape declares sh:minCount 1 at sh:Violation on
+#     coverage:providerName, coverage:memberId and coverage:coverageType.
+#     Retyping the subject while still writing clinical: makes the shape see
+#     these records for the first time and report three violations plus two
+#     datatype violations, on records whose data is correct.
+#     THE EIGHT ARE A PER-TYPE OVERRIDE, NOT A PROPERTY_PREDICATES REMAP.
+#     sourceRecordId is carried by 35 fixtures across other record types and
+#     stays health:sourceRecordId for every one of them; the other seven are
+#     narrower but the reasoning is identical. They join coverage:status in
+#     TYPE_PREDICATE_OVERRIDES.InsurancePlan, and the read side moves with them:
+#     all eight coverage: URIs are in the deserializer's
+#     ADDITIONAL_REVERSE_MAPPINGS, mapping to the same JSON keys the clinical:
+#     and health: spellings already map to, so a pod written either way reads
+#     back in full.
+#     clinical:payorName IS NOT ONE OF THEM AND DOES NOT MOVE. Coverage has no
+#     payor property distinct from coverage:providerName, which is
+#     sh:maxCount 1, so it is a legitimate clinical predicate on a plan.
+#     conformance's coverage-001 expects it under clinical: on a
+#     coverage:InsurancePlan subject, and a blanket "clinical: -> coverage: on a
+#     plan" rewrite passes coverage-002 and -003 and breaks it.
+#
+# clinical=1.16 (UNCHANGED): clinical:CoverageRecord is now READ AND NEVER
+#     WRITTEN, the asymmetry DEPRECATED_TYPE_ALIASES already gave the four
+#     clinical v1.13 classes. The class has been deprecated in favour of
+#     coverage:InsurancePlan since clinical v1.5 (clinical.ttl:187) and every
+#     release of this SDK since v1.3.0 wrote it, so the pods that need the read
+#     side are the ones this SDK produced — refusing them would be a data-loss
+#     bug dressed up as standards compliance. The clinical row does not move:
+#     nothing here implements a newer clinical version, a long-standing
+#     deprecation is simply observed.
+#     Coverage['type'] narrows to 'InsurancePlan'. 'CoverageRecord' stays in
+#     TYPE_TO_MAPPING_KEY so a caller holding the old JSON spelling can still
+#     name it to deserialize(), and it resolves to coverage:InsurancePlan like
+#     the other, so neither spelling can make this SDK write the deprecated
+#     class.
+#
+# THE SHAPES ARE VENDORED NOW, which is what makes any of this checkable.
+#     tests/shapes/ gains coverage.shapes.ttl (and clinical.shapes.ttl is
+#     re-synced, since spec#11 gave both coverage:sourceRecordId and
+#     clinical:payorName an sh:path). Before that, tests/support/shacl.ts's
+#     assertCovered would have refused coverage-001 rather than judging it.
+#     VERIFIED against conformance fixtures coverage-001 through coverage-004,
+#     compared as graphs: all four match their expectedOutput in full, and
+#     coverage-004 earns the sh:minCount violation on coverage:providerName that
+#     its shaclConstraintViolated declares instead of passing unexamined.
+# ── 2026-08-31, review followup on #26. NO VERSION MOVED. Three defects in
+#    the entry above, found on the PR and fixed on it. ──
+#
+# THE ENTRY ABOVE CLAIMED MORE THAN THE CODE DID. It says 'CoverageRecord'
+#     "resolves to coverage:InsurancePlan like the other, so neither spelling
+#     can make this SDK write the deprecated class". True of the CLASS and only
+#     of the class. The class comes from TYPE_TO_MAPPING_KEY, which maps both
+#     spellings; the predicates come from TYPE_PREDICATE_OVERRIDES, which is
+#     keyed on record.type verbatim and had a row for 'InsurancePlan' alone. A
+#     record still typed 'CoverageRecord' was therefore written as a
+#     coverage:InsurancePlan with its nine predicates left in clinical: and
+#     health: — the exact "worse than the bug" state the entry above describes,
+#     reached from the other direction. coverage:InsurancePlanShape targets the
+#     CLASS, so it matched and reported sh:minCount on providerName, memberId
+#     and coverageType against a record carrying all three.
+#     Coverage['type'] narrowing does not close that path. The spelling is
+#     still a key of TYPE_TO_MAPPING_KEY (kept on purpose, per the entry
+#     above), still in RECOGNIZED_DATA_TYPES and still a case in
+#     validateRecord, so JSON read off disk and any JavaScript caller reach
+#     serialize() with it.
+#     The nine spellings now live in INSURANCE_PLAN_PREDICATES and BOTH type
+#     names reference that one object. One object under two keys rather than a
+#     copy: a second literal is free to drift, and the drift is invisible —
+#     both spellings still produce a document that parses, one of them under
+#     the wrong vocabulary.
+#
+# THE TWO SERIALIZATIONS OF ONE RECORD DISAGREED. The Turtle writer moved
+#     effectiveStart / effectiveEnd to xsd:date; src/jsonld/context.ts kept
+#     both in dateTimeFields, so the published context emitted
+#     {'@id': 'coverage:effectiveStart', '@type': 'xsd:dateTime'} and expanded
+#     the YYYY-MM-DD the fixtures carry to "2024-01-01"^^xsd:dateTime — not a
+#     valid xsd:dateTime lexical form, and a sh:datatype violation against
+#     coverage.shapes.ttl:146. The JSON-LD half was the ill-typed one, on a
+#     record the Turtle path wrote cleanly. Both keys moved to dateOnlyFields;
+#     the deprecated effectivePeriodStart / ...End stay in dateTimeFields,
+#     matching EXPLICIT_DATETIME_FIELDS in the writer.
+#     Two hand-maintained lists of one fact remain, and they are now asked the
+#     same question by test rather than left to agree by habit.
+#
+# THE NEW TABLE WAS OUTSIDE THE GUARD. DATE_ONLY_FIELDS is keyed by field name
+#     like every table in SERIALIZER_FIELD_TABLES and was not listed there, so
+#     the invariant in tests/serializer-field-tables.test.ts never walked it: a
+#     typo in it would match no field, fall through to the isDateTimeField
+#     heuristic, be written ^^xsd:dateTime against a shape declaring xsd:date,
+#     and nothing would go red. Listed now — and the aggregate itself is
+#     asserted to name all thirteen tables, since the omission was invisible
+#     precisely because the check is only as wide as what it is handed.
+#
+# tests/vocab-2026-08-27-wave4.test.ts INVERTED, not deleted. It asserted
+#     health:status and not.toContain('coverage:status') for a 'CoverageRecord',
+#     arguing from rdfs:domain coverage:InsurancePlan that the coverage
+#     spelling would wrongly entail the subject is a plan. That premise died
+#     with this PR: the subject already says a coverage:InsurancePlan, so the
+#     entailment the assertion avoided is stated outright by the class triple,
+#     and health:status there is not caution — it is a status written under a
+#     vocabulary the record's own shape does not read.
+
+# 2026-08-31 — NO BUMP. src/jsonld/ changed and no row moves, deliberately.
+#   `toJsonLd` now writes the class of an inline nested node — cascade:EmergencyContact,
+#   cascade:Address, cascade:PharmacyInfo, cascade:RecordSummary — where before it wrote
+#   the node's children and no rdf:type. None of that is new vocabulary: all four classes
+#   have been in core since v2.2 and this SDK has written them in TURTLE all along. What
+#   changed is that the JSON-LD writer now reads the class from the term instead of not
+#   reading it at all, so bumping core would claim support that already existed in one
+#   format and was missing in the other.
+#   The term is now the source for BOTH formats: defineTerm builds jsonLdFor and
+#   fromJsonLdValue beside outputsFor, and src/jsonld/converter.ts forks on termFor(key)
+#   above the PROPERTY_PREDICATES lookup. A field that is termed no longer needs a row in
+#   that table to survive being written, which is what lets the table shrink (#46).
+
+# 2026-08-31 — NO BUMP. src/models/ changed and no row moves, deliberately.
+#   The new directory is src/models/validators/, which declares no vocabulary: it
+#   transcribes constraints the shapes ALREADY state — sh:minCount, sh:maxCount,
+#   sh:minLength — into a form validate() can read at runtime. Nothing here adds
+#   a class, a predicate or a property, and the models themselves are untouched
+#   and still compile to `export {};`.
+#   What it changes is WHERE a rule lives. A term owns facts about a PREDICATE,
+#   true wherever it appears; a per-record-type validator owns facts about a
+#   RECORD TYPE — an sh:minCount is scoped to one node shape — and rules spanning
+#   two fields, which no per-field constraint can state. Bumping a vocabulary row
+#   for that would claim support for something spec did not publish.
+
+# 2026-08-31 — NO BUMP. sh:minLength is now enforced, and no row moves.
+#   The constraint was already published: 30 sh:property blocks across the four
+#   vendored shape files declare one, over 28 distinct predicates, and every one
+#   is sh:minLength 1 — including the two predicates that appear in two shapes,
+#   dct:title and health:conditionName, which agree. This SDK is catching up to
+#   what spec already says, not asserting anything new.
+#   It landed on the TERM rather than in a validator's constraint table, because
+#   that measurement says it is a fact about a PREDICATE and not about any one
+#   record type. clinical:ProcedureShape is the case that separates the two:
+#   clinical:procedureName carries sh:minLength 1 and NO sh:minCount, so an
+#   absent procedure name conforms and a present empty one does not.
+#   CHARACTERS, NOT CONTENT. SHACL measures the value node converted to string,
+#   so "  " is length 2 and conforms. The check does not trim. A whitespace-only
+#   name is a real defect and sh:minLength is not the constraint that states it;
+#   sh:pattern is, and no shape declares one. Trimming here would reject records
+#   pyshacl accepts, which is exactly the divergence the fixture contract exists
+#   to catch.
+
+# 2026-08-31 — NO BUMP. Three terms added, five model comments corrected.
+#   unit, resultUnit and relationship transcribe sh:maxCount / sh:minCount /
+#   sh:minLength that clinical.shapes.ttl and health.shapes.ttl ALREADY declare
+#   and that no term claimed, so a record carrying two units validated clean.
+#   Catching up to published constraints is not new vocabulary support.
+#   The five src/models/ edits are `Maps to` doc comments that named the wrong
+#   predicate — daily-snapshot date (x2), family-history relationship, procedure
+#   cptCode and procedureStatus. The serializer was correct throughout; only the
+#   prose was wrong, and it is prose because nothing derives it.
+
+# 2026-09-01 — NO BUMP. Review followup on #56; no vocabulary changed.
+#   The src/models/ edit is two `Maps to` doc comments in daily-snapshot.ts.
+#   The note above records them as corrected in this branch; they were INVERTED
+#   instead — set to health:date on the two fields the serializer writes
+#   cascade:date for, leaving the file contradicting its own module docblock
+#   eleven lines up. The serializer was never wrong: TYPE_PREDICATE_OVERRIDES
+#   and TYPE_MAPPING both say cascade:date for DailyActivitySnapshot and
+#   DailySleepSnapshot, and tests/daily-snapshot.test.ts asserts it. Only the
+#   prose moved, in the wrong direction, and it is prose because nothing derives
+#   it — there is no check comparing a `Maps to` comment against what the
+#   serializer emits, which is why an inversion could land inside a change whose
+#   subject was those very comments.
+
+# 2026-09-01 — NO BUMP. Review followup on #63; no vocabulary changed.
+#   The src/jsonld/ edit fixes the READER, not the vocabulary. toJsonLd has
+#   stamped a nested node's class since the term became the source for both
+#   formats (see the core-v2.2 note above), and fromJsonLd took it back off —
+#   but only on the branch keyed by the short field name. A document that
+#   arrived EXPANDED, which is what a JSON-LD processor emits and what
+#   fromJsonLd documents as supported, took the full-IRI branch and kept @type
+#   as a record field. NESTED_SKIP holds `type` and `id`, not `@type`, so
+#   serialize() then wrote it as the predicate cascade:@type — not a PN_LOCAL,
+#   so a document no parser accepts rather than a wrong triple.
+#   The classes and predicates involved are unchanged and have been in core
+#   since v2.2; what moved is that both of fromJsonLd's key spellings now go
+#   through the same term. Bumping a row would claim new support for something
+#   one of the two spellings already had.

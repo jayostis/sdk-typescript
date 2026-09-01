@@ -9,6 +9,7 @@
  */
 
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING } from '../vocabularies/namespaces.js';
+import { childPredicates } from '../terms/index.js';
 
 /**
  * The canonical URI for the published Cascade Protocol JSON-LD context.
@@ -29,6 +30,35 @@ export const CONTEXT_URI = 'https://cascadeprotocol.org/ns/context/v1/cascade.js
  * prefix from this set when its vocabulary graduates to a released version.
  */
 const DRAFT_CONTEXT_EXCLUDED_PREFIXES = new Set(['evidence', 'workbench', 'oa', 'ical', 'skos']);
+
+/**
+ * The children of the three patient-profile sub-structures, which the context
+ * must define and `PROPERTY_PREDICATES` deliberately must not.
+ *
+ * Two different questions, and this is the seam between them.
+ * `PROPERTY_PREDICATES` is a WRITE table: it answers "what predicate does the
+ * serializer emit for this field", and a blank node's children never reach it,
+ * because they are derived from the node's prefix and the JSON key
+ * (`childrenOf` in src/terms/term.ts). A JSON-LD context answers a different
+ * question — "what does this key MEAN" — and it has to answer it for every key
+ * a document contains, including the ones inside a nested object.
+ *
+ * Without these, `toJsonLd` writes
+ * `"emergencyContact": { "contactName": "Maria Rivera", ... }` and the document
+ * expands, in any conformant processor, to `cascade:emergencyContact` pointing
+ * at a node with ZERO triples. Nothing reports it: the writer passed the value
+ * through faithfully and the context simply has no term to apply. The TTL path
+ * carries the data and the JSON-LD path loses it silently.
+ *
+ * Top-level terms rather than scoped ones, matching
+ * `spec/contexts/v1/cascade.jsonld`, which defines all twelve exactly this way.
+ * That also keeps the context JSON-LD 1.0-readable: a scoped `@context` would
+ * need `"@version": 1.1` and a 1.0 processor errors on it.
+ *
+ * @see spec/contexts/v1/cascade.jsonld
+ * @see spec/ontologies/core/v1/core.ttl  cascade:EmergencyContact, cascade:Address, cascade:PharmacyInfo
+ */
+const NESTED_CHILD_PREDICATES: Record<string, string> = childPredicates();
 
 /** Prefix of a `prefix:localName` CURIE, or '' if it has no colon. */
 function curiePrefix(curie: string): string {
@@ -91,20 +121,44 @@ export function getContext(): object {
   // (clinical v1.10-v1.12 graph edges).
   const iriSetFields = new Set([
     'indicationReference', 'parsedIndicationReference', 'linkedCondition',
+    // core v3.7: the attachment edge. Repeatable, and its object is always an
+    // IRI (cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI).
+    'hasAttachment',
   ]);
+
+  // Repeated object properties whose object is an inline NODE rather than a
+  // bare IRI (clinical v1.16 hasParticipant). `@container: @set` keeps a single
+  // participation an array on compaction, matching the model's
+  // `EncounterParticipant[]`. Deliberately NOT given `@type: @id`: that coerces
+  // a value to an IRI reference, which would misread the embedded blank node
+  // these edges actually carry.
+  const nodeSetFields = new Set(['hasParticipant']);
 
   // Fields that need xsd:dateTime typing
   const dateTimeFields = new Set([
     'startDate', 'endDate', 'onsetDate', 'performedDate', 'reportedDate',
     'administrationDate', 'effectiveDate', 'effectivePeriodStart', 'effectivePeriodEnd',
-    'effectiveStart', 'effectiveEnd',
     'proxyGrantedAt', 'proxyRevokedAt',
     // core v3.4: dcterms:created on an export manifest.
     'created',
   ]);
 
-  // Fields that need xsd:date typing
-  const dateOnlyFields = new Set(['dateOfBirth', 'date']);
+  // Fields that need xsd:date typing.
+  //
+  // `effectiveStart` / `effectiveEnd` are the coverage v1.6 pair, and they
+  // belong here and not above for the reason the Turtle writer moved them:
+  // `coverage.ttl` ranges both `xsd:date` and `coverage:InsurancePlanShape`
+  // declares `sh:datatype xsd:date`. Typed `xsd:dateTime` here, the context
+  // expanded the `YYYY-MM-DD` the fixtures carry into
+  // `"2024-01-01"^^xsd:dateTime` — not a valid lexical form for that
+  // datatype, and a `sh:datatype` violation — so the JSON-LD serialization of
+  // a record disagreed with the Turtle one and was the ill-typed half.
+  //
+  // The deprecated `effectivePeriodStart` / `...End` stay in
+  // `dateTimeFields` above, matching `EXPLICIT_DATETIME_FIELDS` in the Turtle
+  // writer. Two lists of one fact; `tests/jsonld.test.ts` is what asks them
+  // the same question.
+  const dateOnlyFields = new Set(['dateOfBirth', 'date', 'effectiveStart', 'effectiveEnd']);
 
   // Fields that need xsd:boolean typing
   const booleanFields = new Set([
@@ -128,6 +182,8 @@ export function getContext(): object {
     'sampleCount',
     // health v2.5 — daily snapshot
     'exerciseMinutes', 'standHours',
+    // core v3.7 — attachment size in bytes
+    'byteSize',
   ]);
 
   // Fields that need xsd:decimal/double typing
@@ -142,6 +198,39 @@ export function getContext(): object {
     'rxNormCode', 'icd10Code', 'snomedCode', 'loincCode', 'testCode', 'drugCode',
   ]);
 
+  // The nested children go in FIRST, so the loop below overwrites one on a
+  // collision rather than the other way round. A context term has exactly one
+  // meaning, and where a spelling is both a registered top-level field and a
+  // sub-structure child, the registered field is the one a document's top level
+  // actually carries.
+  //
+  // COLLISIONS ARE THE RULE, not the exception, now that this map is generated
+  // from the terms rather than hand-written: twenty of the twenty-one child
+  // keys are also registered top-level fields. Twenty of those twenty agree
+  // about the predicate, so the loop below rewrites them to what they already
+  // said and the order decides nothing.
+  //
+  // `notes` IS THE ONE THAT DISAGREES, and this loop cannot settle it —
+  // `tests/rules/context-collision.test.ts` pins both halves. A `RecordSummary`
+  // carries `cascade:notes` (spec's own spelling, which
+  // `TYPE_PREDICATE_OVERRIDES` forks the writer to) where a health record
+  // carries `health:notes`. One flat term cannot mean both, so whichever way
+  // this falls, the other occurrence expands to a predicate the Turtle does not
+  // write. It falls to `health:notes` because that is what a document's TOP
+  // LEVEL carries, and the nested `notes` inside a `clinicalSummary` or
+  // `wellnessSummary` is left expanding to the wrong property — the same
+  // TTL-carries-it / JSON-LD-loses-it split `NESTED_CHILD_PREDICATES` was added
+  // to close, on the one key it cannot close by adding a term.
+  //
+  // Closing it means saying which occurrence is meant where a flat term cannot:
+  // a local `@context` on the nested node object (JSON-LD 1.0 permits one), or
+  // a term-scoped context (JSON-LD 1.1, which `@version` rules out here). Both
+  // change the shape of the document `toJsonLd` emits, which is a decision
+  // about public output and not one to take while tidying a comment.
+  for (const [key, pred] of Object.entries(NESTED_CHILD_PREDICATES)) {
+    context[key] = pred;
+  }
+
   for (const [key, pred] of Object.entries(PROPERTY_PREDICATES)) {
     // Draft-vocabulary predicates are excluded from the context until v1.0.
     if (DRAFT_CONTEXT_EXCLUDED_PREFIXES.has(curiePrefix(pred))) continue;
@@ -151,6 +240,8 @@ export function getContext(): object {
       context[key] = { '@id': pred, '@type': '@id', '@container': '@list' };
     } else if (iriSetFields.has(key)) {
       context[key] = { '@id': pred, '@type': '@id', '@container': '@set' };
+    } else if (nodeSetFields.has(key)) {
+      context[key] = { '@id': pred, '@container': '@set' };
     } else if (dateTimeFields.has(key)) {
       context[key] = { '@id': pred, '@type': 'xsd:dateTime' };
     } else if (dateOnlyFields.has(key)) {

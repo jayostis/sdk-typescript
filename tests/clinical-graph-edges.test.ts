@@ -164,12 +164,23 @@ describe('clinical v1.10-v1.12 — traversable graph edges', () => {
 // ─── v1.13: four deprecated classes, still readable ─────────────────────────
 
 describe('clinical v1.13 — deprecated classes', () => {
-  it('maps exactly the four deprecated classes to their health: successors', () => {
+  it('maps exactly the deprecated classes to their successors', () => {
+    // Still exhaustive — `toEqual`, not `toMatchObject` — because the claim is
+    // that this table holds these entries AND NO OTHERS: a class listed here is
+    // one `TYPE_MAPPING` must never write, so an entry appearing without the
+    // write side being withdrawn is the failure worth catching.
+    //
+    // `clinical:CoverageRecord` is the fifth, and it is NOT a v1.13 class. It
+    // has been deprecated in favour of `coverage:InsurancePlan` since clinical
+    // v1.5 (`clinical.ttl:187`) and this SDK wrote it anyway until #26, so its
+    // successor is in the coverage vocabulary rather than in health: — which is
+    // why the title no longer says "four" or "health:".
     expect(DEPRECATED_TYPE_ALIASES).toEqual({
       [`${NAMESPACES.clinical}LabResult`]: `${NAMESPACES.health}LabResultRecord`,
       [`${NAMESPACES.clinical}Condition`]: `${NAMESPACES.health}ConditionRecord`,
       [`${NAMESPACES.clinical}Allergy`]: `${NAMESPACES.health}AllergyRecord`,
       [`${NAMESPACES.clinical}Immunization`]: `${NAMESPACES.health}ImmunizationRecord`,
+      [`${NAMESPACES.clinical}CoverageRecord`]: `${NAMESPACES.coverage}InsurancePlan`,
     });
   });
 

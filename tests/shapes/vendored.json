@@ -1,0 +1,6 @@
+{
+  "core.shapes.ttl": { "specPath": "core/v1" },
+  "health.shapes.ttl": { "specPath": "health/v1" },
+  "clinical.shapes.ttl": { "specPath": "clinical/v1" },
+  "coverage.shapes.ttl": { "specPath": "coverage/v1" }
+}

@@ -25,6 +25,15 @@ import {
   TYPE_TO_MAPPING_KEY,
   buildReversePredicateMap,
 } from '../vocabularies/namespaces.js';
+import {
+  DEFAULT_NESTED_PREFIX,
+  blankNodeTermKeys,
+  childPredicateFor,
+  termFor,
+  termSpellings,
+} from '../terms/index.js';
+import type { FieldRule } from '../terms/index.js';
+import { BLANK_NODE_PREDICATE_PREFIXES } from '../serializer/turtle-serializer.js';
 import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
@@ -53,11 +62,6 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   // VitalSign uses clinical: namespace for these predicates
   [`${NAMESPACES.clinical}snomedCode`]: 'snomedCode',
   [`${NAMESPACES.clinical}interpretation`]: 'interpretation',
-  // health v2.7 / clinical v1.15. Unambiguous: the local name belongs to one
-  // field in either namespace. Without it a vital's verbatim source code is
-  // WRITTEN and then dropped on read, which is the same silent loss the
-  // property exists to prevent, moved from the writer to the reader.
-  [`${NAMESPACES.clinical}interpretationSourceCode`]: 'interpretationSourceCode',
 
   // Procedure and Encounter (EHR-imported) use clinical: for predicates
   // that health: records express under the health: namespace. These aliases
@@ -102,9 +106,75 @@ const ADDITIONAL_REVERSE_MAPPINGS: Record<string, string> = {
   [`${NAMESPACES.clinical}vaccineCode`]: 'vaccineCode',
   [`${NAMESPACES.clinical}lotNumber`]: 'lotNumber',
   [`${NAMESPACES.clinical}site`]: 'site',
+
+  // Coverage v1.5. `status` resolves to health:status through
+  // PROPERTY_PREDICATES, so the coverage: spelling needs its own entry or a
+  // plan's status would be written and then dropped on read. Unambiguous: no
+  // other field in this SDK maps to coverage:status.
+  [`${NAMESPACES.coverage}status`]: 'status',
+
+  // Coverage v1.6, the read side of the eight spellings an InsurancePlan is
+  // WRITTEN in (TYPE_PREDICATE_OVERRIDES.InsurancePlan). Every one of them
+  // resolves to a clinical: or health: spelling through PROPERTY_PREDICATES, so
+  // without an entry here a plan's provider name would be written under
+  // coverage: and then dropped on read — the round trip losing the record's
+  // data with the writer looking innocent.
+  //
+  // Both spellings map to the same JSON key, which is what makes a pod written
+  // in the deprecated clinical: form still read back in full. Unambiguous: no
+  // other field in this SDK maps to any of these coverage: URIs.
+  //
+  // `coverage:payorName` is deliberately absent — no such property exists.
+  // A plan's payor is written clinical:payorName, and that URI is already
+  // reachable through PROPERTY_PREDICATES.
+  [`${NAMESPACES.coverage}providerName`]: 'providerName',
+  [`${NAMESPACES.coverage}memberId`]: 'memberId',
+  [`${NAMESPACES.coverage}groupNumber`]: 'groupNumber',
+  [`${NAMESPACES.coverage}planName`]: 'planName',
+  [`${NAMESPACES.coverage}planType`]: 'planType',
+  [`${NAMESPACES.coverage}coverageType`]: 'coverageType',
+  [`${NAMESPACES.coverage}subscriberId`]: 'subscriberId',
+  [`${NAMESPACES.coverage}sourceRecordId`]: 'sourceRecordId',
+
+  // The blank-node children are NOT here. They are generated below, from the
+  // terms that write them.
 };
 
-const REVERSE_PREDICATE_MAP = buildReversePredicateMap(ADDITIONAL_REVERSE_MAPPINGS);
+/**
+ * The blank-node child predicates, expanded to full URIs.
+ *
+ * These resolve a predicate SPELLING to a JSON key, which is why they belong
+ * beside `ADDITIONAL_REVERSE_MAPPINGS` and not in `PROPERTY_PREDICATES` — a
+ * nested key and a top-level key of the same name are two properties, and
+ * registering the child would collapse them into one.
+ *
+ * GENERATED, and that is the point. A child written by hand here is a second
+ * copy of what `childrenOf` derives, and the two drift in the direction that
+ * cannot be seen: `triplesToNestedObject` drops an unresolved predicate at
+ * `if (!key) continue`, so eleven of twelve rebuilds a contact that looks
+ * complete and is not. Generating them also means a spelling nothing writes
+ * cannot be read — `cascade:contactEmail` was hand-mapped here on symmetry,
+ * appears nowhere in spec, and would have come straight back out of the writer
+ * under no domain, no range and no shape.
+ */
+function termReverseMappings(): Record<string, string> {
+  const mappings: Record<string, string> = {};
+  for (const [curie, jsonKey] of Object.entries(termSpellings())) {
+    const colonIdx = curie.indexOf(':');
+    const nsUri = NAMESPACES[curie.slice(0, colonIdx) as keyof typeof NAMESPACES];
+    if (nsUri) mappings[`${nsUri}${curie.slice(colonIdx + 1)}`] = jsonKey;
+  }
+  return mappings;
+}
+
+const REVERSE_PREDICATE_MAP = buildReversePredicateMap({
+  ...termReverseMappings(),
+  // Hand-written entries win. Everything left in that table is a spelling this
+  // SDK READS and never writes, so nothing on the write side could have derived
+  // it: the classes clinical v1.13 deprecated, and the `cascade:` second
+  // spellings core v3.4 obliges readers to accept.
+  ...ADDITIONAL_REVERSE_MAPPINGS,
+});
 
 /**
  * Build a reverse mapping from RDF type URI to record type string.
@@ -157,6 +227,8 @@ const INTEGER_TYPE_FIELDS = new Set([
   'computedAge', 'refillsAllowed', 'supplyDurationDays', 'onsetAge',
   'steps', 'activeMinutes', 'calories', 'awakenings',
   'totalSleepMinutes', 'deepSleepMinutes', 'remSleepMinutes', 'lightSleepMinutes',
+  // Core v3.7: cascade:byteSize, sh:datatype xsd:integer.
+  'byteSize',
 ]);
 
 /** Fields that are numbers (possibly float) */
@@ -172,25 +244,8 @@ const ARRAY_TYPE_FIELDS = new Set([
   'indicationReference', 'parsedIndicationReference', 'linkedCondition',
   // Core v3.4 manifest rdf:List members.
   'provenanceLayers', 'deviceSources', 'interactionScenarios', 'involvedResources',
-]);
-
-/**
- * Code properties whose vocabulary cardinality is `0..*` (health v2.6,
- * clinical v1.14). The serializer writes one repeated-predicate triple per
- * value; this is the reading side of that.
- *
- * ARITY-PRESERVING, and deliberately not a member of {@link ARRAY_TYPE_FIELDS}:
- * one triple reads back as a bare string, N triples read back as an N-element
- * array. Always returning an array would report structure the graph does not
- * carry, and would change what every existing single-coded record deserializes
- * to. Keeping only the first triple, which is what happened before v2.0.0,
- * silently discarded every coding after the first.
- */
-const MULTI_VALUE_CODE_FIELDS = new Set([
-  'testCode',
-  'labCategory',
-  'icd10Code',
-  'snomedCode',
+  // Core v3.7 attachment edge (repeated predicate triples, IRI objects).
+  'hasAttachment',
 ]);
 
 /**
@@ -211,6 +266,42 @@ function stripCascadeQualifier(value: string): string {
   if (value.startsWith(NAMESPACES.cascade)) return value.slice(NAMESPACES.cascade.length);
   if (value.startsWith('cascade:')) return value.slice('cascade:'.length);
   return value;
+}
+
+// ─── Blank Node Identifiers ─────────────────────────────────────────────────
+
+/**
+ * Monotonic counter behind {@link nextBlankNodeId}.
+ *
+ * Blank-node labels only have to be unique within one parse, but they must be
+ * unambiguously so. The previous scheme was
+ * `_:b${Date.now()}${Math.random().toString(36).slice(2, 6)}`, which is not:
+ * two blank nodes created in the same millisecond collide whenever their four
+ * random characters agree. That was survivable while the only inline blank
+ * nodes were `clinicalSummary` and `wellnessSummary`, at most one of each per
+ * subject. Clinical v1.16 makes it load-bearing — an encounter carries several
+ * `clinical:hasParticipant` blank nodes at once, and a collision would merge
+ * two participations into one, silently attributing one clinician's role to
+ * another's name.
+ *
+ * A counter also makes a parse reproducible, so a test can assert on the
+ * reconstructed structure instead of on whatever labels a clock produced.
+ */
+let blankNodeCounter = 0;
+
+/**
+ * Allocate a fresh, collision-free blank-node label.
+ *
+ * @internal Exported for test only. Not re-exported from `src/deserializer/
+ * index.ts` or the package root, so this is not public API. It is exported at
+ * all because the labels never reach a caller — they are consumed while
+ * rebuilding nested objects — so uniqueness cannot be asserted through
+ * `deserialize()`, and a probabilistic scheme's failure mode is a rare flake
+ * rather than a reproducible red.
+ */
+export function nextBlankNodeId(): string {
+  blankNodeCounter += 1;
+  return `_:b${blankNodeCounter}`;
 }
 
 // ─── Turtle Tokenizer / Parser ──────────────────────────────────────────────
@@ -748,7 +839,7 @@ function parseObjectValue(
   if (trimmed.startsWith('[')) {
     // For blank nodes, we store the inner content as the object
     // and parse it recursively
-    const bnodeId = `_:b${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+    const bnodeId = nextBlankNodeId();
     triples.push({
       subject,
       predicate,
@@ -952,41 +1043,261 @@ function acceptedTypeUris(typeUri: string): string[] {
  * Fields whose Turtle object is an inline blank node that must be rebuilt into
  * a nested JSON object rather than reported as a blank-node identifier.
  *
- * Deliberately narrow. The patient-profile sub-structures
- * (`emergencyContact`, `address`, `preferredPharmacy`) are also blank nodes and
- * are NOT reconstructed today; widening this to every blank node is a separate
- * change with its own compatibility question.
+ * Still deliberately narrow — a field is listed because this SDK writes it as
+ * an inline blank node, not because blank nodes are reconstructed in general.
+ * Widening this to EVERY blank node remains a separate change with its own
+ * compatibility question.
+ *
+ * The three patient-profile sub-structures joined the list with #27, in the
+ * same change that made them serialize at all. Their children resolve through
+ * `ADDITIONAL_REVERSE_MAPPINGS`, and the two halves move together: without the
+ * child spellings, a field listed here rebuilds as `{}` — every child dropped
+ * by `triplesToNestedObject`'s `if (!key) continue`, with nothing reported.
  */
-const NESTED_BLANK_NODE_FIELDS = new Set(['clinicalSummary', 'wellnessSummary']);
+const NESTED_BLANK_NODE_FIELDS = new Set([
+  // Derived: a term whose rule is `blankNode` writes one, so the reader must
+  // rebuild one. The two halves were kept in step by hand until now, and the
+  // failure was silent in the direction that matters — a field the writer
+  // nests and the reader does not comes back as the bare string `"_:b1"`.
+  ...blankNodeTermKeys(),
+  // Not yet termed. These stay hand-written until a term claims them, and the
+  // spread above is what makes that migration a deletion rather than an edit.
+  'wellnessSummary',
+]);
+
+/**
+ * Fields whose Turtle object is a REPEATED inline blank node, rebuilt into an
+ * array of nested objects (clinical v1.16 `hasParticipant`).
+ *
+ * Always an array, even for a single participation, because unlike a 0..* code
+ * property this field's TypeScript type is already `EncounterParticipant[]`:
+ * there is no bare form for one value to preserve.
+ */
+const NESTED_BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
 
 /** Rebuild an inline blank node's predicates into a plain nested object. */
+/**
+ * What a nested node's children are written under: the prefix that abbreviates
+ * them, and the rules for the ones its term declares.
+ *
+ * BOTH HALVES ARE NEEDED to answer whether a key round-trips, and each covers a
+ * case the other does not. The prefix answers the ordinary child. The rules
+ * answer a declared child carrying its own `predicate` — `sourceRecordId` on a
+ * `RecordSummary` is `health:sourceRecordId`, deliberately outside the node's
+ * own namespace, and a prefix-only test would refuse it.
+ *
+ * AN UNTERMED FIELD STILL GETS A REAL PREFIX, from the same table the writer
+ * uses. It used to get none, which switched the check off rather than merely
+ * bypassing it, so `wellnessSummary` and `hasParticipant` kept the defect that
+ * the termed path had fixed. `hasParticipant`'s children are `clinical:`, so
+ * defaulting to `cascade:` here would be the corruption rather than a guess at
+ * it.
+ */
+interface NestedContext {
+  prefix: string;
+  children?: Record<string, FieldRule>;
+}
+
+function nestedContextOf(jsonKey: string): NestedContext {
+  const rule = termFor(jsonKey)?.rule;
+  if (rule?.form === 'blankNode') {
+    return { prefix: rule.nestedPrefix ?? DEFAULT_NESTED_PREFIX, children: rule.children };
+  }
+  return { prefix: BLANK_NODE_PREDICATE_PREFIXES[jsonKey] ?? DEFAULT_NESTED_PREFIX };
+}
+
+/**
+ * The key a nested child comes back under.
+ *
+ * ONE RULE: a short key is usable only if the WRITER, asked what it would emit
+ * for that key on this node, gives back the predicate that was read. Otherwise
+ * the key is the full IRI, which `childPredicateFor` writes in angle brackets —
+ * so nothing is dropped either way, and the round trip is exact.
+ *
+ * THE CHECK APPLIES TO THE MAP'S ANSWER TOO, which is the whole correction.
+ * `REVERSE_PREDICATE_MAP` resolves a predicate SPELLING to a JSON key across
+ * the whole SDK, and consulting it first meant any predicate it recognised
+ * skipped the test: `health:notes` inside a `cascade:emergencyContact` node
+ * came back as `notes` and went out as `cascade:notes` — a different property,
+ * under a vocabulary that never declared it, with `@prefix health:` dropped
+ * from the header because nothing referenced it any more. The guard was written
+ * for exactly that and ran only on the branch that did not need it.
+ *
+ * The map is CHECKED, never bypassed. Deleting the lookup also fixes the
+ * corruption and costs far more: an untermed node has no declared children at
+ * all, so the map is the only thing resolving `cascade:domain` to `domain`, and
+ * without it every child of `wellnessSummary` comes back keyed by a full IRI.
+ * `tests/rules/nested-namespace.test.ts` holds both ends of that.
+ *
+ * WRITABILITY IS SEPARATE FROM FIDELITY and both are required. `cascade:odd(name)`
+ * expands to the very predicate it was read from and still does not parse —
+ * `PN_LOCAL` admits far less than an IRI does — so a spelling that round-trips
+ * in principle is rejected unless the writer can actually emit it.
+ */
+function childKeyFor(predicate: string, ctx: NestedContext): string {
+  const candidate = REVERSE_PREDICATE_MAP.get(predicate) ?? localNameOf(predicate);
+  if (!candidate) return predicate;
+
+  const declared = Object.prototype.hasOwnProperty.call(ctx.children ?? {}, candidate)
+    ? ctx.children?.[candidate]
+    : undefined;
+  const spelling = childPredicateFor(candidate, ctx.prefix, declared);
+
+  return isWritable(spelling) && expandSpelling(spelling) === predicate ? candidate : predicate;
+}
+
+/** The local name of a predicate IRI: everything after the last `#` or `/`. */
+function localNameOf(predicate: string): string {
+  return predicate.slice(Math.max(predicate.lastIndexOf('#'), predicate.lastIndexOf('/')) + 1);
+}
+
+/**
+ * A spelling the writer produced, expanded back to the IRI it denotes.
+ *
+ * `undefined` for a prefix no `NAMESPACES` entry covers, which fails the
+ * comparison and sends the key to its full IRI — the safe direction.
+ */
+function expandSpelling(spelling: string): string | undefined {
+  if (spelling.startsWith('<') && spelling.endsWith('>')) return spelling.slice(1, -1);
+  const colon = spelling.indexOf(':');
+  if (colon < 0) return undefined;
+  const ns = (NAMESPACES as Record<string, string>)[spelling.slice(0, colon)];
+  return ns === undefined ? undefined : `${ns}${spelling.slice(colon + 1)}`;
+}
+
+/**
+ * Whether a spelling is one the writer can actually emit as Turtle.
+ *
+ * An angle-bracketed IRI always is. A prefixed name is only as good as its
+ * local part, tested against the same character class `term.ts`'s
+ * `PREFIXED_NAME` uses — the question is what the WRITER accepts, so a name
+ * this admits and the writer refuses would be a round trip that throws instead
+ * of one that parses.
+ */
+function isWritable(spelling: string): boolean {
+  if (spelling.startsWith('<')) return true;
+  const colon = spelling.indexOf(':');
+  return colon > 0 && PN_LOCAL_SAFE.test(spelling.slice(colon + 1));
+}
+
+const PN_LOCAL_SAFE = /^[\w-]+$/;
+
 function triplesToNestedObject(
   bnodeId: string,
   triples: ParsedTriple[],
+  ctx: NestedContext,
 ): Record<string, unknown> {
-  const nested: Record<string, unknown> = {};
+  // Every child triple, collected per key and converted the same way a
+  // top-level one is. Identical to `triplesToRecord`'s loop on purpose: a
+  // child of a blank node is a triple like any other, and the two paths
+  // disagreeing is how a nested enum kept its full URI while the top-level
+  // spelling of the same field came back as a local name.
+  const collected = new Map<string, unknown[]>();
+
   for (const t of triples) {
     if (t.subject !== bnodeId || t.predicate === RDF_TYPE) continue;
-    const key = REVERSE_PREDICATE_MAP.get(t.predicate);
+
+    // AN UNMAPPED CHILD IS RETURNED, under the predicate's local name.
+    //
+    // `REVERSE_PREDICATE_MAP` is generated from the terms' declared `children`,
+    // so a predicate no term declares had no entry and this loop skipped it —
+    // silently, one child at a time, leaving the rest of the node intact. That
+    // was survivable while `childrenOf` dropped the same keys on the way out:
+    // neither side could see them, and neither side could produce one.
+    //
+    // It stopped being survivable when the writer became faithful. A triple
+    // this SDK writes and will not read back means a document it cannot
+    // round-trip, and the loss lands hardest on data it did not author: read a
+    // pod carrying `cascade:wardCount`, change one field, write it back, and
+    // the key is gone from someone else's document with nothing raised
+    // anywhere. Skipping it also LAUNDERS it — the record that comes back
+    // conforms, so `validate()` has nothing left to refuse, which is the
+    // vacuous pass this SDK is least able to detect.
+    //
+    // The local name, because that is the inverse of what the writer did:
+    // `childrenOf` builds a child predicate as `prefix:key` from the JSON key,
+    // so the key is recoverable from the predicate by construction. Two
+    // predicates in different namespaces sharing a local name would collide
+    // into one key — `health:status` and `coverage:status` under one node —
+    // which is a real limit of this reading and not reachable from any
+    // vocabulary the writer emits today, since a node's children are all
+    // written under a single `nestedPrefix`.
+    //
+    // NOT the same reading at TOP LEVEL, where an unmapped predicate is still
+    // skipped (`triplesToRecord`). Every predicate a record carries is a field
+    // name in that namespace, so falling back there would turn any vocabulary
+    // this SDK has not implemented into invented model fields. Here the scope
+    // is one blank node whose children the writer just produced.
+    const key = childKeyFor(t.predicate, ctx);
     if (!key) continue;
-    if (t.objectType === 'boolean') {
-      nested[key] = t.object === 'true';
-    } else if (
-      t.objectType === 'integer' ||
-      t.datatype === `${NAMESPACES.xsd}integer`
-    ) {
-      nested[key] = parseInt(t.object, 10);
-    } else if (
-      t.objectType === 'double' ||
-      t.datatype === `${NAMESPACES.xsd}double` ||
-      t.datatype === `${NAMESPACES.xsd}decimal`
-    ) {
-      nested[key] = parseFloat(t.object);
+
+    const values = collected.get(key);
+    if (values) {
+      values.push(convertObject(t, key));
     } else {
-      nested[key] = t.object;
+      collected.set(key, [convertObject(t, key)]);
     }
   }
+
+  const nested: Record<string, unknown> = {};
+  for (const [key, values] of collected) {
+    nested[key] = values.length === 1 ? values[0] : values;
+  }
   return nested;
+}
+
+/**
+ * One triple's object as the JSON value the model declares for `jsonKey`.
+ *
+ * Lifted out of `triplesToRecord`'s loop so it can be applied PER TRIPLE.
+ * Arity and type are separate questions, and keeping every triple must not cost
+ * the conversions: the old multi-value branch took raw `t.object`, so routing
+ * everything through it returns the string `"true"` where a boolean belongs and
+ * `"5"` where an integer does.
+ */
+function convertObject(triple: ParsedTriple, jsonKey: string): unknown {
+  // dataProvenance: extract local name from cascade namespace
+  if (jsonKey === 'dataProvenance') {
+    const cascadeNs = NAMESPACES.cascade;
+    return triple.object.startsWith(cascadeNs)
+      ? triple.object.slice(cascadeNs.length)
+      : triple.object;
+  }
+
+  // Prefixed enum individuals (e.g. health:sleepQuality health:Good) come
+  // back as the bare local name the model uses.
+  const enumNs = PREFIXED_ENUM_FIELDS[jsonKey];
+  if (enumNs) {
+    return triple.object.startsWith(enumNs) ? triple.object.slice(enumNs.length) : triple.object;
+  }
+
+  if (triple.objectType === 'boolean' || BOOLEAN_FIELDS.has(jsonKey)) {
+    return triple.object === 'true';
+  }
+
+  if (
+    INTEGER_TYPE_FIELDS.has(jsonKey) ||
+    triple.objectType === 'integer' ||
+    triple.datatype === NAMESPACES.xsd + 'integer'
+  ) {
+    return parseInt(triple.object, 10);
+  }
+
+  if (NUMBER_FIELDS.has(jsonKey)) {
+    const num = parseFloat(triple.object);
+    return isNaN(num) ? triple.object : num;
+  }
+
+  if (
+    triple.objectType === 'double' ||
+    triple.datatype === NAMESPACES.xsd + 'double' ||
+    triple.datatype === NAMESPACES.xsd + 'decimal'
+  ) {
+    return parseFloat(triple.object);
+  }
+
+  // A URI keeps its full string, and a plain literal is itself.
+  return triple.object;
 }
 
 /**
@@ -1024,13 +1335,48 @@ function triplesToRecord<T extends CascadeEntity>(
     // per-domain cascade:RecordSummary inline). Reconstructed rather than
     // reported as the bare blank-node identifier, which would silently drop
     // every count the manifest exists to carry.
+    //
+    // EVERY node, not the first. This read used to take `predTriples[0]`, and
+    // `cascade:emergencyContact` is the field where that showed: the shape
+    // declares no `sh:maxCount` for it — a profile may name more than one
+    // person to call — and the writer honours that, so a document this SDK
+    // wrote from two contacts came back as one. What is lost that way cannot be
+    // caught downstream either: `validate()` judges what reached the record, so
+    // a truncated read returns a clean verdict on incomplete data.
+    //
+    // The arity is the graph's, so ONE node stays a bare object rather than
+    // becoming a one-element array. RDF has no "list of one" for a repeated
+    // predicate, and always wrapping would invent structure the document does
+    // not carry — the same reading {@link MultiValue} takes for a 0..* literal,
+    // and what `triplesToNestedObject` already does with a repeated child.
+    // A capped field is not special-cased here: the reader is faithful and
+    // `validate()` is the judge, so two `cascade:address` nodes come back as
+    // two and are REPORTED rather than quietly halved.
     const firstTriple = predTriples[0];
     if (
       NESTED_BLANK_NODE_FIELDS.has(jsonKey) &&
       firstTriple &&
       firstTriple.objectType === 'blankNode'
     ) {
-      record[jsonKey] = triplesToNestedObject(firstTriple.object, triples);
+      const nodes = predTriples
+        .filter((t) => t.objectType === 'blankNode')
+        .map((t) => triplesToNestedObject(t.object, triples, nestedContextOf(jsonKey)));
+      record[jsonKey] = nodes.length === 1 ? nodes[0] : nodes;
+      continue;
+    }
+
+    // Repeated inline blank nodes (clinical v1.16: an encounter's
+    // participations). Each triple carries its own blank-node identifier, so
+    // every participation is rebuilt, not just the first — keeping only the
+    // first is exactly the maxCount-1 loss this class exists to fix.
+    if (
+      NESTED_BLANK_NODE_ARRAY_FIELDS.has(jsonKey) &&
+      firstTriple &&
+      firstTriple.objectType === 'blankNode'
+    ) {
+      record[jsonKey] = predTriples
+        .filter((t) => t.objectType === 'blankNode')
+        .map((t) => triplesToNestedObject(t.object, triples, nestedContextOf(jsonKey)));
       continue;
     }
 
@@ -1055,78 +1401,19 @@ function triplesToRecord<T extends CascadeEntity>(
       continue;
     }
 
-    // 0..* code properties: every triple, arity preserved.
-    if (MULTI_VALUE_CODE_FIELDS.has(jsonKey)) {
-      const values = predTriples.map((t) => t.object);
-      record[jsonKey] = values.length === 1 ? values[0] : values;
-      continue;
-    }
-
-    // Single-value fields use the first triple
-    const triple = predTriples[0];
-    if (!triple) continue;
-
-    // dataProvenance: extract local name from cascade namespace
-    if (jsonKey === 'dataProvenance') {
-      const cascadeNs = NAMESPACES.cascade;
-      if (triple.object.startsWith(cascadeNs)) {
-        record[jsonKey] = triple.object.slice(cascadeNs.length);
-      } else {
-        record[jsonKey] = triple.object;
-      }
-      continue;
-    }
-
-    // Prefixed enum individuals (e.g. health:sleepQuality health:Good) come
-    // back as the bare local name the model uses.
-    const enumNs = PREFIXED_ENUM_FIELDS[jsonKey];
-    if (enumNs) {
-      record[jsonKey] = triple.object.startsWith(enumNs)
-        ? triple.object.slice(enumNs.length)
-        : triple.object;
-      continue;
-    }
-
-    // Boolean fields
-    if (triple.objectType === 'boolean' || BOOLEAN_FIELDS.has(jsonKey)) {
-      record[jsonKey] = triple.object === 'true';
-      continue;
-    }
-
-    // Integer fields
-    if (INTEGER_TYPE_FIELDS.has(jsonKey) || triple.objectType === 'integer' ||
-        triple.datatype === NAMESPACES.xsd + 'integer') {
-      record[jsonKey] = parseInt(triple.object, 10);
-      continue;
-    }
-
-    // Number fields (plain numeric)
-    if (NUMBER_FIELDS.has(jsonKey)) {
-      const num = parseFloat(triple.object);
-      if (!isNaN(num)) {
-        record[jsonKey] = num;
-      } else {
-        record[jsonKey] = triple.object;
-      }
-      continue;
-    }
-
-    // Double/decimal fields
-    if (triple.objectType === 'double' ||
-        triple.datatype === NAMESPACES.xsd + 'double' ||
-        triple.datatype === NAMESPACES.xsd + 'decimal') {
-      record[jsonKey] = parseFloat(triple.object);
-      continue;
-    }
-
-    // URI fields: keep the full URI string
-    if (triple.objectType === 'uri') {
-      record[jsonKey] = triple.object;
-      continue;
-    }
-
-    // Default: string literal
-    record[jsonKey] = triple.object;
+    // EVERY triple, whatever the field's declared cardinality. A reader that
+    // kept the first would hand the validator a record with nothing left to
+    // violate: the document that went in breaks sh:maxCount 1, the record that
+    // comes back conforms, and re-serializing it launders the violation away.
+    // Faithful first, judged second — which is the reasoning MULTI_VALUE_FIELDS
+    // used to carry for two of its nine entries, generalized to all of them.
+    //
+    // Collapsed at one, so a conforming document is unchanged: `MultiValue<T>`
+    // is `T | T[]`, and every field that was on the list already behaved this
+    // way.
+    const values = predTriples.map((t) => convertObject(t, jsonKey));
+    if (values.length === 0) continue;
+    record[jsonKey] = values.length === 1 ? values[0] : values;
   }
 
   return record as T;

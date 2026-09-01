@@ -1,0 +1,6 @@
+{
+  // Per-test Run and Debug from the editor gutter, and a test tree that follows
+  // vitest's own discovery. There is no vitest.config.ts here, so it reads the
+  // defaults; a renamed or moved suite needs no change on this side.
+  "recommendations": ["vitest.explorer"]
+}

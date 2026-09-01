@@ -30,13 +30,13 @@ export interface Procedure extends CascadeRecord {
 
   /**
    * CPT procedure code (e.g., "67228" for retinal photocoagulation).
-   * Maps to `clinical:cptCode` in Turtle serialization.
+   * Maps to `health:cptCode` in Turtle serialization.
    */
   cptCode?: string;
 
   /**
    * Status of the procedure (e.g., "completed", "in-progress").
-   * Maps to `clinical:procedureStatus` in Turtle serialization.
+   * Maps to `health:procedureStatus` in Turtle serialization.
    */
   procedureStatus?: string;
 

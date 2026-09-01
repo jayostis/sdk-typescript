@@ -1,0 +1,26 @@
+// For editors, not for CI.
+//
+// An editor resolves a file against the NEAREST tsconfig.json. The root one
+// includes `src/**/*.ts` and excludes `**/*.test.ts`, because the build emits
+// only src to dist — so nothing under tests/ belonged to any project, and the
+// editor fell back to an inferred one with default options. That project never
+// loads `tests/support/n3.d.ts`, so every file importing `n3` showed "Could not
+// find a declaration file for module 'n3'" while `npm run typecheck` was clean.
+//
+// This exists so that stops. Extending the typecheck config gives the editor
+// exactly the project CI checks; `include` paths from an extended config are
+// resolved against the config that declared them, not this one, so the
+// allow-list there still means what it says.
+//
+// `rootDir` is the one addition, and it is not cosmetic. Unset, it is inferred
+// from where the config sits, so the language service reported every `src/` file
+// as "not under rootDir 'tests'" — trading one spurious error for another. The
+// program genuinely spans src/ and tests/, and the package root is where they
+// meet. `tsc -p` never complained either way, because it is the editor's
+// language service that validates this.
+{
+  "extends": "../tsconfig.typecheck.json",
+  "compilerOptions": {
+    "rootDir": ".."
+  }
+}

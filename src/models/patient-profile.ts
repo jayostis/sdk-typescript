@@ -11,7 +11,13 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import type { CascadeRecord, BiologicalSex, AgeGroup, BloodType } from './common.js';
+import type {
+  CascadeRecord,
+  BiologicalSex,
+  AgeGroup,
+  BloodType,
+  MultiValue,
+} from './common.js';
 
 /**
  * Emergency contact information for a patient.
@@ -79,6 +85,13 @@ export interface Address {
    * Maps to `cascade:addressUse` in Turtle serialization.
    */
   addressUse?: string;
+
+  /**
+   * Address classification: `"postal"`, `"physical"` or `"both"`, constrained
+   * by `sh:in` on `cascade:AddressShape`.
+   * Maps to `cascade:addressType` in Turtle serialization.
+   */
+  addressType?: string;
 }
 
 /**
@@ -180,8 +193,14 @@ export interface PatientProfile extends CascadeRecord {
   /**
    * Emergency contact information.
    * Maps to `cascade:emergencyContact` as a blank node in Turtle serialization.
+   *
+   * ZERO OR MORE, unlike `address` and `preferredPharmacy` beside it:
+   * `cascade:PatientProfileShape` declares an `sh:maxCount 1` for those two and
+   * none for this one, because a patient may name more than one person to call.
+   * One contact in writes one blank node and reads back as a bare object; N
+   * write N and read back as an N-element array.
    */
-  emergencyContact?: EmergencyContact;
+  emergencyContact?: MultiValue<EmergencyContact>;
 
   /**
    * Patient address.

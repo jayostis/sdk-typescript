@@ -19,6 +19,13 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
+import {
+  childPredicateFor,
+  childPredicatesIn,
+  predicateFor,
+  ruleFor,
+  termFor,
+} from '../terms/index.js';
 import type { CascadeEntity } from '../models/common.js';
 import type { Medication } from '../models/medication.js';
 import type { Condition } from '../models/condition.js';
@@ -36,6 +43,27 @@ import type { SleepSnapshot } from '../models/sleep-snapshot.js';
 // ─── Internal Helpers ───────────────────────────────────────────────────────
 
 /**
+ * The nine field spellings an insurance plan is written in.
+ *
+ * Shared by both type names that resolve to `coverage:InsurancePlan`, and
+ * declared here so there is one copy of them rather than one per spelling.
+ */
+const INSURANCE_PLAN_PREDICATES: Record<string, string> = {
+  status: 'coverage:status',
+  // NOT providerName. Its term owns the field and carries the same
+  // per-type spelling in `predicateByType`; `emitField` forks to the term
+  // before it reads this table, so a row here would be dead and
+  // `tests/terms/superseded-overrides.test.ts` refuses one.
+  memberId: 'coverage:memberId',
+  groupNumber: 'coverage:groupNumber',
+  planName: 'coverage:planName',
+  planType: 'coverage:planType',
+  coverageType: 'coverage:coverageType',
+  subscriberId: 'coverage:subscriberId',
+  sourceRecordId: 'coverage:sourceRecordId',
+};
+
+/**
  * Type-specific predicate overrides.
  *
  * When a JSON field name maps to different RDF predicates depending on the
@@ -47,11 +75,17 @@ import type { SleepSnapshot } from '../models/sleep-snapshot.js';
 const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   VitalSign: {
     snomedCode: 'clinical:snomedCode',
-    interpretation: 'clinical:interpretation',
-    // health v2.7 / clinical v1.15: the verbatim escape hatch follows the
-    // property it explains into the clinical: namespace, so a consumer reading
-    // one always finds the other on the same side.
-    interpretationSourceCode: 'clinical:interpretationSourceCode',
+    // NEITHER `interpretation` NOR `interpretationSourceCode` is here: both are
+    // declared by their own term module — `src/terms/interpretation.ts` and
+    // `src/terms/interpretation-source-code.ts` — whose `predicateByType` says
+    // the same thing. `emitField` and `collectPrefixes` both fork on `termFor`
+    // ahead of this table, so a termed key never reaches
+    // `getPredicateForField` — an entry left here would be a second copy of
+    // one fact, unread, and free to drift from the one that is read.
+    //
+    // `tests/terms/superseded-overrides.test.ts` is what keeps that a rule
+    // rather than a habit: it goes red on any field in this table that a term
+    // has since taken over.
   },
   // Core v3.4: the export-manifest classes carry cascade:notes, not the
   // health:notes that health records use. Same JSON key, different predicate.
@@ -75,6 +109,51 @@ const TYPE_PREDICATE_OVERRIDES: Record<string, Record<string, string>> = {
   DailySleepSnapshot: {
     date: 'cascade:date',
   },
+  // An insurance plan is written in the coverage vocabulary, all of it. Each
+  // of these nine keys resolves to a `clinical:` or `health:` spelling through
+  // PROPERTY_PREDICATES, because the same JSON key names a different property
+  // on a different record type — which is exactly what this table is for.
+  //
+  // WHY PER TYPE AND NOT IN PROPERTY_PREDICATES. `sourceRecordId` is carried by
+  // 35 fixtures across other record types and stays `health:sourceRecordId`
+  // for every one of them; a global remap would move all 35. The other eight
+  // are narrower but the reasoning is the same.
+  //
+  // `payorName` IS NOT HERE AND MUST NOT BE. coverage-001 expects
+  // `clinical:payorName` on a `coverage:InsurancePlan` subject: coverage has no
+  // payor property distinct from `coverage:providerName`, which is
+  // `sh:maxCount 1`, so the clinical predicate is the only place a payor
+  // distinct from the provider can go. A blanket "clinical: -> coverage: on a
+  // plan" rewrite passes coverage-002 and -003 and breaks coverage-001.
+  //
+  // `status` is the coverage v1.5 entry these joined: it already resolves to
+  // health:status (a condition's clinical status), so the coverage spelling has
+  // to be selected by record type. Declared for the insurance plan class
+  // ONLY, under both spellings of its type name — coverage:status has
+  // rdfs:domain coverage:InsurancePlan.
+  InsurancePlan: INSURANCE_PLAN_PREDICATES,
+  // The same nine, under the spelling this SDK READS and never writes.
+  //
+  // The two halves of the write are chosen by different tables. The CLASS
+  // comes from `TYPE_TO_MAPPING_KEY`, which maps BOTH spellings to
+  // `insurance` and so to `coverage:InsurancePlan`. The PREDICATES come from
+  // here, keyed on `record.type` verbatim. With a row for only one of the
+  // two, a record still typed `CoverageRecord` was written as a
+  // `coverage:InsurancePlan` whose predicates stayed `clinical:` and
+  // `health:` — and `coverage:InsurancePlanShape` targets the CLASS, so it
+  // matched and reported `sh:minCount` violations on `providerName`,
+  // `memberId` and `coverageType` against a record carrying all three.
+  //
+  // `Coverage['type']` narrows to `InsurancePlan` and does not close this:
+  // the deprecated spelling is still a key of `TYPE_TO_MAPPING_KEY` (kept so
+  // `deserialize()` accepts it), still in `RECOGNIZED_DATA_TYPES` and still a
+  // `case` in `validateRecord`, so JSON off disk and any JavaScript caller
+  // reach `serialize()` with it.
+  //
+  // ONE OBJECT UNDER TWO KEYS, not a copy. A second literal is free to drift
+  // from the first, and the drift is invisible: both spellings still produce
+  // a document that parses, one of them under the wrong vocabulary.
+  CoverageRecord: INSURANCE_PLAN_PREDICATES,
 };
 
 /**
@@ -103,29 +182,48 @@ const URI_FIELDS = new Set([
   'wellnessSummary',
   // Clinical v1.10: the encounter grouping edge. Always an IRI.
   'hasEncounter',
+  // Core v3.7: the attachment edge. Always an IRI —
+  // cascade:HasAttachmentEdgeShape declares sh:nodeKind sh:IRI so the record and
+  // the attachment can live in different files. Listed here as well as in
+  // IRI_ARRAY_FIELDS so that a caller passing a single bare IRI (rather than a
+  // one-element array) still gets a resource, not a quoted literal.
+  'hasAttachment',
 ]);
 
 /**
- * Code properties whose vocabulary cardinality is `0..*` (health v2.6,
- * clinical v1.14): `sh:maxCount 1` was removed because FHIR R4
- * `Observation.category` is 0..* and `CodeableConcept.coding` is 0..*.
+ * String-valued properties whose vocabulary cardinality is `0..*`.
  *
  * Each accepts a bare value or an array, and each value becomes its own
- * repeated-predicate triple in the order given. Never an `rdf:List`: the
- * vocabulary declares no order, and the SHACL shapes count triples.
+ * repeated-predicate triple in the order given. Never an `rdf:List`: none of
+ * these vocabularies declares an order, and the SHACL shapes count triples.
  *
  * Membership is by FIELD NAME rather than by record type, because that is the
  * only thing this serializer knows: `getPredicateForField` resolves the
  * namespace per type (a VitalSign writes `clinical:snomedCode`, a Condition
  * writes `health:snomedCode`), but the cardinality decision is made before any
  * type context is available. Applying it uniformly is also correct: no shape
- * still caps any of these four at one.
+ * caps any member at one.
+ *
+ * Distinct from {@link IRI_ARRAY_FIELDS}, whose values are resources rather
+ * than literals.
  */
-const MULTI_VALUE_CODE_FIELDS = new Set([
+const MULTI_VALUE_FIELDS = new Set([
+  // health v2.6 / clinical v1.14: `sh:maxCount 1` was removed because FHIR R4
+  // `Observation.category` is 0..* and `CodeableConcept.coding` is 0..*.
   'testCode',
   'labCategory',
   'icd10Code',
   'snomedCode',
+  // clinical v1.16. Encounter.reasonCode is 0..*; Encounter.identifier and the
+  // `.identifier` element of every other FHIR resource are 0..*;
+  // DocumentReference.author is 0..*, and the sh:maxCount 1 on
+  // clinical:providerName is what had been discarding every author past the
+  // first. participantRoleCode is 0..* inside a participation blank node and is
+  // listed here so the nested writer resolves its arity the same way.
+  'encounterReason',
+  'businessIdentifier',
+  'documentAuthorName',
+  'participantRoleCode',
 ]);
 
 /**
@@ -151,6 +249,9 @@ const IRI_ARRAY_FIELDS = new Set([
   'indicationReference',
   'parsedIndicationReference',
   'linkedCondition',
+  // Core v3.7: one report legitimately has a PDF and an HTML rendering of the
+  // same content, so the edge repeats. Each value is a cascade:Attachment IRI.
+  'hasAttachment',
 ]);
 
 /**
@@ -184,10 +285,13 @@ const PREFIXED_ENUM_FIELDS: Record<string, string> = {
  * don't contain "date" or "time" as a substring.
  */
 const EXPLICIT_DATETIME_FIELDS = new Set([
+  // The deprecated clinical: pair only. `effectiveStart` / `effectiveEnd` are
+  // in DATE_ONLY_FIELDS below: coverage.ttl:93,99 ranges both xsd:date and
+  // coverage.shapes.ttl:146 declares sh:datatype xsd:date, so the time
+  // component this used to append was a midnight-UTC placeholder the shape
+  // rejects.
   'effectivePeriodStart',
   'effectivePeriodEnd',
-  'effectiveStart',
-  'effectiveEnd',
   // Core v3.4: dcterms:created on an export manifest. Required to be
   // xsd:dateTime by cascade:ExportManifestShape, and the name contains neither
   // "date" nor "time", so the heuristic below would miss it.
@@ -213,17 +317,30 @@ const DATETIME_DATE_TYPES = new Set([
 function isDateTimeField(key: string, recordType?: string): boolean {
   if (EXPLICIT_DATETIME_FIELDS.has(key)) return true;
   const lower = key.toLowerCase();
-  // Specific date-only field
-  if (key === 'dateOfBirth') return false;
+  // Specific date-only fields
+  if (DATE_ONLY_FIELDS.has(key)) return false;
   if (key === 'date') return recordType !== undefined && DATETIME_DATE_TYPES.has(recordType);
   return lower.includes('date') || lower.includes('time');
 }
 
 /**
  * Fields whose values are date-only (no time component) and get ^^xsd:date typing.
+ *
+ * `effectiveStart` / `effectiveEnd` are the coverage v1.6 pair. Both are ranged
+ * `xsd:date` by `coverage.ttl` and declared `sh:datatype xsd:date` by
+ * `coverage:InsurancePlanShape`, and both are `InsurancePlan`-only across every
+ * fixture in the corpus, so listing them by name carries no cross-type risk.
+ * The deprecated `clinical:effectivePeriodStart` / `...End` keep their
+ * `xsd:dateTime` and stay in {@link EXPLICIT_DATETIME_FIELDS}.
  */
+const DATE_ONLY_FIELDS = new Set([
+  'dateOfBirth',
+  'effectiveStart',
+  'effectiveEnd',
+]);
+
 function isDateOnlyField(key: string): boolean {
-  return key === 'dateOfBirth';
+  return DATE_ONLY_FIELDS.has(key);
 }
 
 /**
@@ -248,6 +365,8 @@ const INTEGER_FIELDS = new Set([
   'bloodPressureDays',
   'activityDays',
   'sleepDays',
+  // Core v3.7: cascade:AttachmentShape declares sh:datatype xsd:integer.
+  'byteSize',
 ]);
 
 /**
@@ -255,13 +374,83 @@ const INTEGER_FIELDS = new Set([
  * `rdf:type` the blank node carries.
  */
 const BLANK_NODE_TYPES: Record<string, string> = {
-  emergencyContact: 'cascade:EmergencyContact',
-  address: 'cascade:Address',
-  preferredPharmacy: 'cascade:PharmacyInfo',
+  // The three patient-profile sub-structures are NOT here. `emergencyContact`,
+  // `address` and `preferredPharmacy` are term modules, and `emitField` returns
+  // before this table for a termed key, so a row would be a second copy of a
+  // fact `src/terms/` owns — and the copy that a reader looking for the
+  // `rdf:type` of a contact would find first (#27).
   // Core v3.4: an export manifest carries its per-domain summaries inline.
-  clinicalSummary: 'cascade:RecordSummary',
   wellnessSummary: 'cascade:RecordSummary',
+  // Clinical v1.16: one participation in an encounter.
+  // clinical:EncounterParticipantShape deliberately omits sh:nodeKind sh:IRI
+  // ("requiring an IRI would forbid the blank node a serializer may reasonably
+  // write for a structural sub-node"), so the inline form is conformant.
+  hasParticipant: 'clinical:EncounterParticipant',
 };
+
+/**
+ * Namespace prefix to qualify a blank node's NESTED predicates with, keyed by
+ * the parent field name. Defaults to `cascade` when a field is absent.
+ *
+ * The nested predicates are built from the prefix and the JSON key rather than
+ * looked up in `PROPERTY_PREDICATES`, because the pre-existing patient-profile
+ * sub-structures carry keys that resolve differently at the top level: a
+ * `name` inside an `emergencyContact` is `cascade:name`, while the top-level
+ * `name` is `foaf:name`. A blanket lookup would silently rewrite output that
+ * has been stable since those sub-structures were introduced.
+ */
+export const BLANK_NODE_PREDICATE_PREFIXES: Record<string, string> = {
+  hasParticipant: 'clinical',
+};
+
+/**
+ * Fields whose value is an ARRAY of nested objects, each serialized as its own
+ * blank node under a repeated predicate.
+ *
+ * Distinct from the single-object blank nodes above: `clinical:hasParticipant`
+ * is 0..* because a visit routinely carries an attender, a referrer and an
+ * authorizing physician at once, and which of them actually saw the patient is
+ * only answerable if all of them are kept with their roles attached.
+ */
+const BLANK_NODE_ARRAY_FIELDS = new Set(['hasParticipant']);
+
+/**
+ * Every table above that is keyed by JSON FIELD NAME, under its own name.
+ *
+ * The tables are module-private and stay that way; this aggregate exists so one
+ * invariant can be asserted across all of them at once — a name in any of them
+ * is a key of `PROPERTY_PREDICATES`. It is not part of the package's public
+ * surface: `src/serializer/index.ts` and `src/index.ts` both re-export by name,
+ * so nothing outside this repo can reach it.
+ *
+ * A table added above and left out here is unchecked, which is the one way this
+ * can be wrong without anything saying so.
+ *
+ * `TYPE_PREDICATE_OVERRIDES` and `DATETIME_DATE_TYPES` are absent on purpose:
+ * their keys are record types, not field names.
+ */
+export const SERIALIZER_FIELD_TABLES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  URI_FIELDS: [...URI_FIELDS],
+  MULTI_VALUE_FIELDS: [...MULTI_VALUE_FIELDS],
+  ARRAY_FIELDS: [...ARRAY_FIELDS],
+  IRI_ARRAY_FIELDS: [...IRI_ARRAY_FIELDS],
+  IRI_LIST_FIELDS: [...IRI_LIST_FIELDS],
+  PREFIXED_ENUM_FIELDS: Object.keys(PREFIXED_ENUM_FIELDS),
+  EXPLICIT_DATETIME_FIELDS: [...EXPLICIT_DATETIME_FIELDS],
+  DATE_ONLY_FIELDS: [...DATE_ONLY_FIELDS],
+  INTEGER_FIELDS: [...INTEGER_FIELDS],
+  BLANK_NODE_TYPES: Object.keys(BLANK_NODE_TYPES),
+  BLANK_NODE_PREDICATE_PREFIXES: Object.keys(BLANK_NODE_PREDICATE_PREFIXES),
+  BLANK_NODE_ARRAY_FIELDS: [...BLANK_NODE_ARRAY_FIELDS],
+  // Keyed by record type rather than by field, so the FIELD names are what is
+  // published — flattened and deduplicated. That makes it answerable by the
+  // same "is this a registered predicate" check as every table above, and by
+  // the one this table needs and they do not: is the field TERMED, in which
+  // case its row here is never read.
+  TYPE_PREDICATE_OVERRIDES: [
+    ...new Set(Object.values(TYPE_PREDICATE_OVERRIDES).flatMap((byField) => Object.keys(byField))),
+  ],
+});
 
 /**
  * Fields that are boolean and should be serialized unquoted.
@@ -297,11 +486,36 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
   for (const [key, value] of Object.entries(record)) {
     if (key === 'id' || key === 'type' || value === undefined || value === null) continue;
 
-    const pred = getPredicateForField(key, record.type);
-    if (pred) {
-      const nsPrefix = pred.split(':')[0];
-      if (nsPrefix && nsPrefix in NAMESPACES) {
-        prefixes.set(nsPrefix, NAMESPACES[nsPrefix as keyof typeof NAMESPACES]);
+    // The same fork `emitField` takes at the write step, and it has to be
+    // taken here too. A term resolves its own predicate out of `predicate` /
+    // `predicateByType`, so asking `getPredicateForField` for a TERMED field is
+    // a second, independent answer to "which namespace does this field write
+    // under" — and the two answers decide different halves of one document.
+    // This one picks the `@prefix` lines the header declares; the other picks
+    // what the subject block writes.
+    //
+    // Harmless while they agree, which they do for every term shipped today.
+    // It stops being harmless at the first term that re-prefixes a field per
+    // type — the shape every `TYPE_PREDICATE_OVERRIDES` entry already has, e.g.
+    // `snomedCode` under `clinical:` on a VitalSign. Resolved the old way, the
+    // header would declare `health:` and the subject block would write
+    // `clinical:snomedCode` under a prefix that was never declared. That is not
+    // a wrong triple: it is a document that does not parse, and it fails on the
+    // whole record rather than on the field.
+    const term = termFor(key);
+    const pred = term ? predicateFor(term, record.type) : getPredicateForField(key, record.type);
+    if (pred) addPrefixForPredicate(pred, prefixes);
+
+    // A blank node's CHILD predicates, which can now leave the node's own
+    // namespace: a `cascade:RecordSummary` inherits `sourceRecordId` from
+    // `CascadeEntity` and writes it `health:sourceRecordId` inside a node
+    // written under `cascade:`. The loop above sees only the top-level field,
+    // and the same reasoning that put `predicateFor` here applies one level
+    // down — the header is decided here and the triple is written by
+    // `childrenOf`, so both have to be asked the same question.
+    if (term) {
+      for (const childPred of childPredicatesIn(ruleFor(term, record.type), value)) {
+        addPrefixForPredicate(childPred, prefixes);
       }
     }
 
@@ -323,6 +537,21 @@ function collectPrefixes(record: CascadeEntity): Map<string, string> {
   }
 
   return prefixes;
+}
+
+/**
+ * Declare the namespace of a `prefix:localName` predicate.
+ *
+ * A no-op for an absolute-IRI predicate — `<https://other.example.org/ns#wardCount>`
+ * carries its own namespace and needs no `@prefix` line — and for a prefix
+ * `NAMESPACES` does not declare, which is unwritable rather than undeclared and
+ * is refused where it is written, not here.
+ */
+function addPrefixForPredicate(predicate: string, prefixes: Map<string, string>): void {
+  const nsPrefix = predicate.split(':')[0];
+  if (nsPrefix && nsPrefix in NAMESPACES) {
+    prefixes.set(nsPrefix, NAMESPACES[nsPrefix as keyof typeof NAMESPACES]);
+  }
 }
 
 function addPrefixForUri(uri: string, prefixes: Map<string, string>): void {
@@ -364,8 +593,23 @@ function sortedPrefixes(prefixes: Map<string, string>): [string, string][] {
  * Dispatches based on the `type` field of the record. The output matches
  * the conformance fixture expected Turtle format.
  *
+ * **This writer is FAITHFUL, never a gate.** It writes what it is given —
+ * including data the shapes reject. A field capped at `sh:maxCount 1` and handed
+ * two values gets two triples, because a shape can only judge what reached the
+ * graph: a writer that dropped the second would hand the validator a record with
+ * nothing left to violate, and a clean verdict on incomplete data is the failure
+ * this SDK is least able to detect. Cardinality and value sets belong to
+ * {@link validate}. `conformance/fixtures/lab-013.json` exists to be written and
+ * then rejected, and a writer that refused it could not produce it at all.
+ *
+ * It still refuses to INVENT. A value with no expressible form — a scalar where
+ * a rule declares a blank node, a nested array — throws naming the field, since
+ * writing nothing is silent loss and writing something is fabrication. That is a
+ * different question from whether the data is valid.
+ *
  * @param record - Any CascadeRecord (Medication, Condition, VitalSign, etc.)
  * @returns A complete Turtle document string
+ * @throws when a value has no serializable form, or the record type is unknown
  */
 export function serialize(record: CascadeEntity): string {
   return serializeRecord(record);
@@ -421,6 +665,20 @@ function serializeRecord(record: CascadeEntity): string {
     if (value === undefined || value === null) return;
     if (key === 'id' || key === 'type') return;
 
+    // A term module owns this field's predicate and rule, so it writes it and
+    // the type-driven chain below never sees it. Placed AFTER the three guards
+    // above rather than at the top of the function: jumping them would leave a
+    // termed field out of `emitted` and run `outputsFor` on an absent value.
+    //
+    // `termFor` is undefined for every field no module claims, which is all of
+    // them but one — so this fork's job is to RETURN CONTROL, and everything
+    // below is reached exactly as often as it is today.
+    const term = termFor(key);
+    if (term) {
+      sub.addAll(term.outputsFor(rec));
+      return;
+    }
+
     const pred = getPredicateForField(key, record.type);
     if (!pred) return;
 
@@ -456,52 +714,41 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
+    // Repeated blank nodes, one per nested object (clinical v1.16
+    // hasParticipant). Checked BEFORE the generic array handling below, which
+    // would otherwise stringify each object into a literal.
+    if (BLANK_NODE_ARRAY_FIELDS.has(key) && Array.isArray(value)) {
+      for (const item of value) {
+        if (item === undefined || item === null || typeof item !== 'object') continue;
+        serializeBlankNode(sub, pred, key, item as Record<string, unknown>);
+      }
+      return;
+    }
+
     // 0..* code properties (health v2.6, clinical v1.14). One triple per value,
     // in the order given, whether the caller passed a bare value or an array.
     // Object form (URI reference vs literal) is unchanged from the single-value
     // case, so a record carrying one code serializes byte-identically to before.
-    if (MULTI_VALUE_CODE_FIELDS.has(key) && (typeof value === 'string' || Array.isArray(value))) {
-      const values = (Array.isArray(value) ? value : [value]).filter(
-        (item): item is string => typeof item === 'string',
-      );
-      if (values.length === 0) return;
-      for (const item of values) {
-        if (URI_FIELDS.has(key)) {
+    //
+    // NO FILTER. `typeof item === 'string'` stood here and dropped every other
+    // member with no error, while the generic loop below — which this branch
+    // exists only to precede, for the URI form — would have written them. The
+    // reader's `convertObject` types a `"5"^^xsd:integer` object as a number,
+    // so `snomedCode: ["abc", 5]` is a shape a real graph hands back, and one
+    // triple went out where two came in.
+    if (MULTI_VALUE_FIELDS.has(key) && (typeof value === 'string' || Array.isArray(value))) {
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (item === undefined || item === null) continue;
+        if (typeof item !== 'string') {
+          // Form is `emitMember`'s question, and it throws for a member no
+          // branch can write rather than losing it.
+          emitMember(key, pred, item);
+        } else if (URI_FIELDS.has(key)) {
           sub.uri(pred, item);
         } else {
           sub.literal(pred, item);
         }
       }
-      return;
-    }
-
-    // Boolean fields
-    if (isBooleanField(key, value)) {
-      sub.boolean(pred, value as boolean);
-      return;
-    }
-
-    // Integer fields
-    if (INTEGER_FIELDS.has(key) && typeof value === 'number') {
-      sub.integer(pred, value);
-      return;
-    }
-
-    // Number fields (plain, untyped literals like clinical:value,
-    // referenceRangeLow, health:steps, health:durationHours). RDF 1.1 already
-    // types a bare 8432 as xsd:integer and a bare 7.4 as xsd:decimal.
-    if (typeof value === 'number') {
-      if (Number.isInteger(value)) {
-        sub.number(pred, value);
-      } else {
-        sub.decimal(pred, value);
-      }
-      return;
-    }
-
-    // URI fields
-    if (URI_FIELDS.has(key) && typeof value === 'string') {
-      sub.uri(pred, value);
       return;
     }
 
@@ -520,13 +767,61 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
-    // Date-only fields
+    // Everything left is written MEMBER BY MEMBER — one triple per value, in
+    // the order given, whether the caller passed a scalar or an array.
+    //
+    // The mirror of the reader's `convertObject`. Arity and form are separate
+    // questions: the branches above decide the shape of the FIELD (an rdf:List,
+    // a set of blank nodes), and `emitMember` decides the form of one VALUE.
+    // Keeping them apart is what lets a repeated predicate come back off the
+    // graph and go straight out again — a document carrying two health:reaction
+    // triples is read as two values and written as two triples, where a writer
+    // that only understood scalars had to drop one or refuse the record.
+    for (const member of Array.isArray(value) ? value : [value]) {
+      if (member === undefined || member === null) continue;
+      emitMember(key, pred, member);
+    }
+  };
+
+  /**
+   * One value of a field, in whatever form its type calls for.
+   *
+   * Every branch here is about the VALUE, never the field's arity, which is why
+   * the same function serves a scalar and each member of an array.
+   */
+  const emitMember = (key: string, pred: string, value: unknown): void => {
+    if (isBooleanField(key, value)) {
+      sub.boolean(pred, value as boolean);
+      return;
+    }
+
+    if (INTEGER_FIELDS.has(key) && typeof value === 'number') {
+      sub.integer(pred, value);
+      return;
+    }
+
+    // Plain, untyped numeric literals (clinical:value, referenceRangeLow,
+    // health:steps). RDF 1.1 types a bare 8432 as xsd:integer and 7.4 as
+    // xsd:decimal.
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) {
+        sub.number(pred, value);
+      } else {
+        sub.decimal(pred, value);
+      }
+      return;
+    }
+
+    if (URI_FIELDS.has(key) && typeof value === 'string') {
+      sub.uri(pred, value);
+      return;
+    }
+
     if (isDateOnlyField(key) && typeof value === 'string') {
       sub.date(pred, value);
       return;
     }
 
-    // DateTime fields
     if (isDateTimeField(key, record.type) && typeof value === 'string') {
       sub.dateTime(pred, value);
       return;
@@ -539,11 +834,21 @@ function serializeRecord(record: CascadeEntity): string {
       return;
     }
 
-    // Default: string literal
     if (typeof value === 'string') {
       sub.literal(pred, value);
       return;
     }
+
+    // A member no branch above claims — a nested array, a symbol, a function.
+    // #15's throw stood here and named the whole FIELD, on the reasoning that a
+    // value written nowhere is worse than an error. That reasoning is kept and
+    // narrowed: an array is no longer unwritable, so what remains is a single
+    // value with no form, and the error says which one rather than condemning
+    // the field it sits in.
+    throw new Error(
+      `No serialization rule for ${Array.isArray(value) ? 'a nested array' : `a ${typeof value}`} ` +
+        `in '${key}' (predicate ${pred})`,
+    );
   };
 
   // Emit all fields in the order they appear in the object
@@ -565,6 +870,7 @@ function serializeBlankNode(
   obj: Record<string, unknown>,
 ): void {
   const bnodeType = BLANK_NODE_TYPES[key];
+  const nsPrefix = BLANK_NODE_PREDICATE_PREFIXES[key] ?? 'cascade';
 
   sub.blankNode(predicate, (b) => {
     if (bnodeType) {
@@ -572,26 +878,77 @@ function serializeBlankNode(
     }
     for (const [k, v] of Object.entries(obj)) {
       if (v === undefined || v === null) continue;
-      // Nested fields are `type`-free sub-structures under the cascade: vocabulary.
+      // Nested fields are `type`-free sub-structures under one vocabulary.
       if (k === 'type' || k === 'id') continue;
-      const nestedPred = `cascade:${k}`;
-      if (INTEGER_FIELDS.has(k) && typeof v === 'number') {
-        b.integer(nestedPred, v);
-        continue;
-      }
-      if (typeof v === 'string') {
-        b.literal(nestedPred, v);
-      } else if (typeof v === 'boolean') {
-        b.boolean(nestedPred, v);
-      } else if (typeof v === 'number') {
-        if (Number.isInteger(v)) {
-          b.number(nestedPred, v);
-        } else {
-          b.decimal(nestedPred, v);
-        }
+      // Through the term module's spelling, not `${nsPrefix}:${k}` inline. This
+      // is the UNTERMED nested path — `wellnessSummary`, `hasParticipant` —
+      // and it takes children from the same faithful reader the termed path
+      // does, including the absolute-IRI keys `recoverableChildKey` returns for
+      // a predicate from another namespace. Abbreviated under this node's
+      // prefix those produced `cascade:https://other.example.org/ns#wardCount`,
+      // which is not a document a parser will take back. Undeclared, because
+      // an untermed node has vouched for no child.
+      const nestedPred = childPredicateFor(k, nsPrefix);
+
+      // MEMBER BY MEMBER, the same split the top-level writer makes: this loop
+      // decides the child's ARITY and `emitNestedMember` decides one value's
+      // FORM.
+      //
+      // A `MULTI_VALUE_FIELDS` branch stood here instead, and it was the only
+      // thing on this path that understood an array at all. That was in step
+      // with the old reader, which returned an array for a declared 0..* child
+      // and a scalar for everything else. It is not in step with the faithful
+      // one: `triplesToNestedObject` returns an array for ANY repeated child
+      // now, so a second `cascade:domain` on a `wellnessSummary` came back
+      // correctly, matched no branch, and was written NOWHERE — both triples
+      // gone, and `validate()` clean on what was left. That vacuous pass is the
+      // failure mode this SDK is least able to detect, and it was open on the
+      // one nesting path no term covers.
+      for (const member of Array.isArray(v) ? v : [v]) {
+        if (member === undefined || member === null) continue;
+        emitNestedMember(b, nestedPred, k, member);
       }
     }
   });
+}
+
+/**
+ * One value of a nested child, in whatever form its type calls for.
+ *
+ * The blank-node counterpart of `emitMember`, and deliberately never asked
+ * about arity — see the loop that calls it.
+ *
+ * A member no branch claims is SKIPPED rather than thrown on, which is the one
+ * place this path still differs from the top-level writer. Nothing reaches it
+ * today: the reader produces strings, numbers and booleans for a nested child,
+ * and the only other shape is an object, which would be a second level of
+ * nesting no term declares and no reader reconstructs. Left as it was because
+ * changing it is a decision about what `serialize()` REFUSES, which is a
+ * separate question from what it drops.
+ */
+function emitNestedMember(
+  b: SubjectBuilder,
+  predicate: string,
+  key: string,
+  value: unknown,
+): void {
+  if (typeof value === 'string') {
+    b.literal(predicate, value);
+    return;
+  }
+  if (typeof value === 'boolean') {
+    b.boolean(predicate, value);
+    return;
+  }
+  if (typeof value === 'number') {
+    if (INTEGER_FIELDS.has(key)) {
+      b.integer(predicate, value);
+    } else if (Number.isInteger(value)) {
+      b.number(predicate, value);
+    } else {
+      b.decimal(predicate, value);
+    }
+  }
 }
 
 // ─── Type-Specific Serializers ──────────────────────────────────────────────

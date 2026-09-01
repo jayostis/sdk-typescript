@@ -98,7 +98,7 @@ function makeImmunization(overrides: Partial<Immunization> = {}): Immunization {
 function makeCoverage(overrides: Partial<Coverage> = {}): Coverage {
   return {
     id: 'urn:uuid:test-cov-1',
-    type: 'CoverageRecord',
+    type: 'InsurancePlan',
     dataProvenance: 'ClinicalGenerated',
     schemaVersion: '1.3',
     providerName: 'Blue Cross',
@@ -510,7 +510,7 @@ describe('Pod Builder', () => {
       const files = builder.build();
 
       const covFile = findFile(files, 'clinical/insurance.ttl');
-      expect(covFile.content).toContain('clinical:CoverageRecord');
+      expect(covFile.content).toContain('coverage:InsurancePlan');
       expect(covFile.content).toContain('Blue Cross');
     });
 

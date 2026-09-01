@@ -127,7 +127,7 @@ function makeFamilyHistory(provenance: ProvenanceType = 'SelfReported'): FamilyH
 function makeCoverage(provenance: ProvenanceType = 'ClinicalGenerated'): Coverage {
   return {
     id: nextId(),
-    type: 'CoverageRecord',
+    type: 'InsurancePlan',
     dataProvenance: provenance,
     schemaVersion: '1.3',
     providerName: 'Blue Cross Blue Shield',

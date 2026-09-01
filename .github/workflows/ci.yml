@@ -2,7 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Integration branches too, not only main. A merge into epic/** is a push to
+    # a non-main branch, so nothing ran on it: #9 and #17 were both checked as
+    # pull requests and the branch they landed on was never tested as a whole.
+    #
+    # Takes effect immediately once merged — a push trigger is read from the
+    # workflow file on the branch being pushed, unlike workflow_dispatch, which
+    # is only offered from the default branch.
+    branches: [main, 'epic/**']
   pull_request:
 
 permissions:
@@ -28,10 +35,19 @@ jobs:
       # be a SIBLING of this checkout rather than a subdirectory. Note the failure
       # mode if this step is removed: readdirSync throws at collection time, so the
       # run fails loudly rather than quietly skipping the fixture-backed tests.
+      # TEMPORARY: points at the FORK, not the-cascade-protocol/conformance.
+      # The fixtures this SDK is being written against are ahead of the org:
+      # jayostis/conformance#1 retyped coverage-001 from clinical:CoverageRecord
+      # to coverage:InsurancePlan, and sdk-typescript#26 asserts the new spelling.
+      # Against the org's copy that assertion fails on a fixture that is correct
+      # locally, so CI would go red for a reason that is not about this code.
+      # REVERT to the-cascade-protocol/conformance once the fork is merged
+      # upstream — until then CI does not tell us whether this SDK still works
+      # against what everyone else has.
       - name: Check out conformance as a sibling
         uses: actions/checkout@v4
         with:
-          repository: the-cascade-protocol/conformance
+          repository: jayostis/conformance
           path: conformance
 
       - name: Set up Node ${{ matrix.node-version }}
@@ -63,3 +79,53 @@ jobs:
       - name: Test
         working-directory: sdk-typescript
         run: npm test
+
+  # Separate from the `test` matrix on purpose. The vendored shapes are one set
+  # of bytes, so the answer cannot depend on the Node version, and running this
+  # per matrix leg would only clone `spec` twice.
+  #
+  # This is the ONLY job that checks out `spec`. The `test` job deliberately
+  # does not have it — that is why the shapes are vendored at all (see
+  # tests/shapes/README.md), and this job is what stops the copies going stale
+  # while the SHACL suite asserts last month's constraints and stays green.
+  shapes-drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out sdk-typescript
+        uses: actions/checkout@v4
+        with:
+          path: sdk-typescript
+
+      # A SIBLING of the checkout, which is where check-shapes-drift.mjs looks
+      # by default. CASCADE_SPEC_DIR would override it; there is nothing to
+      # override here.
+      #
+      # TEMPORARY: points at the FORK, for the same reason as the conformance
+      # checkout above and on the same terms — REVERT to
+      # the-cascade-protocol/spec once the fork is merged upstream.
+      # Note this currently changes NOTHING: jayostis/spec main is level with
+      # the org at 9b13ae4. The shape work for clinical:CoverageRecord is on
+      # feat/6-7-8-9-coverage-deprecation and takes effect here only once that
+      # branch merges to the fork's main. Changed now so both siblings are
+      # consistent and spec starts working on merge rather than needing this
+      # edit again.
+      - name: Check out spec as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: jayostis/spec
+          path: spec
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      # No `npm ci`: check-shapes-drift.mjs imports node:fs, node:path and
+      # node:url only. Exit 1 is drift — re-sync with
+      # `bash scripts/sync-shapes-from-spec.sh`. Exit 2 is "cannot check", an
+      # infrastructure fault rather than a stale copy; the two are kept distinct
+      # so a red run here says which one happened.
+      - name: Check vendored shapes against spec
+        working-directory: sdk-typescript
+        run: npm run check:shapes-drift
