@@ -26,6 +26,8 @@
     "src/**/*.ts",
     "tests/validator/entity-validator-registry.test.ts",
     "tests/public-surface.test.ts",
+    "tests/no-runtime-deps.ts",
+    "tests/no-runtime-deps.test.ts",
     "tests/vocab-2026-08-train.test.ts",
     "tests/conformance/absent.test.ts",
     "tests/conformance/lab.test.ts",
