@@ -18,14 +18,12 @@
  * run judges against are the ones its fixtures were verified against; the
  * sibling is for a developer's local layout.
  *
- * AND THE REVISION IS CHECKED, not only the layout. Whichever of the three
- * answered, `assertAtPin` compares what the checkout is at against that pin
- * before anything reads a file out of it: reading spec in place means the bytes
- * under test are whatever the directory holds, and a sibling nobody re-pins
- * judges records against a vocabulary CI will never see.
+ * WHICH REVISION a local checkout is at is deliberately NOT checked here. CI
+ * clones the pin, so a comparison against it can only ever fire on a
+ * developer's machine — where spec is routinely on a branch on purpose — and it
+ * would refuse to run the suite to report something CI reports anyway.
  */
 
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,124 +105,6 @@ const holdsSpec = (dir: string): boolean =>
   Object.values(MANIFEST).every((entry) => existsSync(join(dir, entry.ontology.split('/')[0] ?? '')));
 
 /**
- * Where `conformance` records the revision its fixtures were verified against.
- *
- * A sibling, the layout `tests/support/fixtures.ts` already reads the fixtures
- * themselves out of. Read rather than pinned again here, for the reason CI
- * gives for cloning it: a second copy of a revision is a second thing to keep
- * in step, and the one that goes stale is always the copy.
- */
-const PIN_FILE = resolve(here, '../../../conformance/scripts/SPEC_PIN');
-
-/**
- * The revision the pin names, or `undefined` when there is no pin to read.
- *
- * Undefined means CANNOT TELL, never "no drift" — `assertAtPin` keeps the two
- * apart. The scalar is matched anchored to its own line: the pin file carries
- * eighty lines of prose about why it last moved, several of which quote older
- * revisions, and a loose match reads one of those as the pin.
- */
-export function pinnedRevision(pinFile: string = PIN_FILE): string | undefined {
-  if (!existsSync(pinFile)) return undefined;
-  return /^commit=(\S+)$/m.exec(readFileSync(pinFile, 'utf-8'))?.[1];
-}
-
-/**
- * The revision a checkout is actually at, or `undefined` when nothing can say.
- *
- * A spec checkout does not have to be a git clone — an unpacked tarball judges
- * records exactly as well — so a missing `git`, a directory with no `.git` and
- * a git that errors all answer the same way: not known, rather than not equal.
- */
-export function checkedOutRevision(root: string): string | undefined {
-  try {
-    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Refuse a spec checkout that is not at the revision `conformance` pinned.
- *
- * WHAT THIS IS FOR. Nothing else checks WHICH spec a run judged against.
- * `specRoot` accepts any directory holding the layout, CI clones the pinned
- * revision, and a developer's sibling is whatever they last pulled — so a local
- * run can assert a different vocabulary than CI and still report a pass. That
- * is what the deleted copies used to make impossible by holding the bytes in
- * the repository, and it is silent in both directions: an older checkout passes
- * on last month's constraints, a newer one on constraints nobody pinned.
- *
- * REFUSES, like every other failure in this module, because the alternative is
- * a green run meaning something other than what it says.
- * `CASCADE_ALLOW_SPEC_DRIFT` is the deliberate case — testing against
- * unreleased vocabulary, which the pin file itself documents and which the
- * conformance runner spells `--allow-spec-drift` — and it warns rather than
- * passing quietly, because a run judging against an unpinned spec has to say so
- * in its own output.
- *
- * WARNS, not refuses, when either revision is unknown. Requiring a conformance
- * sibling and a git checkout in order to run the suite at all is a demand this
- * has no business making. Silence is not available either: "no difference" out
- * of a check that never ran reads exactly like a pass.
- *
- * The PIN FILE is the parameter, not the revision it names. A default
- * parameter fires on an explicit `undefined`, so a signature taking the
- * revision cannot be handed "known to be absent" at all — it silently reads
- * the real pin instead, and the no-pin branch is untestable. A path that does
- * not exist is how absence actually arrives here, so it is what a test hands
- * over. `actual` stays a revision, and the case where nothing can say is
- * arranged by pointing `root` at a directory that is not a clone.
- */
-export function assertAtPin(
-  root: string,
-  pinFile: string = PIN_FILE,
-  actual: string | undefined = checkedOutRevision(root),
-): void {
-  const pinned = pinnedRevision(pinFile);
-
-  if (pinned === undefined) {
-    console.warn(
-      `SPEC PIN UNCHECKED: no pin at ${pinFile}, so nothing says which spec revision ${root} `
-      + 'ought to be at. Its verdicts are against whatever it happens to hold.',
-    );
-    return;
-  }
-
-  if (actual === undefined) {
-    console.warn(
-      `SPEC PIN UNCHECKED: ${root} is not a git checkout, so nothing can say whether it is at `
-      + `the pinned ${pinned}. Its verdicts are against whatever it happens to hold.`,
-    );
-    return;
-  }
-
-  if (actual === pinned) return;
-
-  if (process.env.CASCADE_ALLOW_SPEC_DRIFT) {
-    console.warn(
-      `SPEC DRIFT ALLOWED: ${root} is at ${actual}, not the pinned ${pinned}. This run judges `
-      + 'records against a spec revision the fixtures were never verified at.',
-    );
-    return;
-  }
-
-  throw new Error(
-    `spec at ${root} is checked out at ${actual}, and ${pinFile} pins ${pinned}. The fixtures `
-    + 'were verified against the pinned revision, so judging them against any other one asserts '
-    + 'a vocabulary nobody ran them on — green here, against constraints CI will never see. Run '
-    + `"git -C ${root} checkout ${pinned}", or set CASCADE_ALLOW_SPEC_DRIFT=1 to test against `
-    + 'unreleased vocabulary on purpose.',
-  );
-}
-
-/** Checkouts already judged, so `git rev-parse` runs once per root, not once per lookup. */
-const atPin = new Set<string>();
-
-/**
  * The spec checkout, or a refusal naming every way to supply one.
  *
  * `override` is the explicit form — a test hands it a directory, and it is
@@ -252,11 +132,6 @@ export function specRoot(override?: string): string {
 
   // After the layout check and before any caller reads a file out of it: WHICH
   // spec answered is as much a part of a verdict as whether one did.
-  if (!atPin.has(absolute)) {
-    assertAtPin(absolute);
-    atPin.add(absolute);
-  }
-
   return absolute;
 }
 

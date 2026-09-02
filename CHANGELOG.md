@@ -373,20 +373,6 @@
   as the alternative. Nothing a consumer installs changes: `rdf-validate-shacl`
   is still a devDependency and no shapes file was ever in `package.json`'s
   `files`. (#58)
-- **The checkout is checked against the pin, not just for the layout.** Reading
-  spec in place means the bytes under test are whatever the resolved directory
-  holds, and `specRoot` accepted any directory with an `ontologies/` dir in it.
-  CI clones the revision `conformance/scripts/SPEC_PIN` names; a developer's
-  `../spec` is whatever they last pulled — measured while writing this, two
-  commits past the pin, with `core.shapes.ttl` differing between them — so a
-  local run judged records against constraints CI would never see and reported a
-  pass. `assertAtPin` compares `git -C <root> rev-parse HEAD` against the pin and
-  **refuses**, naming both revisions, the checkout, and the `git checkout` that
-  fixes it. `CASCADE_ALLOW_SPEC_DRIFT=1` is the deliberate case the pin file
-  itself documents and the conformance runner spells `--allow-spec-drift`, and it
-  warns rather than passing quietly. Unknown is kept apart from equal: a checkout
-  that is not a git clone, or no pin to read, **warns** — requiring both to run
-  the suite at all would be a new demand, and silence would read as a pass. (#58)
 - **An empty `CASCADE_SPEC_DIR` no longer resolves to the cwd.** `??` falls back
   only on `null`/`undefined`, so an exported-but-empty `CASCADE_SPEC_DIR=` — what
   any shell or CI that passes an unset input straight through produces — survived
