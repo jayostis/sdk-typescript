@@ -49,6 +49,29 @@ jobs:
           repository: the-cascade-protocol/conformance
           path: conformance
 
+      # The shapes the SHACL suites judge against, at the revision conformance
+      # pinned -- the same step ci.yml runs, and not optional here either. The
+      # suites read spec where it is checked out and keep no copy, so without
+      # this the `Test` step below reaches specRoot(), finds no ../spec beside
+      # the checkout, and throws at collection: every SHACL-importing suite
+      # fails, a `v*` tag goes red, and nothing can be published until this step
+      # exists. Read from conformance/scripts/SPEC_PIN rather than pinned again
+      # here, and cloned rather than checked out with actions/checkout, because
+      # a checkout cannot express "the commit that file names".
+      #
+      # `set -euo pipefail` matters: without it a failed grep leaves COMMIT
+      # empty, `git checkout ""` is a no-op, and the release would be gated on a
+      # test run judging against whatever the default branch happens to be.
+      - name: Check out the pinned spec revision
+        run: |
+          set -euo pipefail
+          COMMIT="$(grep '^commit=' conformance/scripts/SPEC_PIN | cut -d= -f2)"
+          REPO_URL="$(grep '^repo=' conformance/scripts/SPEC_PIN | cut -d= -f2)"
+          echo "Pinned spec commit: ${COMMIT}"
+          git clone --quiet "${REPO_URL}.git" "${RUNNER_TEMP}/spec"
+          git -C "${RUNNER_TEMP}/spec" checkout --quiet "${COMMIT}"
+          echo "CASCADE_SPEC_DIR=${RUNNER_TEMP}/spec" >> "$GITHUB_ENV"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:

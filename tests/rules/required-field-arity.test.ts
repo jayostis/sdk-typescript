@@ -17,7 +17,7 @@
  *
  * TWO FIELDS LEFT THIS FILE AND ARE NOT COMING BACK ON THEIR OWN.
  * `cascade:givenName` and `cascade:familyName` were in the list `requiredString`
- * covered, and no vendored shape declares an `sh:path` for either — the harness
+ * covered, and no shape `spec` publishes declares an `sh:path` for either — the harness
  * in `tests/support/shacl.ts` REFUSES to judge a record carrying them rather
  * than return a `conforms: true` that means nothing. So there is no rule to
  * transcribe and no verdict to check against, which is #47, blocked in turn on

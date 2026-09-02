@@ -50,6 +50,31 @@ jobs:
           repository: jayostis/conformance
           path: conformance
 
+      # The shapes the SHACL suites judge against, at the revision conformance
+      # pinned. Read from conformance/scripts/SPEC_PIN rather than pinned again
+      # here: these fixtures were verified against that exact commit, so reading
+      # spec at any other revision judges them against a spec nobody ran them
+      # on. Cloned rather than checked out with actions/checkout because a
+      # checkout cannot express "the commit that file names".
+      #
+      # `set -euo pipefail` matters: without it a failed grep leaves COMMIT
+      # empty, `git checkout ""` is a no-op, and the job would judge against
+      # whatever the default branch happens to be — green, and against the wrong
+      # shapes.
+      #
+      # CASCADE_SPEC_DIR is the first name tests/support/spec-sources.ts looks
+      # at; the ../spec sibling it falls back to is for a developer's local
+      # layout and is deliberately not created here.
+      - name: Check out the pinned spec revision
+        run: |
+          set -euo pipefail
+          COMMIT="$(grep '^commit=' conformance/scripts/SPEC_PIN | cut -d= -f2)"
+          REPO_URL="$(grep '^repo=' conformance/scripts/SPEC_PIN | cut -d= -f2)"
+          echo "Pinned spec commit: ${COMMIT}"
+          git clone --quiet "${REPO_URL}.git" "${RUNNER_TEMP}/spec"
+          git -C "${RUNNER_TEMP}/spec" checkout --quiet "${COMMIT}"
+          echo "CASCADE_SPEC_DIR=${RUNNER_TEMP}/spec" >> "$GITHUB_ENV"
+
       - name: Set up Node ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
@@ -80,52 +105,3 @@ jobs:
         working-directory: sdk-typescript
         run: npm test
 
-  # Separate from the `test` matrix on purpose. The vendored shapes are one set
-  # of bytes, so the answer cannot depend on the Node version, and running this
-  # per matrix leg would only clone `spec` twice.
-  #
-  # This is the ONLY job that checks out `spec`. The `test` job deliberately
-  # does not have it — that is why the shapes are vendored at all (see
-  # tests/shapes/README.md), and this job is what stops the copies going stale
-  # while the SHACL suite asserts last month's constraints and stays green.
-  shapes-drift:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out sdk-typescript
-        uses: actions/checkout@v4
-        with:
-          path: sdk-typescript
-
-      # A SIBLING of the checkout, which is where check-shapes-drift.mjs looks
-      # by default. CASCADE_SPEC_DIR would override it; there is nothing to
-      # override here.
-      #
-      # TEMPORARY: points at the FORK, for the same reason as the conformance
-      # checkout above and on the same terms — REVERT to
-      # the-cascade-protocol/spec once the fork is merged upstream.
-      # Note this currently changes NOTHING: jayostis/spec main is level with
-      # the org at 9b13ae4. The shape work for clinical:CoverageRecord is on
-      # feat/6-7-8-9-coverage-deprecation and takes effect here only once that
-      # branch merges to the fork's main. Changed now so both siblings are
-      # consistent and spec starts working on merge rather than needing this
-      # edit again.
-      - name: Check out spec as a sibling
-        uses: actions/checkout@v4
-        with:
-          repository: jayostis/spec
-          path: spec
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22.x'
-
-      # No `npm ci`: check-shapes-drift.mjs imports node:fs, node:path and
-      # node:url only. Exit 1 is drift — re-sync with
-      # `bash scripts/sync-shapes-from-spec.sh`. Exit 2 is "cannot check", an
-      # infrastructure fault rather than a stale copy; the two are kept distinct
-      # so a red run here says which one happened.
-      - name: Check vendored shapes against spec
-        working-directory: sdk-typescript
-        run: npm run check:shapes-drift

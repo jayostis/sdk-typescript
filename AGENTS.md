@@ -20,7 +20,7 @@ Do **not** load `llms-full.txt` from that site. It is roughly 1.3 MB, larger tha
 
 - **Vocabulary is not authored here.** Read the class in `spec/ontologies/{name}/v1/{name}.ttl`, its constraints in the matching `.shapes.ttl`, and its fixtures in `conformance/fixtures/` before implementing anything.
 - **Register every class in the deserializer as well as the serializer, and test a round trip.** A class that serializes but does not deserialize makes a pod full of records read as empty, and nothing reports it.
-- **`conformance` must be a sibling checkout**, at `../conformance`. Suites resolve fixtures through it.
+- **`conformance` and `spec` must both be sibling checkouts**, at `../conformance` and `../spec`. Suites resolve fixtures through the first and read the shapes out of the second; nothing in this repository holds a `.ttl` file. `CASCADE_SPEC_DIR` names `spec` somewhere else and is checked first — CI sets it. With neither, every SHACL suite refuses with `no spec checkout at <path>`, which is deliberate: shapes that fail to load conform to everything.
 - **A green test is not always an executed test.** `tests/deserializer.test.ts` uses `if (!recordType) return;`, so an unmapped `dataType` passes without asserting. Prefer an explicit assertion to an early return, and confirm a new test reached its assertions.
 - **`npm ci`, never a symlinked `node_modules`.** A symlink resolves packages back to whatever tree it points at, invalidating everything the suite then claims to have tested.
 

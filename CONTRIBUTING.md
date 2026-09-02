@@ -11,17 +11,19 @@ The "Known gaps" section of `CLAUDE.md` lists, specifically, which classes are u
 
 ## Development setup
 
-**`conformance` must be cloned as a sibling directory**, not inside this one. Several suites resolve fixtures at `../../conformance/fixtures/`, and CI reproduces that layout exactly.
+**`conformance` and `spec` must both be cloned as sibling directories**, not inside this one. Several suites resolve fixtures at `../../conformance/fixtures/`, and the SHACL suites read the shapes out of a `spec` checkout rather than a copy — nothing in this repository holds a `.ttl` file. CI reproduces that layout exactly.
 
 ```
 <parent>/
   sdk-typescript/
   conformance/
+  spec/
 ```
 
 ```bash
 git clone https://github.com/the-cascade-protocol/sdk-typescript.git
 git clone https://github.com/the-cascade-protocol/conformance.git
+git clone https://github.com/the-cascade-protocol/spec.git
 cd sdk-typescript
 
 npm ci        # not npm install, and never a symlinked node_modules:
@@ -29,6 +31,8 @@ npm ci        # not npm install, and never a symlinked node_modules:
               # which silently invalidates everything the suite then claims to test
 npm run build
 ```
+
+`spec` elsewhere is fine, but it has to be named: `CASCADE_SPEC_DIR=/path/to/spec` is checked before the `../spec` sibling, and it is what CI sets after cloning the revision `conformance/scripts/SPEC_PIN` pins. With neither, the suite refuses rather than skipping — `no spec checkout at <path>: it holds no ontologies/ directory` — because a SHACL run against shapes that failed to load conforms to everything and reports green.
 
 Install the hooks once: `sh scripts/install-hooks.sh`. The pre-commit hook blocks commits to `src/models/` or `src/vocabularies/` without updating `VOCAB_VERSIONS`.
 

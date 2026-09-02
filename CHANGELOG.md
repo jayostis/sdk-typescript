@@ -338,6 +338,63 @@
 
 ### Internal
 
+- **`spec` is read where it is checked out, and every copy is deleted.** Four
+  shapes files lived in `tests/shapes/`, kept in step with upstream by
+  `scripts/sync-shapes-from-spec.sh` and a 239-line `scripts/check-shapes-drift.mjs`.
+  A copy that falls behind asserts last month's constraints while reporting
+  green, and the drift check existed only because the copies did; both are gone,
+  along with `vendored.json` and the `check:shapes-drift` npm script. Nothing in
+  this repository is a `.ttl` file any more. `spec-sources.json` is the one place
+  a spec path is written down and `tests/support/spec-sources.ts` its only
+  reader, resolving an explicit path, then `CASCADE_SPEC_DIR`, then the `../spec`
+  sibling — the order both upstream repositories document, and the order CI uses
+  after cloning the revision `conformance/scripts/SPEC_PIN` pins. **REFUSES,
+  NEVER SKIPS**: a suite that cannot find the shapes validates against an empty
+  graph, and an empty graph conforms to everything, so every failure throws
+  naming the path it tried and both ways to change it. `parseManifest` checks the
+  manifest rather than casting it, so an entry with no `ontology` names the
+  vocabulary and the key instead of throwing `ERR_INVALID_ARG_TYPE` out of
+  `node:path`. (#58)
+- **Three detectors stop the scheme coming back**, in `tests/spec-single-source.ts`:
+  `turtleFiles` reports a Turtle file anywhere in the tree, `specPathLiterals`
+  parses TypeScript and JavaScript for a string literal naming a spec path — a
+  whole-literal `ontologies` included, so a path assembled a segment at a time is
+  caught — and `vendoringNames` walks every file, matching paths as well as
+  lines, so a re-added `.sh`, `.mjs` or npm script is a finding. Parsed rather
+  than grepped for the path check: the ~20 `@see spec/ontologies/…` citations
+  under `src/terms/definitions/` are the traceability this repository wants, and
+  a text pattern would report every one. `CHANGELOG.md` and `VOCAB_VERSIONS` are
+  spared at the call site as append-only records of what was true at a past
+  release. (#58)
+- **Contributors need a `spec` checkout now.** `CONTRIBUTING.md`, `AGENTS.md` and
+  `README.md` said to clone `conformance` as a sibling and stopped there;
+  following any of them verbatim left `npm test` throwing `no spec checkout at
+  <path>`. All three now name `spec` as a required sibling and `CASCADE_SPEC_DIR`
+  as the alternative. Nothing a consumer installs changes: `rdf-validate-shacl`
+  is still a devDependency and no shapes file was ever in `package.json`'s
+  `files`. (#58)
+- **All six shapes files `spec` publishes are declared, not four.** `checkup` and `pots`
+  were never vendored, so a record carrying their predicates was refused a verdict rather than
+  judged. No fixture uses either today, so nothing changes verdict — what changes is that the
+  gap is closed and cannot silently reopen: `undeclaredShapes` walks the checkout and fails the
+  suite when `spec-sources.json` does not account for a shapes file spec publishes. Discovery
+  finds; the manifest still decides, so taking a new vocabulary on stays a deliberate commit
+  here rather than arriving with someone else's re-pin. (#31)
+- **An empty `CASCADE_SPEC_DIR` no longer resolves to the cwd.** `??` falls back
+  only on `null`/`undefined`, so an exported-but-empty `CASCADE_SPEC_DIR=` — what
+  any shell or CI that passes an unset input straight through produces — survived
+  to `resolve('')`, which is the cwd. The cwd is a directory, so the `../spec`
+  sibling was never consulted and the refusal named this repository, a path
+  nobody set, with a good checkout sitting beside it. `||` for all three names in
+  the order: an empty string is not a choice of directory. (#58)
+- **`release.yml` gets the pinned-spec clone too.** It checks out `conformance`
+  as a sibling and runs `npm test` as the gate before `npm publish`, but never
+  set `CASCADE_SPEC_DIR`, so after the change above every SHACL-importing suite
+  threw at collection: pushing any `v*` tag went red and nothing could be
+  published. `tests/workflows.test.ts` now asserts that every workflow running
+  the suite supplies spec, by `CASCADE_SPEC_DIR` or by a sibling checkout — the
+  parity was previously kept by hand across two files, which is how one of them
+  missed it. (#58)
 - `emergencyContact`, `address` and `preferredPharmacy` are declared as term
   modules — the first use of `{ form: 'blankNode' }`, and the first terms whose
   outputs nest. None declares a `nestedPrefix`: `childrenOf` defaults to

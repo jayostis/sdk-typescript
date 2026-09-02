@@ -30,9 +30,10 @@ Both still refuse to INVENT. A value with no expressible form throws, naming the
 inexpressibility, not invalidity, and the two are not the same question.
 
 **`validate()` is the only judge, and it ships alone.** `rdf-validate-shacl` is a devDependency and
-`tests/shapes/` is not in `package.json`'s `files`, so SHACL is a test-time tool and nothing a
-consumer installs can reach it. Anything the shapes should catch in production has to be reachable
-from `validate()` — today that means a rule a term declares, since `validateCardinality` reads
+the shapes are read from a `spec` checkout that is not part of this package at all, so SHACL is a
+test-time tool and nothing a consumer installs can reach it. Anything the shapes should catch in
+production has to be reachable from `validate()` — today that means a rule a term declares, since
+`validateCardinality` reads
 `maxCount` off `termFor(field)` and knows nothing about the rest.
 
 ## MANDATORY: Deployment Discipline
@@ -69,7 +70,7 @@ See `VOCAB_VERSIONS` comments. Remaining items:
 - **Core v2.8**: `fhirResourceType` is still unregistered. `layerPromotionStatus`, `fhirJson` and `sourceRecordDate` are present.
 - **Health v2.0/v2.5**: the eight history-container object properties (`restingHeartRateHistory`, `dailyActivityHistory`, ...) and the reading classes they range over are unmodelled. The six wellness containers are registered as constants only; this SDK does not serialize a `health:HealthProfile`.
 - **Blank-node reads**: reconstruction into nested objects is opt-in, one field at a time — `clinicalSummary` / `wellnessSummary`, `hasParticipant` (clinical v1.16), and the three patient-profile sub-structures `emergencyContact` / `address` / `preferredPharmacy` (#27, which is also what made those three serialize at all). Any OTHER blank node still comes back as a blank-node identifier. A field is reconstructed only if it is in `NESTED_BLANK_NODE_FIELDS` **and** every child predicate resolves through the deserializer's reverse map; a field listed without its children rebuilds as `{}`, silently.
-- **Coverage classes other than `InsurancePlan`**: `ClaimRecord`, `BenefitStatement`, `DenialNotice` and `AppealRecord` have interfaces and `TYPE_MAPPING` entries but no shape upstream, so nothing here can make them judgeable. (`InsurancePlan` itself is fixed: it is written `coverage:InsurancePlan` with `coverage:` predicates, `clinical:CoverageRecord` is read and never written, and `coverage.shapes.ttl` is vendored — #26.)
+- **Coverage classes other than `InsurancePlan`**: `ClaimRecord`, `BenefitStatement`, `DenialNotice` and `AppealRecord` have interfaces and `TYPE_MAPPING` entries but no shape upstream, so nothing here can make them judgeable. (`InsurancePlan` itself is fixed: it is written `coverage:InsurancePlan` with `coverage:` predicates, `clinical:CoverageRecord` is read and never written, and `coverage.shapes.ttl` is read from the `spec` checkout — #26.)
 - **No `ClinicalDocument` model**: clinical v1.16's `documentReferenceStatus`, `documentAuthorName` and `authenticatorName` are registered as predicates with no model to attach them to.
 - **Conformance coverage**: the fixture-driven harnesses load a subset of the fixture families. `dailyvital-`, `device-`, `encounter-`, `medadmin-`, `imaging-`, `social-`, `proxy-`, `claim-`, `benefit-` and `denial-` are not exercised by any test.
 - **Silent skips**: `tests/deserializer.test.ts` uses `if (!recordType) return;`, so an unmapped `dataType` reports a pass without asserting anything. Prefer an explicit assertion over an early return.

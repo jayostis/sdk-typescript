@@ -186,7 +186,7 @@ describe('Validator', () => {
     // SHACL measures the value node after conversion to string, so `"  "` is
     // length 2 and conforms. `""` IS reported — see tests/rules/min-length.test.ts.
     // The constraint that would reject whitespace is `sh:pattern`, and no
-    // vendored shape declares one on any free-text field: all 28 `sh:pattern`
+    // shape `spec` publishes declares one on any free-text field: all 28 `sh:pattern`
     // declarations are format checks on coded values (cptCode, contentHash,
     // schemaVersion). The trim this test assumes was an implementation detail of
     // the hardcoded check it replaced, never a Cascade rule.
@@ -513,7 +513,7 @@ describe('Validator', () => {
     // SKIPPED — blocked upstream, not a defect in this file.
     //
     // `validate()` used to require `givenName` and `familyName` from a hardcoded
-    // switch case. NO vendored shape declares an `sh:path` for either predicate,
+    // switch case. NO shape `spec` publishes declares an `sh:path` for either predicate,
     // and `src/models/patient-profile.ts` marks both optional — so the
     // requirement had no source in the vocabulary or in the model. It is gone,
     // and these two assert it.
@@ -554,7 +554,7 @@ describe('Validator', () => {
     // SKIPPED — blocked on FOUR issues, and it is the only test here that needs
     // all of them. Two independent reasons stack:
     //
-    // 1. WHETHER `givenName` IS REQUIRED AT ALL. No vendored shape declares an
+    // 1. WHETHER `givenName` IS REQUIRED AT ALL. No shape `spec` publishes declares an
     //    `sh:path` for `foaf:givenName`, the model marks it optional, and
     //    `tests/support/shacl.ts` refuses to judge a record carrying it rather
     //    than return a vacuous conforms:true.

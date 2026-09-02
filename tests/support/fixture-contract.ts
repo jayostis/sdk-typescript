@@ -196,8 +196,9 @@ export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp):
 
   it('earns from the shipped validator the verdict the corpus declares', () => {
     // `validate()` is the whole of what ships: `rdf-validate-shacl` is a
-    // devDependency and `tests/shapes/` is not in package.json's `files`, so
-    // nothing a consumer installs can reach the SHACL verdict below.
+    // devDependency and the shapes are read from a spec checkout this package
+    // does not contain, so nothing a consumer installs can reach the SHACL
+    // verdict below.
     expect(validate(fixture.input).valid).toBe(fixture.shouldAccept);
   });
 
@@ -206,7 +207,7 @@ export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp):
     // allowed and is the case today; what must not happen is a rule the
     // vocabulary states being invisible to the only validator that ships.
     //
-    // `shaclCheck` refuses a graph the vendored shapes are silent on rather
+    // `shaclCheck` refuses a graph the loaded shapes are silent on rather
     // than returning the vacuous `conforms: true` that silence produces, so
     // reaching a report at all is part of what this asserts.
     const report = await shaclCheck(fixture.input as CascadeRecord);

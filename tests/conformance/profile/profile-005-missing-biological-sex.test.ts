@@ -40,7 +40,7 @@ describe('profile-005 — Negative: Patient profile missing required biologicalS
   // SKIPPED — blocked upstream, not a defect in this fixture.
   //
   // Only `biologicalSex` is sourced; `givenName` and `familyName` are the two
-  // the comment below already calls "#35's extras". No vendored shape declares
+  // the comment below already calls "#35's extras". No shape `spec` publishes declares
   // an `sh:path` for either, and the models mark both optional, so `validate()`
   // no longer reports them and this asserts that it does.
   //

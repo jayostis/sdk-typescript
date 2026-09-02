@@ -148,6 +148,8 @@ This SDK passes all Cascade Protocol conformance test fixtures. The serializer p
 
 ## Development
 
+Clone `conformance` and `spec` as siblings of this repository first. The suites read conformance fixtures from `../conformance/fixtures/` and the SHACL shapes out of a `spec` checkout — no `.ttl` file is copied in here, so without them `npm test` refuses with `no spec checkout at <path>`. `CASCADE_SPEC_DIR` names a `spec` checkout kept somewhere else and is checked before the `../spec` sibling.
+
 ```bash
 # Build
 npm run build

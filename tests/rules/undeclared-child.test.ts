@@ -5,7 +5,7 @@
  * directory do not carry, because this rule is the one whose whole point is
  * what the SHAPES cannot do. `max-count` and `value-set` can leave SHACL to
  * `tests/conformance/`: the shapes judge those, so a conformance fixture is a
- * second opinion. Nothing in `tests/shapes/` is `sh:closed`, so an undeclared
+ * second opinion. No shape spec publishes is `sh:closed`, so an undeclared
  * predicate earns a vacuous `conforms: true` from plain SHACL, and the reason
  * `validate()` has to grow this check is not observable anywhere except beside
  * the check itself.
@@ -38,7 +38,7 @@
  *
  * NO PATIENT PROFILE IN THE SHACL LAYER, though `emergencyContact` is the
  * reviewer's own example and is asked about at the writer and validator layers.
- * Every profile this SDK writes carries `foaf:name`, no vendored shape declares
+ * Every profile this SDK writes carries `foaf:name`, no shape `spec` publishes declares
  * an `sh:path` for any `foaf:` predicate, and `assertCovered` refuses the graph
  * on that ground alone — a refusal naming the wrong predicate, which would be
  * red for a reason this rule did not cause. See tests/conformance/profile.test.ts.
@@ -348,13 +348,13 @@ describe('a child the term does not declare', () => {
     });
 
     it('cannot judge a child no ontology declares, which is why validate() must', async () => {
-      // The evidence for this whole rule. Nothing in tests/shapes/ is
+      // The evidence for this whole rule. No shape spec publishes is
       // sh:closed, so SHACL returns conforms:true on a graph carrying
       // cascade:supplementTally — indistinguishable from a graph that satisfied
       // every constraint. `assertCovered` is what refuses it, and it is a
-      // TEST-TIME helper: `rdf-validate-shacl` is a devDependency and
-      // tests/shapes/ is not in package.json's `files`, so nothing a consumer
-      // installs can reach this refusal. `validate()` ships alone.
+      // TEST-TIME helper: `rdf-validate-shacl` is a devDependency and the
+      // shapes live in a spec checkout this package does not contain, so
+      // nothing a consumer installs can reach this refusal. `validate()` ships alone.
       await expect(shaclCheck(manifest({
         clinicalSummary: summary({ supplementTally: 9 }),
       }) as never)).rejects.toThrow(/cascade:supplementTally/);
@@ -365,7 +365,7 @@ describe('a child the term does not declare', () => {
 /**
  * The message has to name the predicate the WRITER emits.
  *
- * That is this rule's entire product. Nothing in `tests/shapes/` is `sh:closed`
+ * That is this rule's entire product. No shape spec publishes is `sh:closed`
  * and the shapes are a devDependency besides, so a consumer's only account of
  * an undeclared child is this string — and a string naming a predicate nothing
  * writes is worse than silence, because it sends them grepping their export for

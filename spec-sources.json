@@ -1,0 +1,26 @@
+{
+  "core": {
+    "ontology": "ontologies/core/v1/core.ttl",
+    "shapes": "ontologies/core/v1/core.shapes.ttl"
+  },
+  "health": {
+    "ontology": "ontologies/health/v1/health.ttl",
+    "shapes": "ontologies/health/v1/health.shapes.ttl"
+  },
+  "clinical": {
+    "ontology": "ontologies/clinical/v1/clinical.ttl",
+    "shapes": "ontologies/clinical/v1/clinical.shapes.ttl"
+  },
+  "coverage": {
+    "ontology": "ontologies/coverage/v1/coverage.ttl",
+    "shapes": "ontologies/coverage/v1/coverage.shapes.ttl"
+  },
+  "checkup": {
+    "ontology": "ontologies/checkup/v1/checkup.ttl",
+    "shapes": "ontologies/checkup/v1/checkup.shapes.ttl"
+  },
+  "pots": {
+    "ontology": "ontologies/pots/v1/pots.ttl",
+    "shapes": "ontologies/pots/v1/pots.shapes.ttl"
+  }
+}

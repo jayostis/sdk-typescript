@@ -1,8 +1,8 @@
 /**
  * `sh:minLength` — an empty value is reported, and a blank one is not.
  *
- * THE RULE, from `spec`: 30 `sh:property` blocks across the four vendored shape
- * files declare an `sh:minLength`, over 28 distinct predicates, and every one of
+ * THE RULE, from `spec`: 30 `sh:property` blocks across the four shapes
+ * files `spec` publishes declare an `sh:minLength`, over 28 distinct predicates, and every one of
  * them is 1. Until this landed, `Constraint.minLength` was a declared field that
  * nothing read, so `medicationName: ''` satisfied a `minCount: 1` — one member
  * is present, and nobody asked how long it was.
@@ -13,8 +13,8 @@
  * The check does not trim, and two tests below say so out loud, because the
  * opposite is the obvious-looking change for someone reading `''` and `'  '`
  * side by side. A whitespace-only name IS a defect — it is just not this
- * constraint's, `sh:pattern` being the one that would state it, and no vendored
- * shape declaring one. Trimming here would reject records `pyshacl` accepts, and
+ * constraint's, `sh:pattern` being the one that would state it, and no shape
+ * `spec` publishes declaring one. Trimming here would reject records `pyshacl` accepts, and
  * a validator that disagrees with the shapes is the thing this SDK has the
  * hardest time noticing.
  *

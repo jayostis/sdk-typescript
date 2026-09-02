@@ -3,7 +3,7 @@
  * for a fixed course, continuously, or unknown.
  *
  * A TERM AND NOT A PER-RECORD RULE, and the corpus is why. Measured across the
- * four vendored shapes files, 48 predicates carry an `sh:in` and only four bind
+ * four shapes files `spec` publishes, 48 predicates carry an `sh:in` and only four bind
  * different lists on different shapes — `clinical:status`,
  * `cascade:dataProvenance`, `clinical:verificationStatus` and `health:status`
  * (#45). This is not one of them: one list, on one shape, so the value set is a
