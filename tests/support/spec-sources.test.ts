@@ -19,6 +19,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 
 import {
   specRoot,
+  undeclaredShapes,
   pathsFor,
   shapesGraph,
   parseManifest,
@@ -200,5 +201,38 @@ describe('shapesGraph', () => {
     // cost `tests/support/shacl.ts` documents and the reason fixture loading
     // was split out; sharing one dataset is what keeps it paid once.
     expect(shapesGraph()).toBe(shapesGraph());
+  });
+});
+
+describe('undeclaredShapes', () => {
+  // The list in `spec-sources.json` is the decision about which vocabularies
+  // this SDK judges records against, and it is kept by hand — it sat at four of
+  // the six `spec` publishes for weeks with nothing to say so, which is #31.
+  // Discovery is what makes forgetting loud; the entry is still somebody's
+  // commit.
+
+  it('names a shapes file the manifest does not carry', () => {
+    const root = scratchSpec([
+      'ontologies/core/v1/core.shapes.ttl',
+      'ontologies/genomics/v1/genomics.shapes.ttl',
+    ]);
+
+    expect(undeclaredShapes(root)).toEqual(['ontologies/genomics/v1/genomics.shapes.ttl']);
+  });
+
+  it('is silent for a vocabulary that publishes no shapes', () => {
+    // An ontology with no shapes file is not an omission — spec publishes six
+    // shapes files across more vocabularies than that, and a directory holding
+    // only a `.ttl` is spec saying it constrains nothing yet.
+    const root = scratchSpec([
+      'ontologies/core/v1/core.shapes.ttl',
+      'ontologies/genomics/v1/genomics.ttl',
+    ]);
+
+    expect(undeclaredShapes(root)).toEqual([]);
+  });
+
+  it('accounts for every shapes file the checkout we test against publishes', () => {
+    expect(undeclaredShapes()).toEqual([]);
   });
 });

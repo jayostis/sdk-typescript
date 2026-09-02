@@ -373,6 +373,13 @@
   as the alternative. Nothing a consumer installs changes: `rdf-validate-shacl`
   is still a devDependency and no shapes file was ever in `package.json`'s
   `files`. (#58)
+- **All six shapes files `spec` publishes are declared, not four.** `checkup` and `pots`
+  were never vendored, so a record carrying their predicates was refused a verdict rather than
+  judged. No fixture uses either today, so nothing changes verdict — what changes is that the
+  gap is closed and cannot silently reopen: `undeclaredShapes` walks the checkout and fails the
+  suite when `spec-sources.json` does not account for a shapes file spec publishes. Discovery
+  finds; the manifest still decides, so taking a new vocabulary on stays a deliberate commit
+  here rather than arriving with someone else's re-pin. (#31)
 - **An empty `CASCADE_SPEC_DIR` no longer resolves to the cwd.** `??` falls back
   only on `null`/`undefined`, so an exported-but-empty `CASCADE_SPEC_DIR=` — what
   any shell or CI that passes an unset input straight through produces — survived

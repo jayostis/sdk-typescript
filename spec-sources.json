@@ -14,5 +14,13 @@
   "coverage": {
     "ontology": "ontologies/coverage/v1/coverage.ttl",
     "shapes": "ontologies/coverage/v1/coverage.shapes.ttl"
+  },
+  "checkup": {
+    "ontology": "ontologies/checkup/v1/checkup.ttl",
+    "shapes": "ontologies/checkup/v1/checkup.shapes.ttl"
+  },
+  "pots": {
+    "ontology": "ontologies/pots/v1/pots.ttl",
+    "shapes": "ontologies/pots/v1/pots.shapes.ttl"
   }
 }

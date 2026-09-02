@@ -24,7 +24,7 @@
  * would refuse to run the suite to report something CI reports anyway.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -130,8 +130,6 @@ export function specRoot(override?: string): string {
     );
   }
 
-  // After the layout check and before any caller reads a file out of it: WHICH
-  // spec answered is as much a part of a verdict as whether one did.
   return absolute;
 }
 
@@ -238,4 +236,47 @@ export function expand(curie: string): string {
 export function curieOf(iri: string): string {
   const ns = namespaceOf(iri);
   return `${PREFIX_OF.get(ns) ?? ns}:${iri.slice(ns.length)}`;
+}
+
+/**
+ * Every shapes file in a spec checkout that `spec-sources.json` does not name.
+ *
+ * DISCOVERY FINDS, THE MANIFEST DECIDES. Globbing the checkout and loading
+ * whatever turns up would be simpler, and it would make the set of judged
+ * vocabularies move on somebody else's commit: the day `conformance` re-pins to
+ * a spec revision carrying a new vocabulary, this suite would start judging
+ * records against shapes nobody here has read, in the same commit that took the
+ * pin. `VOCAB_VERSIONS` tracks what this SDK has actually implemented, one
+ * vocabulary at a time, and the loaded set has to move the same way.
+ *
+ * A hand-kept list gets the opposite thing wrong: it was four of six for weeks
+ * and nothing said so, which is #31. So the list stays the decision and this
+ * makes forgetting it loud — the omission is reported, and adding the entry is
+ * still somebody's deliberate commit.
+ *
+ * THE LAYOUT IS DERIVED, NOT WRITTEN. Spelling `ontologies/${name}/v1` here
+ * would put spec's directory shape back into code — the thing the manifest
+ * exists to hold and `specPathLiterals` reports. So an entry that already
+ * resolves is read for its shape: the container it sits in, the version segment,
+ * and the suffix its filename adds to its vocabulary name.
+ */
+export function undeclaredShapes(root: string = specRoot()): string[] {
+  const sample = Object.entries(MANIFEST).find(([, entry]) => entry.shapes !== undefined);
+  if (!sample) return [];
+
+  const [name, entry] = sample;
+  const [container, , version, file] = entry.shapes!.split('/');
+  if (!container || !version || !file?.startsWith(name)) return [];
+  const suffix = file.slice(name.length);
+
+  const dir = join(root, container);
+  if (!existsSync(dir)) return [];
+
+  const declared = new Set(Object.values(MANIFEST).map((each) => each.shapes));
+
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((each) => each.isDirectory())
+    .map((each) => [container, each.name, version, `${each.name}${suffix}`].join('/'))
+    .filter((relative) => existsSync(join(root, relative)) && !declared.has(relative))
+    .sort();
 }
