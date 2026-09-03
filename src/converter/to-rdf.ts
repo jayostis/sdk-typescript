@@ -256,6 +256,17 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
       return Object.values(members).includes(text) ? `<${text}>` : null;
     }
 
+    // A range with no members is not automatically an open reference.
+    // `cascade:creatorWebID` (`rdfs:range rdfs:Resource`) is open by design and
+    // belongs here; `health:hrvHistory` (`rdfs:range health:HRVReading`) is a
+    // Cascade class spec declared and never gave a single field, and accepting
+    // any IRI for it would write a reference spec cannot judge into the graph.
+    // `SPEC_TERMS.unclassifiableRanges` is exactly that second group (#91), so
+    // it is refused here — `null`, turned by the caller into the throw naming
+    // the term, the range and what spec would need to add — rather than
+    // silently taking the permissive branch below.
+    if (definition.range && SPEC_TERMS.unclassifiableRanges[definition.range]) return null;
+
     // Any absolute IRI, whatever its scheme. `cascade:creatorWebID` has
     // `rdfs:range rdfs:Resource` and therefore no value set at all, so this is
     // the only branch a WebID can take.
@@ -359,6 +370,21 @@ export function convertToRdf(record: Record<string, unknown>): string {
     const object = objectTerm(item, definition);
 
     if (object === null) {
+      // PER VALUE, NOT PER TYPE (#91). A range spec declares and never gives
+      // members or fields — `health:HRVReading` and five more — is not a
+      // mistake in THIS record; the record just happens to be the one that
+      // exercised a gap on spec's side. The refusal has to say so, or a reader
+      // goes looking for a typo that is not there.
+      const gap = definition.range ? SPEC_TERMS.unclassifiableRanges[definition.range] : undefined;
+
+      if (gap) {
+        throw new Error(
+          `Cannot express "${key}" = ${JSON.stringify(item)} as RDF: its range `
+          + `${definition.range} is unclassifiable — neither a code list nor a structured class `
+          + `with any field spec has declared. ${gap.specFix}`,
+        );
+      }
+
       throw new Error(
         `Cannot express "${key}" = ${JSON.stringify(item)} as RDF. The term declares `
         + `${definition.type ?? definition.range ?? 'no type'}, which this value is not a `
