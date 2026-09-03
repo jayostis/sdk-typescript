@@ -49,6 +49,16 @@ const N3Writer = require('../vendor/n3/N3Writer.js').default as new (options: {
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
+/**
+ * An absolute IRI: a scheme, then anything N-Triples may hold between angles.
+ *
+ * A SCHEME TEST, NOT AN HTTP TEST. `urn:` is not exotic here — every fixture's
+ * own record id is a `urn:uuid:`, so cross-record references in that form are
+ * the expected case and `did:` WebIDs are the other obvious one. Matching
+ * `^https?://` reported both as inexpressible, which they are not.
+ */
+const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\s<>"{}|\\^`]*$/;
+
 /** Keys that name the record rather than describing it. */
 const STRUCTURAL = new Set(['id', 'type']);
 
@@ -75,6 +85,46 @@ function vocabularyOf(classIri: string): string {
   return vocabulary && vocabulary in SPEC_TERMS.vocabularies ? vocabulary : 'core';
 }
 
+/**
+ * The keys every context that declares them agrees about, and the ones no two
+ * contexts do.
+ *
+ * WHY THE STACK IS NOT ENOUGH. `core` plus the record's own vocabulary assumes
+ * spec's contexts are partitioned by vocabulary, and they are not:
+ * `businessIdentifier` is declared on `CascadeEntity` and is therefore legal on
+ * EVERY record type, but it is published in the `clinical` context — not
+ * `core`, not `health`. Resolving a `health:ImmunizationRecord` against the
+ * stack alone turned a field the hand-rolled serializer has always written into
+ * a hard failure the moment the type was routed.
+ *
+ * WHY THIS CANNOT WRITE THE WRONG PREDICATE, which is the harm the
+ * per-vocabulary stack exists to prevent. A key lands here only if every context
+ * that declares it names the SAME predicate, so there is one answer and no
+ * choice to get wrong. The 34 keys that mean different things in different
+ * contexts — `notes` is `clinical:notes` under `clinical` and `health:notes`
+ * under `health`, and `status`, `severity` and 31 others are the same — are
+ * collected in `CONTESTED_KEYS` instead and still refused, naming the ambiguity
+ * rather than reporting the key as undefined. That is `jayostis/spec#4`; this
+ * reads around it without guessing.
+ */
+const [SHARED_TERMS, CONTESTED_KEYS] = ((): [Record<string, TermDefinition>, Set<string>] => {
+  const shared: Record<string, TermDefinition> = {};
+  const contested = new Set<string>();
+
+  for (const terms of Object.values(SPEC_TERMS.vocabularies)) {
+    for (const [key, definition] of Object.entries(terms)) {
+      const agreed = shared[key];
+
+      if (agreed && agreed.predicate !== definition.predicate) contested.add(key);
+      else shared[key] = definition;
+    }
+  }
+
+  for (const key of contested) delete shared[key];
+
+  return [shared, contested];
+})();
+
 const TERMS_BY_VOCABULARY = new Map<string, Record<string, TermDefinition>>();
 
 /**
@@ -94,7 +144,11 @@ function termsFor(classIri: string): Record<string, TermDefinition> {
   // The record's own vocabulary wins where both declare a key, which is the
   // point of resolving per class: a `health:` record's `notes` is
   // `health:notes`, and `core`'s entry must not shadow it.
+  // Lowest first. `SHARED_TERMS` holds only keys every context agrees about, so
+  // what it contributes is a key the stack does not define — never a rival
+  // answer for one it does.
   const merged = {
+    ...SHARED_TERMS,
     ...SPEC_TERMS.vocabularies['core'],
     ...SPEC_TERMS.vocabularies[vocabulary],
   };
@@ -128,14 +182,20 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
     // (`jayostis/spec#47`). The ontology resolves it: the predicate's range is a
     // class whose subclasses ARE the permitted values, so `"ClinicalGenerated"`
     // is `cascade:ClinicalGenerated` and nothing else.
-    if (!/^https?:\/\//.test(text)) {
-      const members = definition.range ? SPEC_TERMS.valueSets[definition.range] : undefined;
-      const resolved = members?.[text.includes(':') ? text.slice(text.indexOf(':') + 1) : text];
+    //
+    // ASKED FIRST, BEFORE THE IRI TEST, because a CURIE satisfies both: a scheme
+    // test cannot tell `cascade:ClinicalGenerated` from `urn:webid:alice`, and
+    // the value set can — the first is a member and members are what this term
+    // admits.
+    const members = definition.range ? SPEC_TERMS.valueSets[definition.range] : undefined;
+    const resolved = members?.[text.includes(':') ? text.slice(text.indexOf(':') + 1) : text];
 
-      return resolved ? `<${resolved}>` : null;
-    }
+    if (resolved) return `<${resolved}>`;
 
-    return `<${text}>`;
+    // Any absolute IRI, whatever its scheme. `cascade:creatorWebID` has
+    // `rdfs:range rdfs:Resource` and therefore no value set at all, so this is
+    // the only branch a WebID can take.
+    return ABSOLUTE_IRI.test(text) ? `<${text}>` : null;
   }
 
   // 2 — the context, then the ontology, says what kind of literal it is.
@@ -182,7 +242,24 @@ export function convertToRdf(record: Record<string, unknown>): string {
     );
   }
 
-  const subject = `<${String(record['id'] ?? '')}>`;
+  const id = record['id'];
+
+  // NAMED HERE, NOT LEFT TO THE PARSER. `id ?? ''` wrote `<>` for a record with
+  // no id — a relative IRI resolving to whatever base the consumer parses with,
+  // so every id-less record collides: the "reaches the graph and validates
+  // clean" outcome this module argues against. And an id that was not an IRI
+  // escaped as `Unexpected "<not" on line 1` out of the vendored parser, naming
+  // neither the record nor the field, unlike every other refusal here.
+  if (typeof id !== 'string' || !ABSOLUTE_IRI.test(id)) {
+    throw new Error(
+      `"id" must be an absolute IRI; this record has ${JSON.stringify(id)}. A record with no `
+      + 'usable subject is written as the relative IRI <>, which resolves to whatever base the '
+      + 'reader parses with — so every such record collides, and the merged graph validates '
+      + 'clean on data that named nothing.',
+    );
+  }
+
+  const subject = `<${id}>`;
   const terms = termsFor(recordType.rdfTypeUri);
   const triples = [`${subject} <${RDF_TYPE}> <${recordType.rdfTypeUri}> .`];
 
@@ -193,9 +270,15 @@ export function convertToRdf(record: Record<string, unknown>): string {
 
     if (!definition) {
       throw new Error(
-        `No context entry for "${key}" in core or ${vocabularyOf(recordType.rdfTypeUri)}. `
-        + 'Spec publishes the JSON-to-RDF mapping; a key it does not define has no predicate, '
-        + 'and writing a guessed one would put a triple in a pod that no shape can judge.',
+        CONTESTED_KEYS.has(key)
+          ? `"${key}" names a different predicate in each context that declares it, and neither `
+            + `core nor ${vocabularyOf(recordType.rdfTypeUri)} — the contexts a `
+            + `${recordType.name} resolves against — is one of them. See jayostis/spec#4. `
+            + 'Picking one would write the wrong predicate for every record of the other class.'
+          : `No context entry for "${key}" in core or ${vocabularyOf(recordType.rdfTypeUri)}. `
+            + 'Spec publishes the JSON-to-RDF mapping; a key it does not define has no '
+            + 'predicate, and writing a guessed one would put a triple in a pod that no shape '
+            + 'can judge.',
       );
     }
 
@@ -222,6 +305,21 @@ export function convertToRdf(record: Record<string, unknown>): string {
   return triples.join('\n');
 }
 
+/** These quads as a Turtle document, with exactly these prefixes offered. */
+function turtleOf(quads: unknown[], prefixes: Record<string, string>): string {
+  const writer = new N3Writer({ prefixes });
+  for (const quad of quads) writer.addQuad(quad);
+
+  let turtle = '';
+  // n3's `end` is callback-shaped and synchronous when the sink is a string.
+  writer.end((error: unknown, result: string) => {
+    if (error) throw error;
+    turtle = result;
+  });
+
+  return turtle;
+}
+
 /**
  * The same record as a Turtle document, prefixes and all.
  *
@@ -242,21 +340,24 @@ export function convertToTurtle(record: Record<string, unknown>): string {
   // Only the prefixes the document actually uses. n3 emits every prefix it is
   // given, and a header declaring seven vocabularies for a record that names
   // two is noise a reader has to discount.
-  const used = Object.fromEntries(
-    Object.entries(SPEC_TERMS.prefixes)
-      .filter(([, namespace]) => quads.some((quad: { predicate: { value: string } }) =>
-        quad.predicate.value.startsWith(namespace))),
-  );
+  //
+  // ASKED OF THE OUTPUT, NOT OF THE QUADS. A prefix is used when the writer
+  // abbreviated something with it, and only the writer knows what it
+  // abbreviates: it renders `rdf:type` as `a`, writes an `xsd:string` literal
+  // bare, and shortens a datatype IRI that appears in no predicate. Reading the
+  // predicate position alone got all three wrong — every routed document
+  // carried a `@prefix rdf:` line nothing used, while a namespace reaching the
+  // document only as a subject, an object or a datatype was written out in
+  // full. Restating n3's rules here would be a second place for them to drift.
+  //
+  // WRITTEN TWICE: once to see, once to keep. Dropping a declaration nothing
+  // referenced cannot change how anything else renders.
+  const body = turtleOf(quads, SPEC_TERMS.prefixes)
+    .split('\n')
+    .filter((line) => !line.startsWith('@prefix '))
+    .join('\n');
 
-  const writer = new N3Writer({ prefixes: used });
-  for (const quad of quads) writer.addQuad(quad);
-
-  let turtle = '';
-  // n3's `end` is callback-shaped and synchronous when the sink is a string.
-  writer.end((error: unknown, result: string) => {
-    if (error) throw error;
-    turtle = result;
-  });
-
-  return turtle;
+  return turtleOf(quads, Object.fromEntries(
+    Object.entries(SPEC_TERMS.prefixes).filter(([prefix]) => body.includes(`${prefix}:`)),
+  ));
 }

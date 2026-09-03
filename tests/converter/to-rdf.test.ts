@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
-import { convertToRdf } from '../../src/converter/to-rdf.js';
+import { convertToRdf, convertToTurtle } from '../../src/converter/to-rdf.js';
 import { graphDifference, quadsFromTurtle } from '../support/graph.js';
 import { loadFixture } from '../support/fixtures.js';
 
@@ -128,5 +128,93 @@ describe('what it refuses', () => {
 
     expect(written).toContain('"not-asked"');
     expect(written).toContain('"asked-unknown"');
+  });
+});
+
+describe('keys spec declares outside core and the record vocabulary', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord', schemaVersion: '1.3' };
+
+  it('writes businessIdentifier, which every record type may carry', () => {
+    // Declared on `CascadeEntity` and legal on every record, but published in
+    // the `clinical` context — not `core`, not `health`. Resolving against
+    // `core ∪ {vocabulary}` alone turned a field the hand-rolled serializer has
+    // always written into a hard failure the moment a type was routed.
+    expect(convertToRdf({ ...immunization, businessIdentifier: 'biz-1' }))
+      .toContain('<https://ns.cascadeprotocol.org/clinical/v1#businessIdentifier> "biz-1"');
+  });
+
+  it('still refuses a key whose predicate depends on which context is asked', () => {
+    // `supplementName` is `checkup:supplementName` under one context and
+    // `clinical:supplementName` under another, and neither `core` nor `health`
+    // declares it. This is the case the per-vocabulary stack exists for: there
+    // is no single answer, so writing one would be a guess.
+    expect(() => convertToRdf({ ...immunization, supplementName: 'x' }))
+      .toThrow(/supplementName/);
+  });
+});
+
+describe('the subject IRI', () => {
+  it('refuses a record with no id, rather than writing <>', () => {
+    // `<>` is a relative IRI resolving to whatever base the consumer parses
+    // with, so every id-less record collides — reaching the graph and
+    // validating clean, which is what this module exists not to do.
+    expect(() => convertToRdf({ type: 'ImmunizationRecord', vaccineName: 'X' }))
+      .toThrow(/"id"/);
+  });
+
+  it('refuses an id that is not an IRI, naming id rather than the parser', () => {
+    // Left to the vendored parser this surfaced as `Unexpected "<not" on line
+    // 1`, which names neither the record nor the field.
+    expect(() => convertToRdf({ id: 'not an iri', type: 'ImmunizationRecord', vaccineName: 'X' }))
+      .toThrow(/"id"/);
+  });
+});
+
+describe('IRI-valued fields accept any absolute IRI', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord', schemaVersion: '1.3' };
+
+  it('writes a urn: value under a term the context marks @id', () => {
+    // `cascade:creatorWebID` has `rdfs:range rdfs:Resource` and therefore no
+    // value set, so an http-only test reported every other scheme as
+    // inexpressible. Every fixture's own record id is a `urn:uuid:`.
+    expect(convertToRdf({ ...immunization, creatorWebID: 'urn:webid:alice' }))
+      .toContain('<urn:webid:alice>');
+  });
+
+  it('writes a did: value', () => {
+    expect(convertToRdf({ ...immunization, creatorWebID: 'did:example:alice' }))
+      .toContain('<did:example:alice>');
+  });
+
+  it('still resolves a bare token through the range value set', () => {
+    expect(convertToRdf({ ...immunization, dataProvenance: 'ClinicalGenerated' }))
+      .toContain('<https://ns.cascadeprotocol.org/core/v1#ClinicalGenerated>');
+  });
+
+  it('still refuses a bare token that is no member and no IRI', () => {
+    expect(() => convertToRdf({ ...immunization, dataProvenance: 'MadeItUp' }))
+      .toThrow(/Cannot express "dataProvenance"/);
+  });
+});
+
+describe('the Turtle header declares what the document uses', () => {
+  const immunization = {
+    id: 'urn:uuid:test',
+    type: 'ImmunizationRecord',
+    administrationDate: '2024-10-15T10:00:00Z',
+  };
+
+  it('declares no rdf: prefix, because the type triple is written as "a"', () => {
+    // Every record has an `rdf:type` triple and n3 renders it `a`, so a filter
+    // reading the predicate position declared a prefix nothing used.
+    expect(convertToTurtle(immunization)).not.toContain('@prefix rdf:');
+  });
+
+  it('declares a prefix for a namespace that appears only outside the predicate', () => {
+    // `xsd:` reaches the document as a literal's datatype and never as a
+    // predicate, so it was written out in full under a header that had already
+    // declared six other vocabularies.
+    expect(convertToTurtle(immunization)).toContain('@prefix xsd:');
+    expect(convertToTurtle(immunization)).toContain('xsd:dateTime');
   });
 });

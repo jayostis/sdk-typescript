@@ -284,3 +284,25 @@ describe('the module survives its own epic', () => {
     ).toEqual([]);
   });
 });
+
+describe('the assembly survives the upstream fix its overrides wait for', () => {
+  it('does not repeat a class the derived table and an override both supersede', () => {
+    // `SUPERSEDES_OVERRIDES` exists because spec has not yet stated
+    // `clinical:CoverageRecord rdfs:seeAlso coverage:InsurancePlan`
+    // (`jayostis/spec#50` gap 2). When that triple lands,
+    // `scripts/build-record-types.mjs` puts the class into `supersedes` AND the
+    // override still adds it — so `acceptedClassUris` holds it twice and the
+    // `BY_CLASS` loop throws at MODULE EVALUATION, taking the whole package
+    // down at import with a message describing a conflict that does not exist.
+    const [deprecated, superseding] = Object.entries(SUPERSEDES_OVERRIDES)[0];
+
+    const [assembled] = assembleRecordTypes([{
+      iri: superseding,
+      name: 'InsurancePlan',
+      localName: 'InsurancePlan',
+      supersedes: [deprecated],
+    }]);
+
+    expect(new Set(assembled.acceptedClassUris).size).toBe(assembled.acceptedClassUris.length);
+  });
+});

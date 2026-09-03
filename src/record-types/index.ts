@@ -79,11 +79,23 @@ export function assembleRecordTypes(classes: readonly DerivedClass[]): readonly 
       .filter(([, supersedingIri]) => supersedingIri === derived.iri)
       .map(([deprecatedIri]) => deprecatedIri);
 
+    // DEDUPLICATED, because the derived table and the override can both name
+    // one class and the `BY_CLASS` loop treats a repeat as a conflict.
+    // `SUPERSEDES_OVERRIDES` exists precisely because spec has not yet stated
+    // `clinical:CoverageRecord rdfs:seeAlso coverage:InsurancePlan`
+    // (`jayostis/spec#50` gap 2). When that triple lands,
+    // `scripts/build-record-types.mjs` puts the class into `supersedes` and the
+    // override still adds it — so the loop below would throw at MODULE
+    // EVALUATION, taking the whole package down at import, over a class
+    // claimed twice by the same record type. The upstream fix this row waits
+    // for must not be the thing that breaks it.
+    const accepted = new Set([derived.iri, ...derived.supersedes, ...superseded]);
+
     return Object.freeze({
       name: override ?? derived.name,
       aliases: Object.freeze(aliases),
       rdfTypeUri: derived.iri,
-      acceptedClassUris: Object.freeze([derived.iri, ...derived.supersedes, ...superseded]),
+      acceptedClassUris: Object.freeze([...accepted]),
     }) as RecordType;
   });
 
