@@ -24,9 +24,21 @@ import { walk } from './lib/walk.mjs';
 const SRC = 'src/vendor';
 const OUT = 'dist/vendor';
 
+// REFUSES ON NO VENDOR, the same way `copy-spec-data.mjs` refuses on no
+// `src/spec`. `src/converter/to-rdf.ts` and `src/deserializer/n3-adapter.ts`
+// `require('../vendor/n3/...')` at RUNTIME, not at compile time — tsc never
+// checks that the file exists, so exiting 0 here let `npm run build` succeed
+// and ship a package that throws `MODULE_NOT_FOUND` the first time a consumer
+// called `serialize`/`deserialize` on a routed type. An absent build input
+// exiting 0 is the failure mode this repository keeps finding.
 if (!existsSync(SRC)) {
-  console.log('copy-vendor: no src/vendor, nothing to do');
-  process.exit(0);
+  console.error(
+    `copy-vendor: FAILED — ${SRC} is missing. It is generated rather than committed, so run `
+    + 'the vendoring step first — a build that skips it ships with no Turtle parser and no '
+    + 'LICENSE.md at ' + OUT + ', and nothing downstream would report it until a consumer '
+    + 'called serialize()/deserialize() and hit MODULE_NOT_FOUND.',
+  );
+  process.exit(1);
 }
 
 cpSync(SRC, OUT, { recursive: true });

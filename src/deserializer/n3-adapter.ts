@@ -105,7 +105,7 @@ function termValue(term: any, label: (id: string) => string): string {
  * can emit the one and drop the other.
  */
 function collapseLists(quads: readonly any[], label: (id: string) => string): {
-  membersOf: Map<string, string[]>;
+  membersOf: Map<string, unknown[]>;
   chainNodes: Set<string>;
 } {
   const first = new Map<string, string>();
@@ -124,10 +124,27 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
   }
 
   const chainNodes = new Set([...first.keys()].filter((node) => rest.has(node)));
-  const membersOf = new Map<string, string[]>();
+  const membersOf = new Map<string, unknown[]>();
 
-  for (const head of chainNodes) {
-    const members: string[] = [];
+  // A member that is itself a list head is resolved to ITS OWN members rather
+  // than left as the inner list's blank-node label — `( ( "x" ) "y" )` is a
+  // list whose first member is a list, and `termValue` above stores only the
+  // label because it does not know yet which labels are list heads (`chainNodes`
+  // is not built until every quad has been seen). Resolving here, head-first
+  // and memoised in `membersOf`, is what turns that label back into the array.
+  //
+  // `resolving` guards a cycle ACROSS two list heads (`_:a`'s only member is
+  // `_:b`, `_:b`'s only member is `_:a`) the same way `seen` below guards a
+  // cycle WITHIN one: `_:a rdf:rest _:a` cannot happen between two rdf:List
+  // heads our own writer produces, but this reads documents from anywhere else,
+  // and unbounded recursion is a worse failure than one unresolved member.
+  const resolve = (head: string, resolving: Set<string>): unknown[] => {
+    const cached = membersOf.get(head);
+    if (cached) return cached;
+    if (resolving.has(head)) return [];
+    resolving.add(head);
+
+    const members: unknown[] = [];
     const seen = new Set<string>();
 
     // `seen` is not defensiveness about our own writer, it is about documents
@@ -137,11 +154,16 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
       seen.add(node);
       const member = first.get(node);
       if (member === undefined) break;
-      members.push(member);
+      members.push(
+        member === RDF_NIL ? [] : chainNodes.has(member) ? resolve(member, resolving) : member,
+      );
     }
 
     membersOf.set(head, members);
-  }
+    return members;
+  };
+
+  for (const head of chainNodes) resolve(head, new Set());
 
   return { membersOf, chainNodes };
 }
