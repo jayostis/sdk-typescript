@@ -52,7 +52,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { duplicateNames } from './lib/duplicate-names.mjs';
+import { duplicateNamesAmong } from './lib/duplicate-names.mjs';
 import { localNameOf } from './lib/iri.mjs';
 import { recordPopulation } from './lib/record-population.mjs';
 
@@ -201,7 +201,7 @@ const live = derived.filter((entry) => !entry.deprecated);
 // spoken, and that is the one a lookup obeys. Emitting this one is what lets a
 // worklist see the upstream defect at all — an override that resolves a
 // collision also hides it, and a gap nothing reports is a gap nobody fixes.
-const collisions = duplicateNames(live, (entry) => entry.name, (entry) => entry.iri);
+const collisions = duplicateNamesAmong(live, (entry) => entry.name, (entry) => entry.iri);
 
 const banner = [
   '/**',

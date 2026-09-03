@@ -134,6 +134,55 @@ export interface RecordTypeTable {
  * collision is recorded and carried; the refusal happens in the lookup, for the
  * contested name alone.
  */
+/**
+ * Every name split into the ones that resolve and the ones that cannot.
+ *
+ * PARTITIONS, IT DOES NOT FILTER — and that is why this is not
+ * `duplicateNamesAmong` from `scripts/lib/duplicate-names.mjs`, which a reader
+ * comparing the two will reasonably think it duplicates. That one returns ONLY
+ * the collisions and drops every name claimed once, which is what a build-time
+ * report wants. A runtime lookup needs the other half as well: 78 names have to
+ * resolve, and the contested one has to refuse. Reusing it here would answer
+ * half the question and still leave this loop to answer the rest.
+ *
+ * There is a second reason they stay apart, and it outranks the first: nothing
+ * under `scripts/` ships. A consumer installs `dist`, so importing build
+ * tooling into `src/` would put an unpublished file on the runtime path —
+ * exactly what `tests/no-runtime-deps.test.ts` exists to prevent.
+ *
+ * A CONTESTED NAME LANDS IN NEITHER MAP, deliberately. Putting one claimant in
+ * `byName` and recording the collision beside it would leave a lookup that
+ * ANSWERS — with whichever row the iteration reached first, which is the
+ * accident this module was built to remove.
+ */
+function partitionNamesByClaimant(assembled: readonly RecordType[]): {
+  byName: Map<string, RecordType>;
+  contestedNames: Map<string, readonly string[]>;
+} {
+  const claimants = new Map<string, RecordType[]>();
+
+  for (const recordType of assembled) {
+    for (const name of [recordType.name, ...recordType.aliases]) {
+      claimants.set(name, [...(claimants.get(name) ?? []), recordType]);
+    }
+  }
+
+  const byName = new Map<string, RecordType>();
+  const contestedNames = new Map<string, readonly string[]>();
+
+  for (const [name, claiming] of claimants) {
+    const [first] = claiming;
+
+    if (claiming.length > 1) {
+      contestedNames.set(name, Object.freeze(claiming.map((recordType) => recordType.rdfTypeUri)));
+    } else if (first) {
+      byName.set(name, first);
+    }
+  }
+
+  return { byName, contestedNames };
+}
+
 export function assembleRecordTypes(classes: readonly DerivedClass[]): RecordTypeTable {
   const aliasesFor = new Map<string, string[]>();
 
@@ -188,30 +237,7 @@ export function assembleRecordTypes(classes: readonly DerivedClass[]): RecordTyp
   // skipped by forgetting to build it — the argument `src/terms/index.ts` makes
   // for building its map with an explicit loop, and the reason a collision
   // found here is still found here now that it is deferred rather than thrown.
-  const named = new Map<string, RecordType[]>();
-
-  for (const recordType of assembled) {
-    for (const name of [recordType.name, ...recordType.aliases]) {
-      named.set(name, [...(named.get(name) ?? []), recordType]);
-    }
-  }
-
-  const byName = new Map<string, RecordType>();
-  const contestedNames = new Map<string, readonly string[]>();
-
-  for (const [name, claiming] of named) {
-    const [first] = claiming;
-
-    // A contested name is registered in NEITHER map, deliberately. Putting one
-    // claimant in `byName` and recording the collision beside it would leave a
-    // lookup that answers — with whichever row the iteration reached first,
-    // which is the accident this module was built to remove.
-    if (claiming.length > 1) {
-      contestedNames.set(name, Object.freeze(claiming.map((recordType) => recordType.rdfTypeUri)));
-    } else if (first) {
-      byName.set(name, first);
-    }
-  }
+  const { byName, contestedNames } = partitionNamesByClaimant(assembled);
 
   // The class direction, indexed the same way and for the same reason. A
   // `new Map(...)` over pairs keeps the last of two claimants and reports
