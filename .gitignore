@@ -7,6 +7,7 @@ dist/
 # and CI builds it from the commit conformance/scripts/SPEC_PIN names. The cost
 # is that npm run build now needs a spec checkout, exactly as npm test already
 # does.
+src/spec-data/terms.generated.ts
 src/spec/
 
 # NOT ignored, deliberately: src/record-types/generated.ts. It is TypeScript that

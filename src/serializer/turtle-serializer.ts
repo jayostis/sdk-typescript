@@ -19,6 +19,9 @@
 
 import { TurtleBuilder, SubjectBuilder } from './turtle-builder.js';
 import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY } from '../vocabularies/namespaces.js';
+import { convertToTurtle } from '../converter/to-rdf.js';
+import { isMigrated } from '../migration/index.js';
+import { recordTypeFor } from '../record-types/index.js';
 import {
   childPredicateFor,
   childPredicatesIn,
@@ -612,6 +615,26 @@ function sortedPrefixes(prefixes: Map<string, string>): [string, string][] {
  * @throws when a value has no serializable form, or the record type is unknown
  */
 export function serialize(record: CascadeEntity): string {
+  // THE SEAM, and it is a REPLACEMENT rather than a supplement — the shape
+  // `src/validator/validator.ts:381` already uses, for the same reason: running
+  // both paths would write every triple twice.
+  //
+  // ABOVE `collectPrefixes` AND `emitField`, deliberately. #75 warns that the
+  // serializer decides its header in one place and its body in another, and
+  // that a route catching only one of them produces "a document that does not
+  // parse … it fails on the whole record rather than on the field". Routing at
+  // the entry point means one decision, so the two cannot disagree.
+  //
+  // The routed writer emits N-Triples, which is Turtle — every N-Triples
+  // document is a legal Turtle document, with IRIs written out rather than
+  // abbreviated. Nothing downstream reads the prefix header; the conformance
+  // suite compares graphs.
+  const recordType = recordTypeFor(record.type);
+
+  if (recordType && isMigrated(recordType.rdfTypeUri, 'serialize')) {
+    return convertToTurtle({ ...record } as Record<string, unknown>);
+  }
+
   return serializeRecord(record);
 }
 
