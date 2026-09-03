@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTEXTS = join(root, 'src/spec/contexts');
 const ONTOLOGIES = join(root, 'src/spec/ontologies');
-const OUT = join(root, 'src/spec-data/terms.generated.ts');
+const OUT = join(root, 'src/spec/derived/terms.generated.ts');
 
 const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const RANGE = 'http://www.w3.org/2000/01/rdf-schema#range';
@@ -208,7 +208,7 @@ const source = `/**
  * A STRING, PARSED AT LOAD. #76 measured tsc inferring 41,029 types for a
  * comparable object literal; this costs one type and about a millisecond.
  *
- * @module spec-data
+ * @module spec/derived
  */
 
 /** One JSON key, as the context and the ontology together describe it. */
@@ -237,10 +237,10 @@ export const SPEC_TERMS: SpecTerms = JSON.parse(
 ) as SpecTerms;
 `;
 
-// The directory is not in git: everything it holds is generated and ignored,
-// and git does not track an empty directory. A clean clone therefore has no
-// src/spec-data/ at all, which CI found and a local test that deleted only the
-// FILE did not.
+// The directory is not in git: everything under src/spec/ is generated and
+// ignored, and git does not track an empty directory. A clean clone therefore
+// has no src/spec/derived/ at all, which CI found and a local test that deleted
+// only the FILE did not.
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, source, 'utf-8');
 
@@ -258,5 +258,5 @@ console.log(
   `build-terms: ${Object.keys(vocabularies).length} vocabularies, `
   + `${Object.values(vocabularies).reduce((n, t) => n + Object.keys(t).length, 0)} terms, `
   + `${Object.keys(valueSets).length} value sets, ${conflicts.length} cross-context conflicts, `
-  + `${Math.round(payload.length / 1024)}K -> src/spec-data/terms.generated.ts`,
+  + `${Math.round(payload.length / 1024)}K -> src/spec/derived/terms.generated.ts`,
 );

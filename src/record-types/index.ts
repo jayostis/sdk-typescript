@@ -1,13 +1,14 @@
 /**
  * Everything this SDK knows about a record type, behind three functions.
  *
- * The front door. Import from here, never from `./generated.js` or
- * `./overrides.js` — a caller reaching those gets rows without the invariants
- * below having been checked.
+ * The front door. Import from here, never from
+ * `../spec/derived/record-types.generated.js` or `./overrides.js` — a caller
+ * reaching those gets rows without the invariants below having been checked.
  *
  * DERIVED, NOT TRANSCRIBED. The classes and their published names come from
  * `src/spec/`, built from the checkout by `scripts/build-spec-data.mjs` and
- * turned into `./generated.ts` by `scripts/build-record-types.mjs`. The
+ * turned into `src/spec/derived/record-types.generated.ts` by
+ * `scripts/build-record-types.mjs`. The
  * population is spec's, stated by `cascade:RecordClass` — a marker the
  * record-bearing classes carry directly. It replaces a reading of
  * `rdfs:subClassOf prov:Entity` that `jayostis/spec#34` (ASK-05) ruled out:
@@ -29,10 +30,10 @@
 
 export * from './types.js';
 export { NAME_OVERRIDES, INPUT_ALIASES, SUPERSEDES_OVERRIDES } from './overrides.js';
-export type { DerivedClass } from './generated.js';
+export type { DerivedClass } from '../spec/derived/record-types.generated.js';
 
-import { DERIVED_CLASSES } from './generated.js';
-import type { DerivedClass } from './generated.js';
+import { DERIVED_CLASSES } from '../spec/derived/record-types.generated.js';
+import type { DerivedClass } from '../spec/derived/record-types.generated.js';
 import { INPUT_ALIASES, NAME_OVERRIDES, SUPERSEDES_OVERRIDES } from './overrides.js';
 import type { RecordType } from './types.js';
 

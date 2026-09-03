@@ -1,7 +1,7 @@
 /**
  * The derived table is what spec says, and the exceptions are declared.
  *
- * `src/record-types/generated.ts` is built by `scripts/build-record-types.mjs`
+ * `src/spec/derived/record-types.generated.ts` is built by `scripts/build-record-types.mjs`
  * from `src/spec/`, which is built from the checkout. Nothing here is
  * transcribed — but "derived" is a claim, and a claim nothing checks is how
  * `InsurancePlan` spent five releases pointing at `clinical:CoverageRecord`
@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll } from 'vitest';
 
 import { allRecordTypes, recordTypeForClass } from '../../src/record-types/index.js';
-import { DERIVED_CLASSES } from '../../src/record-types/generated.js';
+import { DERIVED_CLASSES } from '../../src/spec/derived/record-types.generated.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ONTOLOGIES = join(repoRoot, 'src/spec/ontologies');
@@ -146,7 +146,7 @@ describe('the derived table is spec\'s record-bearing population', () => {
 
     expect(
       missing,
-      'src/record-types/generated.ts has drifted from src/spec/. Rebuild with '
+      'src/spec/derived/record-types.generated.ts has drifted from src/spec/. Rebuild with '
       + '`node scripts/build-record-types.mjs`; if the classes really moved, that is a spec bump.',
     ).toEqual([]);
   });
@@ -255,7 +255,7 @@ describe('names come from the published contexts', () => {
   });
 });
 
-describe('the committed table is what the build produces', () => {
+describe('the table on disk is what the build produces', () => {
   it('regenerates byte-identically', () => {
     // The strongest form of the check, and the one `tests/vendor-drift.test.ts`
     // already uses for the vendored parser: run the producer and compare. The
@@ -265,16 +265,22 @@ describe('the committed table is what the build produces', () => {
     // Rebuilding in a test is safe because the output is deterministic — the
     // generator sorts at every level for exactly this reason — so a passing run
     // leaves the tree untouched and a failing one leaves it correct.
-    const generated = join(repoRoot, 'src/record-types/generated.ts');
-    const committed = readFileSync(generated, 'utf-8');
+    //
+    // The table is gitignored, so this is no longer a check that a commit kept
+    // up: it is a check that the file the suite just imported is the one the
+    // generator produces from the spec data on disk. A stale build left by an
+    // interrupted `npm run generate`, or a hand edit made to get a run green,
+    // is what it catches now.
+    const generated = join(repoRoot, 'src/spec/derived/record-types.generated.ts');
+    const onDisk = readFileSync(generated, 'utf-8');
 
     execFileSync('node', [join(repoRoot, 'scripts/build-record-types.mjs')], { cwd: repoRoot });
 
     expect(
       readFileSync(generated, 'utf-8'),
-      'src/record-types/generated.ts differs from what scripts/build-record-types.mjs '
-      + 'produces. Either it was edited by hand — it says not to be — or spec moved and the '
-      + 'rebuilt file is the change to commit.',
-    ).toBe(committed);
+      'src/spec/derived/record-types.generated.ts differs from what scripts/build-record-types.mjs '
+      + 'produces. Either it was edited by hand — it says not to be — or the spec data under '
+      + '`src/spec/` moved after it was built. `npm run generate` rebuilds both in order.',
+    ).toBe(onDisk);
   }, 60_000);
 });

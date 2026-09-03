@@ -80,7 +80,7 @@ export function migrationStateOf(
         `The migration allow-list names ${classUri}, which is not a registered class. An entry `
         + 'nothing matches reads as "not routed" — the same answer as leaving it out — so the '
         + 'type it was meant to switch would stay on the old path with nothing to say so. Use '
-        + 'the rdfTypeUri of a record type in src/record-types/generated.ts.',
+        + 'the rdfTypeUri of a record type in src/spec/derived/record-types.generated.ts.',
       );
     }
 

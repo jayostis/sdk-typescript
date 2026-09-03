@@ -30,7 +30,7 @@ import { describe, it, expect } from 'vitest';
 
 // @ts-expect-error -- a build script, deliberately plain JavaScript and untyped.
 import { recordPopulation, MARKER_RULE, BRIDGE_RULE } from '../../scripts/lib/record-population.mjs';
-import { DERIVED_CLASSES } from '../../src/record-types/generated.js';
+import { DERIVED_CLASSES } from '../../src/spec/derived/record-types.generated.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ONTOLOGIES = join(repoRoot, 'src/spec/ontologies');

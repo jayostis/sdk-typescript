@@ -199,7 +199,18 @@ const vocabularies = Object.keys(manifest).sort();
 
 // Removed rather than overwritten: a vocabulary dropped from the manifest must
 // not leave its artifact behind, where every consumer would go on reading it.
-rmSync(join(root, 'src/spec'), { recursive: true, force: true });
+//
+// THE TWO DIRECTORIES THIS SCRIPT OWNS, not `src/spec/` whole. Everything under
+// `src/spec/` is generated, but not all of it by this script:
+// `src/spec/derived/` is written by `build-record-types.mjs` and
+// `build-terms.mjs`, which run AFTER this one and read what it writes. Wiping
+// the parent would delete their output too — harmless in `npm run generate`,
+// where they run next, and not harmless anywhere a test rebuilds only the data
+// (`tests/record-types/derivation.test.ts`, `tests/spec-data/ontology-jsonld.test.ts`),
+// which would leave a sibling test file importing a module that no longer
+// exists.
+rmSync(OUT, { recursive: true, force: true });
+rmSync(CONTEXTS, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 mkdirSync(CONTEXTS, { recursive: true });
 

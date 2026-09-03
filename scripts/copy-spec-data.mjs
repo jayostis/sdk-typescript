@@ -1,5 +1,5 @@
 /**
- * Copy `src/spec/` into `dist/spec/`, verbatim.
+ * Copy the DATA under `src/spec/` into `dist/spec/`.
  *
  * The sibling of `copy-vendor.mjs`, for the same reason and with the same
  * refusal. `tsconfig.json` has `include: ["src/**\/*.ts"]`, so tsc never opens a
@@ -13,32 +13,50 @@
  * infers a structural type for every node of it. #76 measured the real payload
  * through that path at +10.9% and 32,502 types. A copy costs neither.
  *
- * REFUSES ON AN EMPTY DIRECTORY. `src/spec/` is gitignored and generated, so the
- * state this has to guard against is a build where `build-spec-data` did not
- * run: the package would ship with no ontologies, and everything reading them
- * would report "that class is not declared" rather than failing. An absence that
+ * DATA ONLY, NOT THE WHOLE DIRECTORY. `src/spec/` holds two kinds of generated
+ * artifact and they reach `dist/` by different routes. The `.jsonld` and
+ * `.json` under `ontologies/` and `contexts/` are data tsc will not touch, so
+ * they are copied. `src/spec/derived/*.ts` is TypeScript that tsc has ALREADY
+ * compiled into `dist/spec/derived/*.js`, so copying it too would put an
+ * uncompiled `.ts` next to its own output in the published package — a second,
+ * stale copy of a module consumers can import.
+ *
+ * REFUSES ON NO DATA. `src/spec/` is gitignored and generated, so the state
+ * this has to guard against is a build where `build-spec-data` did not run: the
+ * package would ship with no ontologies, and everything reading them would
+ * report "that class is not declared" rather than failing. An absence that
  * reads as an answer is the failure mode this repository keeps finding.
  */
-import { cpSync, existsSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { dirname, extname, join, relative } from 'node:path';
 
 import { walk } from './lib/walk.mjs';
 
 const SRC = 'src/spec';
 const OUT = 'dist/spec';
 
-if (!existsSync(SRC) || walk(SRC).length === 0) {
+/** A file tsc will not carry, and therefore one this has to. */
+const isData = (file) => ['.jsonld', '.json'].includes(extname(file));
+
+const data = existsSync(SRC) ? walk(SRC).filter(isData) : [];
+
+if (data.length === 0) {
   console.error(
-    `copy-spec-data: FAILED — ${SRC} is missing or empty. It is generated rather than committed, `
-    + 'so run `node scripts/build-spec-data.mjs` first (that is what `npm run build` does). A '
-    + 'package shipped without it answers every question about spec with "absent", which is '
-    + 'indistinguishable from a class that does not exist.',
+    `copy-spec-data: FAILED — ${SRC} is missing or holds no data files. It is generated rather `
+    + 'than committed, so run `node scripts/build-spec-data.mjs` first (that is what `npm run '
+    + 'build` does). A package shipped without it answers every question about spec with '
+    + '"absent", which is indistinguishable from a class that does not exist.',
   );
   process.exit(1);
 }
 
-cpSync(SRC, OUT, { recursive: true });
+const copied = data.map((file) => {
+  const target = join(OUT, relative(SRC, file));
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(file, target);
+  return target;
+});
 
-const copied = walk(OUT);
 const bytes = copied.reduce((total, file) => total + statSync(file).size, 0);
 
 // The provenance is what lets a shipped artifact be checked against

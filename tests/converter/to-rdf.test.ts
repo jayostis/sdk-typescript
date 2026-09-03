@@ -1,7 +1,7 @@
 /**
  * The generic writer, against the corpus it has to reproduce.
  *
- * `convertToRdf` reads nothing but `src/spec-data/` and `src/record-types/`,
+ * `convertToRdf` reads nothing but `src/spec/derived/` and `src/record-types/`,
  * both generated from what spec publishes. No model, no term module, no
  * predicate table. This compares its output to a fixture's own
  * `expectedOutput.turtle` as GRAPHS, canonically — the fixtures were written

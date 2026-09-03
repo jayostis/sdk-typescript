@@ -2,8 +2,9 @@
  * A Cascade record to RDF, from spec's published data and nothing else.
  *
  * NO MODELS, NO TERM MODULES, NO PREDICATE TABLE. Every fact this reads comes
- * from `src/spec-data/terms.generated.ts` and `src/record-types/generated.ts`,
- * both built from the contexts and ontologies this package ships. It is the
+ * from `src/spec/derived/terms.generated.ts` and
+ * `src/spec/derived/record-types.generated.ts`, both built from the contexts
+ * and ontologies this package ships. It is the
  * generic writer #69 exists to build, at the size #80 predicted, and it is
  * routed to one record type at a time through `src/migration/`.
  *
@@ -34,8 +35,8 @@ import { createRequire } from 'node:module';
 
 import { recordTypeFor } from '../record-types/index.js';
 import { quoteTurtleString } from '../serializer/turtle-builder.js';
-import { SPEC_TERMS } from '../spec-data/terms.generated.js';
-import type { TermDefinition } from '../spec-data/terms.generated.js';
+import { SPEC_TERMS } from '../spec/derived/terms.generated.js';
+import type { TermDefinition } from '../spec/derived/terms.generated.js';
 
 const require = createRequire(import.meta.url);
 

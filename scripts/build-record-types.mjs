@@ -39,7 +39,7 @@
  * is the name this SDK already used.
  */
 
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,7 +48,7 @@ import { MARKER_RULE, recordPopulation } from './lib/record-population.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ONTOLOGIES = join(root, 'src/spec/ontologies');
 const CONTEXTS = join(root, 'src/spec/contexts');
-const OUT = join(root, 'src/record-types/generated.ts');
+const OUT = join(root, 'src/spec/derived/record-types.generated.ts');
 
 const SEE_ALSO = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
@@ -224,15 +224,19 @@ const banner = [
   '',
 ].join('\n');
 
+// The directory is not in git: everything under `src/spec/` is generated and
+// ignored, and git does not track an empty directory, so a clean clone has no
+// `src/spec/derived/` to write into.
+mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, banner, 'utf-8');
 
 // WHAT THE FLIP COST, printed because nothing else would say. The rule changes
 // on the first marked class, so every class the superseded rule reached and the
 // marker does not leaves the table in the same build — and a class that is
-// simply absent from `generated.ts` is indistinguishable from one spec never
-// declared. Not a failure: most of what the marker drops is a correction (the
-// `cascade:DataProvenance` members are values, not records), and a build that
-// refused them would be refusing the marker for working.
+// simply absent from `record-types.generated.ts` is indistinguishable from one
+// spec never declared. Not a failure: most of what the marker drops is a
+// correction (the `cascade:DataProvenance` members are values, not records),
+// and a build that refused them would be refusing the marker for working.
 if (population.dropped.length > 0) {
   console.warn(
     `\n  NOTE: the ${MARKER_RULE} rule is in effect and ${population.dropped.length} live `
@@ -255,5 +259,5 @@ if (wrongly.length > 0) {
 
 console.log(
   `build-record-types: ${derived.filter((e) => !e.deprecated).length} record classes `
-  + `by ${population.rule} -> src/record-types/generated.ts`,
+  + `by ${population.rule} -> src/spec/derived/record-types.generated.ts`,
 );

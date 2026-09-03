@@ -257,7 +257,7 @@ describe('the assembly refuses what it cannot decide', () => {
 });
 
 describe('the module survives its own epic', () => {
-  it('imports nothing from outside src/record-types/', () => {
+  it('imports nothing but itself and the generated spec data', () => {
     // #87 deletes `src/terms/`, `src/serializer/`, `src/deserializer/`,
     // `src/validator/`, `src/vocabularies/` and `src/jsonld/`. This directory is
     // not on that list and must not be, because the public API takes names and
@@ -267,6 +267,17 @@ describe('the module survives its own epic', () => {
     // `src/vocabularies/` until the classes were derived, which would have made
     // it break at Phase 9 and be discovered there. Both are gone; this is what
     // keeps them gone.
+    //
+    // `../spec/derived/` IS PERMITTED, and it is the one exception the stated
+    // rule always meant to allow. The derived table is not a sibling module
+    // with its own opinions — it is `scripts/build-record-types.mjs`'s output,
+    // rebuilt from the spec checkout on every `npm run generate` and gitignored
+    // precisely so it cannot fall behind. It is what Phase 9 KEEPS: the epic
+    // deletes the six hand-written directories in favour of reading spec, and
+    // this is the reading. The table lived in this directory as a committed
+    // file until every generated artefact was moved under `src/spec/` and
+    // ignored, so "nothing outside itself" was a statement about where the
+    // build happened to write, not about what this module depends on.
     const dir = resolve(dirname(fileURLToPath(import.meta.url)), '../../src/record-types');
 
     const outward = readdirSync(dir)
@@ -274,13 +285,13 @@ describe('the module survives its own epic', () => {
       .flatMap((file) => [...readFileSync(join(dir, file), 'utf-8')
         .matchAll(/from '([^']+)'/g)]
         .map((match) => `${file} -> ${match[1]}`)
-        .filter((line) => !line.includes('-> ./')));
+        .filter((line) => !line.includes('-> ./') && !line.includes('-> ../spec/derived/')));
 
     expect(
       outward,
-      'src/record-types/ must import nothing outside itself. Phase 9 (#87) deletes six '
-      + 'sibling directories, and a module that imports one of them does not survive the '
-      + 'epic it was built for.',
+      'src/record-types/ must import nothing but itself and ../spec/derived/. Phase 9 (#87) '
+      + 'deletes six sibling directories, and a module that imports one of them does not '
+      + 'survive the epic it was built for.',
     ).toEqual([]);
   });
 });
