@@ -115,12 +115,24 @@ for (const node of nodes.values()) {
  * declares its three values as SUBCLASSES; `cascade:ConsentScope` and five
  * more (`GenerationTrigger`, `ReconciliationStatus`,
  * `ConflictResolutionStrategy`, `LayerPromotionStatusValue`,
- * `WalkingSteadinessLevel`) declare theirs as NAMED INDIVIDUALS — each member
+ * `health:SleepQuality`) declare theirs as NAMED INDIVIDUALS — each member
  * typed `owl:NamedIndividual` and typed AGAIN, directly, to the range class,
  * rather than related to it by `rdfs:subClassOf` at all (#91). A rule that
  * only walked `rdfs:subClassOf` was invisible to the second form, so
  * `cascade:consentScope` carrying `"SocialHistoryConsent"` resolved to
  * nothing.
+ *
+ * `health:WalkingSteadinessLevel` is NOT one of the six: its members
+ * (`WalkingSteadinessLow/OK/Unknown/VeryLow`) carry only the range type, with
+ * no `owl:NamedIndividual` in their `@type` array, so `isNamedIndividual`
+ * evaluates false for all of them below. That is currently latent only
+ * because the context's `walkingSteadiness` term resolves to an unrelated
+ * `xsd:string` range rather than this enum range — a separate, pre-existing
+ * naming mismatch that happens to keep this class from ever being looked up
+ * here. If that mismatch is fixed independently, this class would wrongly
+ * fall into `unclassifiableRanges` with a `specFix` message asking spec to
+ * add members it has already published as plain-typed individuals, not
+ * named individuals.
  */
 function membersOf(rangeIri) {
   // A PROV root is not a code list. `rdfs:range prov:Entity` says "the value is

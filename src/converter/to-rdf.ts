@@ -36,7 +36,7 @@ import { createRequire } from 'node:module';
 import { recordTypeFor } from '../record-types/index.js';
 import { quoteTurtleString } from '../serializer/turtle-builder.js';
 import { SPEC_TERMS } from '../spec/derived/terms.generated.js';
-import type { TermDefinition } from '../spec/derived/terms.generated.js';
+import type { TermDefinition, UnclassifiableRange } from '../spec/derived/terms.generated.js';
 
 const require = createRequire(import.meta.url);
 
@@ -197,6 +197,21 @@ const literal = (value: string, datatype?: string): string =>
   `${quoteTurtleString(value)}${datatype ? `^^<${datatype}>` : ''}`;
 
 /**
+ * The spec-fix entry for a range, if `range` names one of the classes spec
+ * declared and never gave a field or a published member (#91).
+ *
+ * `SPEC_TERMS.unclassifiableRanges` is declared non-optional on `SpecTerms`,
+ * but that only binds a freshly generated `terms.generated.ts` — the map
+ * itself is a JSON literal baked in at generation time, so a copy of the file
+ * built by a pre-#91 version of `scripts/build-terms.mjs` has no such key at
+ * runtime despite the type saying otherwise. `?.` here is what stands between
+ * that stale-file case and a `TypeError` thrown from every `@id`-typed term,
+ * unclassifiable or not — one shared check, so the two call sites can't drift.
+ */
+const unclassifiableRangeFor = (range: string | undefined): UnclassifiableRange | undefined =>
+  range ? SPEC_TERMS.unclassifiableRanges?.[range] : undefined;
+
+/**
  * One value, as an N-Triples object term.
  *
  * Returns `null` for a value with no expressible form, which the caller turns
@@ -265,7 +280,7 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
     // it is refused here — `null`, turned by the caller into the throw naming
     // the term, the range and what spec would need to add — rather than
     // silently taking the permissive branch below.
-    if (definition.range && SPEC_TERMS.unclassifiableRanges[definition.range]) return null;
+    if (unclassifiableRangeFor(definition.range)) return null;
 
     // Any absolute IRI, whatever its scheme. `cascade:creatorWebID` has
     // `rdfs:range rdfs:Resource` and therefore no value set at all, so this is
@@ -375,7 +390,7 @@ export function convertToRdf(record: Record<string, unknown>): string {
       // mistake in THIS record; the record just happens to be the one that
       // exercised a gap on spec's side. The refusal has to say so, or a reader
       // goes looking for a typo that is not there.
-      const gap = definition.range ? SPEC_TERMS.unclassifiableRanges[definition.range] : undefined;
+      const gap = unclassifiableRangeFor(definition.range);
 
       if (gap) {
         throw new Error(
