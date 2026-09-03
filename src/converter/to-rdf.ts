@@ -357,7 +357,20 @@ export function convertToTurtle(record: Record<string, unknown>): string {
     .filter((line) => !line.startsWith('@prefix '))
     .join('\n');
 
+  // LITERAL TEXT IS NOT AN ABBREVIATION. The search above reads the rendered
+  // document, and a literal is part of that document without being part of what
+  // the writer abbreviated — so a record whose value happens to contain
+  // `clinical:` declared a vocabulary the body never named. Legal Turtle and the
+  // same graph either way, and precisely the noise this filter exists to remove.
+  //
+  // Blanked rather than matched around. A prefixed name can follow a newline, a
+  // space, `;`, `,`, `[`, `(` or `^^`, and a literal can contain any of those —
+  // including real newlines inside a triple-quoted string — so a pattern over
+  // what MAY precede a prefix has to be right about every one of them. Removing
+  // the literals first leaves only positions where an abbreviation can occur.
+  const abbreviations = body.replace(/"""[\s\S]*?"""|"(?:[^"\\]|\\.)*"/g, '""');
+
   return turtleOf(quads, Object.fromEntries(
-    Object.entries(SPEC_TERMS.prefixes).filter(([prefix]) => body.includes(`${prefix}:`)),
+    Object.entries(SPEC_TERMS.prefixes).filter(([prefix]) => abbreviations.includes(`${prefix}:`)),
   ));
 }

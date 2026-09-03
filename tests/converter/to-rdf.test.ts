@@ -217,4 +217,28 @@ describe('the Turtle header declares what the document uses', () => {
     expect(convertToTurtle(immunization)).toContain('@prefix xsd:');
     expect(convertToTurtle(immunization)).toContain('xsd:dateTime');
   });
+
+  it('ignores a prefix-like string inside a literal', () => {
+    // The used-prefix test reads the RENDERED document, because only the writer
+    // knows what it abbreviated. A literal is part of that document and is not
+    // part of what it abbreviated, so a record whose text happens to contain
+    // `clinical:` must not make the header declare a vocabulary the body never
+    // names — which is exactly the noise the filter exists to remove.
+    const written = convertToTurtle({
+      ...immunization,
+      vaccineName: 'given per clinical: notes',
+    });
+
+    expect(written).not.toContain('@prefix clinical:');
+    expect(written, 'the literal itself must survive intact').toContain('per clinical: notes');
+  });
+
+  it('still declares the prefixes the body does use', () => {
+    // The other direction, so a filter that fixed the case above by declaring
+    // nothing at all would fail here.
+    const written = convertToTurtle({ ...immunization, vaccineName: 'COVID-19' });
+
+    expect(written).toContain('@prefix health:');
+    expect(written).toContain('@prefix xsd:');
+  });
 });
