@@ -20,6 +20,28 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
+ * A class IRI as the CURIE a compact JSON-LD document should carry.
+ *
+ * CONTRACTED HERE, not carried on the record type. `RecordType` used to hold
+ * both a CURIE and an IRI, and the CURIE cost a hand-kept prefix map to expand
+ * — the last such map once the classes are derived from spec, because expanded
+ * JSON-LD carries IRIs and no prefixes by construction.
+ *
+ * A compact document with an `@context` is the one place the short form is
+ * genuinely wanted, so the contraction happens at the only site that wants it.
+ * An IRI under no known prefix comes back unchanged, which is valid JSON-LD and
+ * is what a class from a vocabulary this SDK has no prefix for should produce.
+ */
+function curieOf(iri: string): string {
+  for (const [prefix, namespace] of Object.entries(NAMESPACES)) {
+    // `cascade` and `core` share a namespace; `cascade` is what every context
+    // and every serialized document uses, and it sorts first here.
+    if (iri.startsWith(namespace)) return `${prefix}:${iri.slice(namespace.length)}`;
+  }
+  return iri;
+}
+
+/**
  * Convert a Cascade Protocol record to a JSON-LD document.
  *
  * The resulting document includes:
@@ -48,7 +70,7 @@ export function toJsonLd(record: CascadeEntity): object {
   const doc: Record<string, unknown> = {
     '@context': CONTEXT_URI,
     '@id': record.id,
-    '@type': recordType.rdfType,
+    '@type': curieOf(recordType.rdfTypeUri),
   };
 
   // Widened once, as `serializeRecord` does at turtle-serializer.ts:642. A term

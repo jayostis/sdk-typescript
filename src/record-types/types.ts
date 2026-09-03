@@ -31,16 +31,16 @@ export interface RecordType {
   /** Other spellings accepted on input, never returned. */
   readonly aliases: readonly string[];
 
-  /** The class this SDK WRITES, as a CURIE: `'clinical:Medication'`. */
-  readonly rdfType: string;
-
   /**
-   * The same class, expanded once.
+   * The class IRI this record type is written as.
    *
-   * Twelve `indexOf(':')`-and-two-`slice`s appeared across four files, seven of
-   * them splitting a class CURIE. More to the point for #69: this is derived
-   * from the ontologies rather than transcribed, so it is the one key that
-   * survives the deletion of `src/vocabularies/`.
+   * A FULL IRI, NOT A CURIE. `rdfType` used to sit beside this holding
+   * `'clinical:Medication'`, which read nicely and cost a prefix map to expand —
+   * twelve `indexOf(':')`-and-two-`slice`s across four files, seven of them
+   * splitting a class CURIE. The prefix map is the last thing that would have
+   * to be hand-kept once the classes are derived, because expanded JSON-LD
+   * carries IRIs and no prefixes: `@prefix health: <...>` does not survive the
+   * conversion, by construction. One identifier, and nothing to expand.
    */
   readonly rdfTypeUri: string;
 
@@ -54,57 +54,4 @@ export interface RecordType {
    * bug dressed up as standards compliance.
    */
   readonly acceptedClassUris: readonly string[];
-}
-
-/**
- * One `owl:Class` declaration as the derivation needs it.
- *
- * Deliberately not an RDF term, a quad, or a path on disk. The derivation takes
- * these as an ARGUMENT — see {@link deriveRecordTypes} — and the whole benefit
- * of that is that a test can write two of them in an object literal.
- */
-export interface ClassDeclaration {
-  /** The vocabulary prefix the class declares itself under: `'clinical'`. */
-  readonly prefix: string;
-
-  /** The local name: `'Medication'`. */
-  readonly localName: string;
-
-  /**
-   * `owl:deprecated`, in either spelling.
-   *
-   * A deprecated class is READ but never WRITTEN, so it must not be a
-   * derivation target: `clinical:CoverageRecord` is declared, is an exact
-   * local-name match for the accepted input spelling `CoverageRecord`, and
-   * deriving to it would make this SDK write the class #26 removed.
-   */
-  readonly deprecated?: boolean;
-}
-
-/** A name that more than one vocabulary declares a class for. */
-export interface Ambiguity {
-  readonly name: string;
-
-  /** Every candidate CURIE, sorted, so the message is stable. */
-  readonly candidates: readonly string[];
-}
-
-/**
- * What derivation could work out, and what it could not.
- *
- * `unresolved` is the complete list of names needing a declared override, and
- * an ambiguous name is in BOTH: `ambiguous` says why — which candidates — and
- * `unresolved` says that something must decide. A caller reading only
- * `unresolved` cannot miss a collision, which is the failure this shape exists
- * to prevent.
- */
-export interface DerivationReport {
-  /** `name -> CURIE`, for names exactly one non-deprecated class matches. */
-  readonly derived: ReadonlyMap<string, string>;
-
-  /** Names more than one vocabulary declares, with their candidates. */
-  readonly ambiguous: readonly Ambiguity[];
-
-  /** Every name derivation could not resolve to exactly one class, sorted. */
-  readonly unresolved: readonly string[];
 }

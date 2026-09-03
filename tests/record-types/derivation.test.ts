@@ -1,216 +1,235 @@
 /**
- * The committed table is what derivation produces from `spec`, and this is
- * what says so.
+ * The derived table is what spec says, and the exceptions are declared.
  *
- * `src/record-types/table.ts` is hand-committed because `src/` cannot read a
- * `spec` checkout — a consumer installs `dist` and has none. A committed copy
- * of somebody else's fact is exactly what #69 exists to remove, so the copy
- * has to be COMPARED rather than trusted: this re-runs the derivation against
- * the checkout and fails naming the row that moved.
+ * `src/record-types/generated.ts` is built by `scripts/build-record-types.mjs`
+ * from `src/spec/`, which is built from the checkout. Nothing here is
+ * transcribed — but "derived" is a claim, and a claim nothing checks is how
+ * `InsurancePlan` spent five releases pointing at `clinical:CoverageRecord`
+ * (#26). This re-runs the derivation against the shipped data and fails naming
+ * what moved.
  *
- * The table it replaces was equally hand-written and nothing compared it to
- * anything, which is how `InsurancePlan` spent five releases pointing at
- * `clinical:CoverageRecord` (#26). The point of this file is that the same
- * mistake now has somewhere to be reported.
- *
- * The synthetic cases are not decoration. `SocialHistoryRecord` is the only
- * local-name collision the corpus contains, so without classes written by hand
- * the collision rule would be tested once, by accident of what `spec` happens
- * to declare today.
+ * THE PENDING LIST IS COMPARED BOTH WAYS. `src/record-types/pending-spec-50.json`
+ * names twelve classes spec's own record-bearing rule does not reach. An entry
+ * that stops being needed — because spec declared the axiom — fails here, so
+ * the list can only shrink and shrinking it is a deliberate edit. An exception
+ * nothing re-checks is an exemption.
  */
 
-import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import {
-  RDF_TYPE_OVERRIDES,
-  deriveRecordTypes,
-  allRecordTypes,
-} from '../../src/record-types/index.js';
-import { RECORD_CLASSES } from '../../src/record-types/table.js';
-import { ontologyClasses } from '../support/ontology-classes.js';
+import { describe, it, expect, beforeAll } from 'vitest';
 
-/** Every name this SDK accepts, canonical and alias alike. */
-const ACCEPTED_NAMES = Object.keys(RECORD_CLASSES);
+import { allRecordTypes, recordTypeForClass } from '../../src/record-types/index.js';
+import { DERIVED_CLASSES } from '../../src/record-types/generated.js';
 
-describe('derivation against the spec checkout', () => {
-  it('resolves every name it does not report as unresolved', () => {
-    const { derived, unresolved } = deriveRecordTypes(ontologyClasses(), ACCEPTED_NAMES);
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const ONTOLOGIES = join(repoRoot, 'src/spec/ontologies');
 
-    expect(derived.size + unresolved.length).toBe(ACCEPTED_NAMES.length);
-  });
+const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
+const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
+const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
+const RECORD_ROOTS = new Set([
+  'http://www.w3.org/ns/prov#Entity',
+  'http://www.w3.org/ns/prov#Activity',
+]);
 
-  it('reports exactly these six names as needing an override', () => {
-    // Enumerated, not counted. `toHaveLength(6)` passes on a list with the
-    // right size and the wrong contents, which is the failure this exists to
-    // catch — a class arriving in `spec` under a name an override already
-    // covers would keep the count and change the meaning.
-    const { unresolved } = deriveRecordTypes(ontologyClasses(), ACCEPTED_NAMES);
+/**
+ * Build the artifacts if they are absent.
+ *
+ * `src/spec/` is gitignored and generated, so a clean clone has none. Failing
+ * teaches people to ignore a red suite on a fresh checkout; skipping makes
+ * every assertion below vacuous exactly when the data has never been produced.
+ */
+beforeAll(() => {
+  if (!existsSync(ONTOLOGIES)) {
+    execFileSync('node', [join(repoRoot, 'scripts/build-spec-data.mjs')], { cwd: repoRoot });
+    execFileSync('node', [join(repoRoot, 'scripts/build-record-types.mjs')], { cwd: repoRoot });
+  }
+}, 60_000);
 
-    expect([...unresolved].sort()).toEqual([
-      'ClinicalSocialHistoryRecord',
-      'CoverageRecord',
-      'MedicationRecord',
-      'ProcedureRecord',
-      'SocialHistoryConsent',
-      'SocialHistoryRecord',
-    ]);
-  });
+interface Node { '@id': string; '@type'?: string[]; [key: string]: unknown }
 
-  it('has an override for every unresolved name, and no override it does not need', () => {
-    // Both directions. An override with nothing to override is a line nobody
-    // will delete, and it hides the day derivation stops resolving a row.
-    const { unresolved } = deriveRecordTypes(ontologyClasses(), ACCEPTED_NAMES);
+/** The shipped graph, merged across vocabularies. */
+function graph(): Map<string, Node> {
+  const nodes = new Map<string, Node>();
 
-    expect(Object.keys(RDF_TYPE_OVERRIDES).sort()).toEqual([...unresolved].sort());
-  });
-
-  it('names SocialHistoryRecord as the corpus collision, with both candidates', () => {
-    const { ambiguous } = deriveRecordTypes(ontologyClasses(), ACCEPTED_NAMES);
-
-    expect(ambiguous).toEqual([
-      {
-        name: 'SocialHistoryRecord',
-        candidates: ['clinical:SocialHistoryRecord', 'health:SocialHistoryRecord'],
-      },
-    ]);
-  });
-
-  it('agrees with the committed table on every derived row', () => {
-    // The assertion this file exists for. 33 rows, each named on failure.
-    const { derived } = deriveRecordTypes(ontologyClasses(), ACCEPTED_NAMES);
-    const disagreements: string[] = [];
-
-    for (const [name, curie] of derived) {
-      if (RECORD_CLASSES[name] !== curie) {
-        disagreements.push(`${name}: spec says ${curie}, table says ${RECORD_CLASSES[name]}`);
-      }
+  for (const file of readdirSync(ONTOLOGIES).filter((f) => f.endsWith('.jsonld'))) {
+    for (const node of JSON.parse(readFileSync(join(ONTOLOGIES, file), 'utf-8')) as Node[]) {
+      // Merged, because a subclass chain crosses vocabularies —
+      // `clinical:SocialHistoryRecord`'s parent is declared in core — and a
+      // per-file walk would call a class unreachable purely because its parent
+      // was declared elsewhere.
+      nodes.set(node['@id'], { ...(nodes.get(node['@id']) ?? {}), ...node });
     }
+  }
+
+  return nodes;
+}
+
+const nodes = graph();
+
+/** Spec's own rule: does this class's superclass chain reach a PROV root? */
+function bearsRecords(iri: string, seen = new Set<string>()): boolean {
+  if (seen.has(iri)) return false;
+  seen.add(iri);
+
+  const parents = ((nodes.get(iri)?.[SUB_CLASS_OF] ?? []) as { '@id'?: string }[])
+    .map((value) => value['@id'])
+    .filter((value): value is string => Boolean(value));
+
+  return parents.some((parent) => RECORD_ROOTS.has(parent) || bearsRecords(parent, seen));
+}
+
+const pending = JSON.parse(
+  readFileSync(join(repoRoot, 'src/record-types/pending-spec-50.json'), 'utf-8'),
+) as { entries: { class: string; declares: string; detail: string }[] };
+
+describe('the derived table is spec\'s record-bearing population', () => {
+  it('finds classes at all', () => {
+    // A zero-length read makes every assertion below vacuous: nothing derives,
+    // nothing is pending, and the suite reports a clean derivation of nothing.
+    expect(nodes.size).toBeGreaterThan(500);
+    expect(DERIVED_CLASSES.length).toBeGreaterThan(50);
+  });
+
+  it('includes every live class the PROV rule reaches, and no deprecated one', () => {
+    const expected = [...nodes]
+      .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
+        && !node[DEPRECATED] && bearsRecords(iri))
+      .map(([iri]) => iri);
+
+    const derived = new Set(DERIVED_CLASSES.map((entry) => entry.iri));
+    const missing = expected.filter((iri) => !derived.has(iri));
 
     expect(
-      disagreements,
-      'src/record-types/table.ts has drifted from the ontologies. The derivation is the '
-      + 'authority: correct the table, or add an override saying why the derived class is not '
-      + 'the one this SDK writes.',
+      missing,
+      'src/record-types/generated.ts has drifted from src/spec/. Rebuild with '
+      + '`node scripts/build-record-types.mjs`; if the classes really moved, that is a spec bump.',
     ).toEqual([]);
   });
 
-  it('derives 33 of the 39 accepted names', () => {
-    // A count as well as the contents, because a name silently disappearing
-    // from `ACCEPTED_NAMES` would leave every assertion above passing.
-    const { derived } = deriveRecordTypes(ontologyClasses(), ACCEPTED_NAMES);
+  it('adds exactly the classes the pending list declares, and nothing else', () => {
+    const byRule = new Set([...nodes]
+      .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
+        && !node[DEPRECATED] && bearsRecords(iri))
+      .map(([iri]) => iri));
 
-    expect(ACCEPTED_NAMES).toHaveLength(39);
-    expect(derived.size).toBe(33);
-    expect(allRecordTypes()).toHaveLength(36);
+    const extra = DERIVED_CLASSES.map((entry) => entry.iri).filter((iri) => !byRule.has(iri));
+
+    expect(extra.sort()).toEqual(pending.entries.map((entry) => entry.class).sort());
   });
 });
 
-describe('what the checkout provides', () => {
-  it('finds the classes at all', () => {
-    // A zero-length read makes every assertion above vacuous: nothing derives,
-    // everything is unresolved, and the suite reports a clean derivation of
-    // nothing. The count is loose on purpose — it is a floor, not a fact.
-    const classes = ontologyClasses();
+describe('the pending list, compared both ways', () => {
+  it('names twelve classes, each with a reason', () => {
+    expect(pending.entries).toHaveLength(12);
 
-    expect(classes.length).toBeGreaterThan(100);
-    expect(classes.map((c) => `${c.prefix}:${c.localName}`)).toContain('clinical:Medication');
+    for (const entry of pending.entries) {
+      expect(entry.declares, entry.class).toBeTruthy();
+      expect(entry.detail, entry.class).toBeTruthy();
+    }
   });
 
-  it('sees owl:deprecated in both spellings', () => {
-    // `true` and `"true"^^xsd:boolean` are the same triple and `spec` writes
-    // both. A detector matching only the bare form calls
-    // `clinical:CoverageRecord` live, and `CoverageRecord` then derives
-    // straight back to the class #26 removed — a wrong answer shaped exactly
-    // like a right one, since the row it produces looks derived.
-    const deprecated = ontologyClasses()
-      .filter((c) => c.deprecated)
-      .map((c) => `${c.prefix}:${c.localName}`)
+  it('every entry is still needed — spec has not yet declared the axiom', () => {
+    // THE DIRECTION THAT MATTERS. When `jayostis/spec#50` lands, these go red
+    // one at a time and each entry is deleted in the commit that bumps the pin.
+    // Without this, a fixed class would sit in the list forever, read as
+    // deliberate, and quietly stop being derived from spec.
+    const settled = pending.entries
+      .filter((entry) => bearsRecords(entry.class))
+      .map((entry) => entry.class);
+
+    expect(
+      settled,
+      'spec now reaches these classes through its own record-bearing rule, so their entries in '
+      + 'src/record-types/pending-spec-50.json have outlived their cause. Delete them.',
+    ).toEqual([]);
+  });
+
+  it('every entry names a class the shipped data actually declares', () => {
+    // The other direction: an entry for a class spec deleted or renamed would
+    // silently register nothing at all.
+    for (const entry of pending.entries) {
+      expect(nodes.has(entry.class), `${entry.class} is in no shipped ontology`).toBe(true);
+    }
+  });
+
+  it('cites the issue that deletes it', () => {
+    const raw = JSON.parse(
+      readFileSync(join(repoRoot, 'src/record-types/pending-spec-50.json'), 'utf-8'),
+    ) as { $issue: string; $rule: string };
+
+    expect(raw.$issue).toBe('jayostis/spec#50');
+    expect(raw.$rule).toContain('prov:Entity');
+  });
+});
+
+describe('names come from the published contexts', () => {
+  it('derives four supersedes links from rdfs:seeAlso, not from a table', () => {
+    // The four deprecations spec states correctly. A fifth landing upstream
+    // needs no change in this repository at all.
+    const withSupersedes = DERIVED_CLASSES
+      .filter((entry) => entry.supersedes.length > 0)
+      .map((entry) => entry.name)
       .sort();
 
-    expect(deprecated).toEqual([
-      'clinical:Allergy',
-      'clinical:Condition',
-      // The typed spelling, `clinical.ttl:190`. The other four use the bare one.
-      'clinical:CoverageRecord',
-      'clinical:Immunization',
-      'clinical:LabResult',
+    expect(withSupersedes).toEqual([
+      'AllergyRecord', 'ConditionRecord', 'ImmunizationRecord', 'LabResultRecord',
     ]);
+  });
+
+  it('does not derive one for clinical:CoverageRecord, whose seeAlso points at FHIR', () => {
+    // `jayostis/spec#50` gap 2. It resolves through a declared override
+    // instead, and this is what says the derivation is not the reason.
+    const insurancePlan = DERIVED_CLASSES.find((entry) => entry.name === 'InsurancePlan');
+
+    expect(insurancePlan?.supersedes).toEqual([]);
+    expect(recordTypeForClass('https://ns.cascadeprotocol.org/clinical/v1#CoverageRecord')?.name)
+      .toBe('InsurancePlan');
+  });
+
+  it('every derived name is non-empty and unique', () => {
+    const names = DERIVED_CLASSES.map((entry) => entry.name);
+
+    expect(names.every((name) => name.length > 0)).toBe(true);
+    // One collision exists — the two `SocialHistoryRecord` classes — and it is
+    // resolved by an override at assembly, not by the derivation.
+    expect(names.length - new Set(names).size).toBe(1);
+  });
+
+  it('registers more classes than this SDK has models for', () => {
+    // The population is spec's, not ours. 79 classes carry record data and
+    // `src/models/` covers a fraction of them; a lookup that answered only for
+    // the modelled ones would be a hand-kept list wearing a derivation's
+    // clothes.
+    expect(allRecordTypes().length).toBe(DERIVED_CLASSES.length);
+    expect(allRecordTypes().length).toBeGreaterThan(60);
   });
 });
 
-describe('the collision rule, on classes the corpus does not contain', () => {
-  it('reports a collision rather than taking the first candidate', () => {
-    const { derived, ambiguous, unresolved } = deriveRecordTypes(
-      [
-        { prefix: 'health', localName: 'Widget' },
-        { prefix: 'clinical', localName: 'Widget' },
-      ],
-      ['Widget'],
-    );
+describe('the committed table is what the build produces', () => {
+  it('regenerates byte-identically', () => {
+    // The strongest form of the check, and the one `tests/vendor-drift.test.ts`
+    // already uses for the vendored parser: run the producer and compare. The
+    // assertions above compare the class SET; this compares the file, so a name
+    // edited by hand, a supersedes link removed, or a reordering all fail.
+    //
+    // Rebuilding in a test is safe because the output is deterministic — the
+    // generator sorts at every level for exactly this reason — so a passing run
+    // leaves the tree untouched and a failing one leaves it correct.
+    const generated = join(repoRoot, 'src/record-types/generated.ts');
+    const committed = readFileSync(generated, 'utf-8');
 
-    expect(ambiguous).toEqual([
-      { name: 'Widget', candidates: ['clinical:Widget', 'health:Widget'] },
-    ]);
-    expect(derived.has('Widget')).toBe(false);
-    // In BOTH lists: `ambiguous` says why, `unresolved` says something must
-    // decide. A caller reading only `unresolved` cannot miss a collision.
-    expect(unresolved).toEqual(['Widget']);
-  });
+    execFileSync('node', [join(repoRoot, 'scripts/build-record-types.mjs')], { cwd: repoRoot });
 
-  it('reports a name no class declares', () => {
-    const { derived, ambiguous, unresolved } = deriveRecordTypes(
-      [{ prefix: 'health', localName: 'Widget' }],
-      ['Sprocket'],
-    );
-
-    expect(derived.size).toBe(0);
-    expect(ambiguous).toEqual([]);
-    expect(unresolved).toEqual(['Sprocket']);
-  });
-
-  it('does not derive to a deprecated class, even on an exact match', () => {
-    // The rule `CoverageRecord` needs. A deprecated class is still READ — it
-    // is in `acceptedClassUris` — but a class this SDK must never write cannot
-    // be what a name derives to.
-    const { derived, unresolved } = deriveRecordTypes(
-      [{ prefix: 'clinical', localName: 'Widget', deprecated: true }],
-      ['Widget'],
-    );
-
-    expect(derived.has('Widget')).toBe(false);
-    expect(unresolved).toEqual(['Widget']);
-  });
-
-  it('derives to the live class when a deprecated one shares its local name', () => {
-    // Not a collision: one candidate survives the deprecation filter, so this
-    // resolves rather than asking a human. Written down because the two rules
-    // interact and the wrong composition — filter after choosing — would
-    // report an ambiguity that does not exist.
-    const { derived, ambiguous } = deriveRecordTypes(
-      [
-        { prefix: 'clinical', localName: 'Widget', deprecated: true },
-        { prefix: 'health', localName: 'Widget' },
-      ],
-      ['Widget'],
-    );
-
-    expect(ambiguous).toEqual([]);
-    expect(derived.get('Widget')).toBe('health:Widget');
-  });
-
-  it('is not confused by a class declared twice in one vocabulary', () => {
-    // Same CURIE twice is one candidate, not two. `spec` does not do this
-    // today; a merge that duplicated a block would, and reporting it as a
-    // collision would send a reader looking for a second vocabulary.
-    const { derived, ambiguous } = deriveRecordTypes(
-      [
-        { prefix: 'health', localName: 'Widget' },
-        { prefix: 'health', localName: 'Widget' },
-      ],
-      ['Widget'],
-    );
-
-    expect(ambiguous).toEqual([]);
-    expect(derived.get('Widget')).toBe('health:Widget');
-  });
+    expect(
+      readFileSync(generated, 'utf-8'),
+      'src/record-types/generated.ts differs from what scripts/build-record-types.mjs '
+      + 'produces. Either it was edited by hand — it says not to be — or spec moved and the '
+      + 'rebuilt file is the change to commit.',
+    ).toBe(committed);
+  }, 60_000);
 });

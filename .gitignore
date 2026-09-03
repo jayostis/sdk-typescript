@@ -9,6 +9,12 @@ dist/
 # does.
 src/spec/
 
+# NOT ignored, deliberately: src/record-types/generated.ts. It is TypeScript that
+# src/ imports, so a clean clone must compile without a build; it is 15K rather
+# than the 416K of spec data; and its diff is the precise record of which record
+# types changed when spec moves, which is the review signal the bulk data cannot
+# give cheaply. tests/record-types/derivation.test.ts guards it against drift.
+
 # Editor config: share what describes the project, keep what describes a person.
 # Denying the directory first means a settings.json or a credentials file dropped
 # here later is ignored by default rather than riding along in someone's commit.

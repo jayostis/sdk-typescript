@@ -1,142 +1,132 @@
 /**
  * Everything this SDK knows about a record type, behind three functions.
  *
- * The front door. Import from here, never from `./table.js` or `./overrides.js`
- * — a caller reaching those gets the raw rows without the invariants below
- * having been checked, which is the arrangement this module replaces.
+ * The front door. Import from here, never from `./generated.js` or
+ * `./overrides.js` — a caller reaching those gets rows without the invariants
+ * below having been checked.
+ *
+ * DERIVED, NOT TRANSCRIBED. The classes and their published names come from
+ * `src/spec/`, built from the checkout by `scripts/build-spec-data.mjs` and
+ * turned into `./generated.ts` by `scripts/build-record-types.mjs`. The
+ * population is spec's own rule — an `rdfs:subClassOf` chain reaching
+ * `prov:Entity` or `prov:Activity`, which `spec/scripts/check-class-coverage.py`
+ * enforces and which is the only machine-readable statement anywhere that a
+ * class holds stored records.
  *
  * WHAT THIS FIXES. One RDF class must read back as exactly one JSON `type`, and
  * that choice used to be made by object key order: `buildReverseTypeMap` took
  * "the first entry in `TYPE_TO_MAPPING_KEY` that maps to each mapping key", so
  * `clinical:Procedure` read back as `ProcedureRecord` — a spelling
- * `src/models/procedure.ts` does not declare, that nothing exports, and that no
- * fixture uses. Here the canonical name is DECLARED, and a group of names with
- * no declared canonical throws at load rather than picking one silently.
+ * `src/models/procedure.ts:23` does not declare and `src/index.ts` does not
+ * export. Here the name comes from spec, and where two classes would claim one
+ * name the assembly throws rather than picking.
  *
  * @module record-types
  */
 
 export * from './types.js';
-export * from './derive.js';
-export { RDF_TYPE_OVERRIDES, CANONICAL_NAMES } from './overrides.js';
+export { NAME_OVERRIDES, INPUT_ALIASES, SUPERSEDES_OVERRIDES } from './overrides.js';
+export type { DerivedClass } from './generated.js';
 
-import { DEPRECATED_TYPE_ALIASES, NAMESPACES } from '../vocabularies/namespaces.js';
-import { CANONICAL_NAMES } from './overrides.js';
-import { RECORD_CLASSES } from './table.js';
+import { DERIVED_CLASSES } from './generated.js';
+import type { DerivedClass } from './generated.js';
+import { INPUT_ALIASES, NAME_OVERRIDES, SUPERSEDES_OVERRIDES } from './overrides.js';
 import type { RecordType } from './types.js';
 
 /**
- * `prefix:LocalName` → full IRI, expanded once so nothing splits a CURIE again.
+ * Assemble record types from derived classes and the declared overrides.
  *
- * Throws on an unknown prefix rather than passing the CURIE through. A record
- * type whose class IRI is the string `'clinical:Medication'` matches no
- * `rdf:type` in any pod and no `sh:targetClass` in any shape, so it would read
- * as "this record type is simply never present" — a silent absence, which is
- * the failure mode this module exists to remove.
+ * TAKES ITS CLASSES AS AN ARGUMENT, for the reason `deriveRecordTypes` did and
+ * `thirdPartyImports(dir)` does: the interesting cases cannot be produced from
+ * the real data. Exactly one name collision exists across the 79 derived
+ * classes, so a function that read `DERIVED_CLASSES` directly could be tested
+ * against one instance of the case it exists to handle — and the next
+ * vocabulary to introduce a duplicate name is precisely the event that must not
+ * pass silently.
  */
-function expandClass(curie: string, name: string): string {
-  const colon = curie.indexOf(':');
-  const prefix = colon < 0 ? '' : curie.slice(0, colon);
-  const namespace = (NAMESPACES as Record<string, string>)[prefix];
+export function assembleRecordTypes(classes: readonly DerivedClass[]): readonly RecordType[] {
+  const aliasesFor = new Map<string, string[]>();
 
-  if (!namespace) {
-    throw new Error(
-      `Record type "${name}" is declared as "${curie}", whose prefix "${prefix}" is not in `
-      + 'NAMESPACES. Add the prefix, or correct the CURIE — an unexpanded CURIE matches no '
-      + 'rdf:type in any pod and no sh:targetClass in any shape.',
-    );
+  for (const [alias, iri] of Object.entries(INPUT_ALIASES)) {
+    aliasesFor.set(iri, [...(aliasesFor.get(iri) ?? []), alias]);
   }
 
-  return `${namespace}${curie.slice(colon + 1)}`;
-}
+  // Every name a class RETURNS, computed before any alias is, because whether
+  // a displaced name may be kept as an alias depends on whether another class
+  // returns it.
+  const returned = new Set(classes.map((derived) => NAME_OVERRIDES[derived.iri] ?? derived.name));
 
-/**
- * The record types, assembled and checked, once.
- *
- * CHECKED AT LOAD, not where a caller happens to look. An invariant enforced
- * here holds for every consumer and every test and cannot be skipped by
- * forgetting to assert it — the same argument `src/terms/index.ts` makes for
- * building its map with an explicit loop.
- */
-const RECORD_TYPES: readonly RecordType[] = (() => {
-  const namesByClass = new Map<string, string[]>();
+  const assembled = classes.map((derived) => {
+    const override = NAME_OVERRIDES[derived.iri];
 
-  for (const [name, curie] of Object.entries(RECORD_CLASSES)) {
-    const names = namesByClass.get(curie) ?? [];
-    names.push(name);
-    namesByClass.set(curie, names);
-  }
+    // An override normally ADDS a spelling rather than replacing one: the name
+    // spec publishes stays accepted on input, because documents and callers
+    // already use it and spec is the authority on what it means.
+    //
+    // UNLESS ANOTHER CLASS RETURNS IT, which is the collision case and the
+    // reason the override exists at all. `clinical:SocialHistoryRecord` is
+    // renamed precisely because `health:SocialHistoryRecord` owns that name;
+    // keeping it as an alias here would make one string resolve to two classes,
+    // and the input direction would answer by iteration order — the defect this
+    // module exists to remove, reintroduced one layer down.
+    const displaced = override && override !== derived.name && !returned.has(derived.name)
+      ? [derived.name]
+      : [];
 
-  // Deprecated class IRI -> the class that superseded it, inverted: every
-  // spelling a subject may carry and still be read back as this type. Kept in
-  // `src/vocabularies/` rather than derived because only four of the five are
-  // derivable — `clinical:CoverageRecord`'s `rdfs:seeAlso` points at
-  // `fhir:Coverage`, so its supersession is stated in prose alone.
-  const deprecatedFor = new Map<string, string[]>();
-  for (const [deprecated, supersededBy] of Object.entries(DEPRECATED_TYPE_ALIASES)) {
-    deprecatedFor.set(supersededBy, [...(deprecatedFor.get(supersededBy) ?? []), deprecated]);
-  }
+    const aliases = [...displaced, ...(aliasesFor.get(derived.iri) ?? [])].sort();
 
-  return Object.freeze(
-    [...namesByClass].map(([curie, names]) => {
-      // The canonical name is DECLARED or there is no record type. Falling back
-      // to `names[0]` here would reinstate the exact defect — an answer decided
-      // by the order two rows happen to appear in.
-      const declared = names.filter((name) => !(name in CANONICAL_NAMES));
+    const superseded = Object.entries(SUPERSEDES_OVERRIDES)
+      .filter(([, supersedingIri]) => supersedingIri === derived.iri)
+      .map(([deprecatedIri]) => deprecatedIri);
 
-      if (declared.length !== 1) {
-        throw new Error(
-          `${names.length} record-type names resolve to ${curie} — ${names.join(', ')} — and `
-          + `${declared.length} of them is canonical. Exactly one must be: add the others to `
-          + 'CANONICAL_NAMES pointing at the spelling a read should RETURN, which is the literal '
-          + 'the model in src/models/ already declares.',
-        );
-      }
+    return Object.freeze({
+      name: override ?? derived.name,
+      aliases: Object.freeze(aliases),
+      rdfTypeUri: derived.iri,
+      acceptedClassUris: Object.freeze([derived.iri, ...derived.supersedes, ...superseded]),
+    }) as RecordType;
+  });
 
-      const name = declared[0] as string;
-      const rdfTypeUri = expandClass(curie, name);
+  // Checked here rather than where a caller happens to look. An invariant
+  // enforced at assembly holds for every consumer and every test and cannot be
+  // skipped by forgetting to assert it — the argument `src/terms/index.ts`
+  // makes for building its map with an explicit loop.
+  const claimants = new Map<string, string[]>();
 
-      return Object.freeze({
-        name,
-        aliases: Object.freeze(names.filter((other) => other !== name).sort()),
-        rdfType: curie,
-        rdfTypeUri,
-        acceptedClassUris: Object.freeze([rdfTypeUri, ...(deprecatedFor.get(rdfTypeUri) ?? [])]),
-      }) as RecordType;
-    }),
-  );
-})();
-
-const BY_NAME: ReadonlyMap<string, RecordType> = (() => {
-  const byName = new Map<string, RecordType>();
-
-  for (const recordType of RECORD_TYPES) {
+  for (const recordType of assembled) {
     for (const name of [recordType.name, ...recordType.aliases]) {
-      const clash = byName.get(name);
-
-      // Unreachable through `RECORD_CLASSES`, whose keys are unique by
-      // construction, and asserted anyway: the map is built from two sources and
-      // a name reaching two record types would make `recordTypeFor` answer by
-      // iteration order, which is what this module exists not to do.
-      if (clash) {
-        throw new Error(
-          `"${name}" names two record types, ${clash.rdfType} and ${recordType.rdfType}.`,
-        );
-      }
-
-      byName.set(name, recordType);
+      claimants.set(name, [...(claimants.get(name) ?? []), recordType.rdfTypeUri]);
     }
   }
 
-  return byName;
-})();
+  const contested = [...claimants].filter(([, iris]) => iris.length > 1);
+
+  if (contested.length > 0) {
+    throw new Error(
+      `${contested.length} name(s) are claimed by more than one class: `
+      + contested.map(([name, iris]) => `"${name}" by ${iris.join(' and ')}`).join('; ')
+      + '. A class reads back as exactly one type. Add a NAME_OVERRIDES entry naming which '
+      + 'spelling each class returns, rather than letting the order of the derived table decide.',
+    );
+  }
+
+  return Object.freeze(assembled);
+}
+
+const RECORD_TYPES = assembleRecordTypes(DERIVED_CLASSES);
+
+const BY_NAME: ReadonlyMap<string, RecordType> = new Map(
+  RECORD_TYPES.flatMap((recordType) =>
+    [recordType.name, ...recordType.aliases].map((name) => [name, recordType] as const)),
+);
 
 /**
  * Class IRI → the record type it reads back as, deprecated spellings included.
  *
  * Built with an explicit loop for the reason `src/terms/index.ts` gives: a
- * `new Map(...)` over pairs keeps the last of two claimants and reports nothing,
- * so which one won would depend on order and the loser would be unreachable.
+ * `new Map(...)` over pairs keeps the last of two claimants and reports
+ * nothing, so which one won would depend on order and the loser would be
+ * unreachable with no way to notice.
  */
 const BY_CLASS: ReadonlyMap<string, RecordType> = (() => {
   const byClass = new Map<string, RecordType>();
@@ -149,7 +139,7 @@ const BY_CLASS: ReadonlyMap<string, RecordType> = (() => {
         throw new Error(
           `${classUri} would read back as both "${clash.name}" and "${recordType.name}". A class `
           + 'reads back as exactly one type; if one of these is a deprecated spelling, it belongs '
-          + 'in DEPRECATED_TYPE_ALIASES rather than in RECORD_CLASSES.',
+          + 'in a supersedes link rather than in the derived table.',
         );
       }
 
@@ -175,14 +165,14 @@ export function recordTypeFor(name: string): RecordType | undefined {
  *
  * This is the direction the old code got wrong, and the reason it is a lookup
  * rather than a scan: `recordTypeForClass(clinical:Procedure).name` is
- * `'Procedure'` because `CANONICAL_NAMES` says so, not because of where a row
+ * `'Procedure'` because spec publishes that name, not because of where a row
  * sits in a file.
  */
 export function recordTypeForClass(classUri: string): RecordType | undefined {
   return BY_CLASS.get(classUri);
 }
 
-/** Every registered record type. */
+/** Every record type spec declares, in name order. */
 export function allRecordTypes(): readonly RecordType[] {
   return RECORD_TYPES;
 }

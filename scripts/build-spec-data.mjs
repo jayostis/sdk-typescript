@@ -38,7 +38,7 @@
  * without a gate that cries wolf at the people doing the work.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const N3Parser = require(join(root, 'src/vendor/n3/N3Parser.js')).default;
 
 const OUT = join(root, 'src/spec/ontologies');
+const CONTEXTS = join(root, 'src/spec/contexts');
 
 /**
  * Where `spec` is.
@@ -198,8 +199,9 @@ const vocabularies = Object.keys(manifest).sort();
 
 // Removed rather than overwritten: a vocabulary dropped from the manifest must
 // not leave its artifact behind, where every consumer would go on reading it.
-rmSync(OUT, { recursive: true, force: true });
+rmSync(join(root, 'src/spec'), { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
+mkdirSync(CONTEXTS, { recursive: true });
 
 let total = 0;
 
@@ -233,16 +235,34 @@ for (const vocabulary of vocabularies) {
   );
 }
 
+// The contexts are carried VERBATIM, not converted. They are already JSON-LD,
+// and they are the published name→IRI mapping — the thing #4 proposes making
+// normative — so a byte-identical copy is the only form that cannot disagree
+// with what spec publishes. #76 item 3.
+const contexts = readdirSync(join(specDir, 'contexts/v1')).filter((f) => f.endsWith('.jsonld'));
+
+if (contexts.length === 0) {
+  throw new Error(
+    `no contexts under ${join(specDir, 'contexts/v1')}. A missing context is not an empty one: `
+    + 'every record class would come back unnamed, which reads as "this SDK registers nothing".',
+  );
+}
+
+for (const file of contexts) {
+  cpSync(join(specDir, 'contexts/v1', file), join(CONTEXTS, file));
+}
+console.log(`  contexts   ${String(contexts.length).padStart(5)} files, verbatim`);
+
 writeFileSync(
   join(OUT, 'PROVENANCE.json'),
   `${JSON.stringify({ ...provenanceOf(specDir), vocabularies }, null, 2)}\n`,
   'utf-8',
 );
 
-const bytes = readdirSync(OUT)
-  .reduce((sum, file) => sum + readFileSync(join(OUT, file)).length, 0);
+const bytes = [OUT, CONTEXTS].flatMap((dir) => readdirSync(dir).map((f) => join(dir, f)))
+  .reduce((sum, file) => sum + readFileSync(file).length, 0);
 
 console.log(
   `build-spec-data: ${vocabularies.length} ontologies, ${total} quads, `
-  + `${(bytes / 1024).toFixed(0)}K -> src/spec/ontologies`,
+  + `${(bytes / 1024).toFixed(0)}K -> src/spec`,
 );

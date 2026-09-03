@@ -1,0 +1,68 @@
+{
+  "$comment": "Record classes this SDK registers that spec's own record-bearing rule does not yet reach. A GATE INPUT, not a filter: scripts/build-record-types.mjs adds these to the derived population, and tests/record-types/derivation.test.ts fails when an entry no longer needs to be here. So the list can only shrink, and shrinking it is an explicit committed edit.",
+  "$rule": "scripts/check-class-coverage.py in the spec repository defines the population: a class whose rdfs:subClassOf chain reaches prov:Entity or prov:Activity has said its instances are record data. It is the only machine-readable statement anywhere that a class holds stored records. Every class below is one this SDK reads and writes as a record and that rule does not reach, so without this file the derived table would silently omit it -- and an omitted record type looks exactly like a class that does not exist.",
+  "$issue": "jayostis/spec#50",
+  "$established": "2026-09-02. Filed as jayostis/spec#50, which asks for one rdfs:subClassOf axiom per class. This is the same defect jayostis/spec#13 fixed for seven other classes, where it was described as invisible in both directions -- the gate could not see them, and they could not be baselined either, because the baseline is the gate's output. Delete an entry the moment spec declares the axiom; the derivation test is what says when.",
+  "entries": [
+    {
+      "class": "https://ns.cascadeprotocol.org/health/v1#LabResultRecord",
+      "declares": "rdfs:subClassOf fhir:Observation, which reaches neither PROV root",
+      "detail": "clinical:LabResult, the class this deprecated and replaced, declares rdfs:subClassOf prov:Entity. The deprecation moved every lab result out of the coverage gate's population."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/health/v1#ConditionRecord",
+      "declares": "no rdfs:subClassOf",
+      "detail": "Same as LabResultRecord: clinical:Condition carries prov:Entity and this does not."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/health/v1#AllergyRecord",
+      "declares": "no rdfs:subClassOf",
+      "detail": "Same as LabResultRecord: clinical:Allergy carries prov:Entity and this does not."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/health/v1#ImmunizationRecord",
+      "declares": "no rdfs:subClassOf",
+      "detail": "Same as LabResultRecord: clinical:Immunization carries prov:Entity and this does not."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/health/v1#FamilyHistoryRecord",
+      "declares": "no rdfs:subClassOf",
+      "detail": "No deprecated predecessor; it has simply never declared one."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/health/v1#SocialHistoryRecord",
+      "declares": "no rdfs:subClassOf",
+      "detail": "The consumer-reported social history. Its clinical: sibling declares cascade:HealthRecord, which itself declares nothing, so both halves of the collision are outside the population for different reasons."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/core/v1#PatientProfile",
+      "declares": "no rdfs:subClassOf",
+      "detail": "Indistinguishable in the graph from cascade:Address, which is a value structure and correctly NOT a record type: both are a bare owl:Class with an rdfs:label. That pair is the clearest statement of why this rule matters."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/clinical/v1#EncounterParticipant",
+      "declares": "no rdfs:subClassOf",
+      "detail": "Registered since the 2026-08-27 vocabulary wave. Written as its own subject with its own IRI rather than a blank node, so it is stored record data by the same argument as everything else here."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/clinical/v1#SocialHistoryRecord",
+      "declares": "rdfs:subClassOf cascade:HealthRecord, which declares nothing itself",
+      "detail": "One axiom on cascade:HealthRecord fixes this transitively and is the cheaper repair -- a class named HealthRecord asserting it bears record data is not a stretch."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/core/v1#ProxyAgent",
+      "declares": "rdfs:subClassOf prov:Agent",
+      "detail": "A genuine question rather than an oversight, and spec#50 poses it rather than presuming: either the rule widens to include prov:Agent, or this class takes a second superclass, or it is deliberately outside the population and spec says so. It is stored in a pod either way, which is why it is here meanwhile."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/core/v1#RecordSummary",
+      "declares": "rdfs:subClassOf void:Dataset",
+      "detail": "Same open question as ProxyAgent, with a different foreign superclass."
+    },
+    {
+      "class": "https://ns.cascadeprotocol.org/core/v1#SocialHistoryConsent",
+      "declares": "owl:NamedIndividual, not owl:Class",
+      "detail": "No class index contains it under any rule. jayostis/spec#30 says it is a value rather than a record type, so the likely outcome is that this SDK stops registering it -- and then this entry goes without spec changing anything. Tracked here rather than in spec#50, which explicitly excludes it."
+    }
+  ]
+}

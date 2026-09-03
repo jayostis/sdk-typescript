@@ -1,77 +1,86 @@
 /**
- * The rows exact local-name lookup cannot answer, each with its reason.
+ * Everything about record types that spec does not say, and why.
  *
- * Applied by the CALLER of {@link deriveRecordTypes}, not passed into it — the
- * derivation reports what it could not resolve and this is what the answer is.
- * A test therefore reads the same `unresolved` the committed table was built
- * from, rather than a code path nothing else takes.
+ * FIVE ROWS. This file held forty-eight before the table was derived — thirty-
+ * nine class mappings, six overrides and three canonical names — and every one
+ * of those is now read out of `src/spec/`. What is left is the residue: two
+ * names spec publishes differently or not at all, two input spellings that are
+ * ours alone, and one supersession spec states only in prose.
+ *
+ * EVERY ROW NAMES THE ISSUE THAT DELETES IT. A row with no issue behind it is a
+ * fact about this SDK; a row with one is a workaround with an end date. Four of
+ * the five below are the latter.
  *
  * @module record-types
  */
 
+import { NAMESPACES } from '../vocabularies/namespaces.js';
+
+const clinical = NAMESPACES.clinical;
+const coverage = NAMESPACES.coverage;
+
 /**
- * Name → the class it is written as, where derivation reports it unresolved.
+ * Where the name this SDK returns is not the name spec publishes.
  *
- * Every entry must be justified by something an ontology says, not by a
- * convention, because a convention is a rule and a rule this small should be
- * six written lines instead.
+ * `class IRI -> the name a read RETURNS`. The name spec published stays
+ * accepted on input — see {@link recordTypeFor} — so an override adds a
+ * spelling rather than replacing one.
  */
-export const RDF_TYPE_OVERRIDES: Readonly<Record<string, string>> = {
-  // The SDK's type name carries a `Record` suffix the class does not. A suffix
-  // rule would absorb both of these and then be wrong the first time a class is
-  // genuinely named `*Record` — `health:` declares eleven that are.
-  MedicationRecord: 'clinical:Medication',
-  ProcedureRecord: 'clinical:Procedure',
-
-  // The one local name two vocabularies both declare, so lookup has two
-  // candidates and no way to choose. `health:` is consumer-reported;
-  // `clinical:` is EHR-extracted from a C-CDA Social History section
-  // (`clinical.ttl:2113`), with its own consent scope and its own pod path.
-  SocialHistoryRecord: 'health:SocialHistoryRecord',
-  ClinicalSocialHistoryRecord: 'clinical:SocialHistoryRecord',
-
-  // Not an `owl:Class` at all — `core.ttl:1289` declares it an
-  // `owl:NamedIndividual`, so a class index does not contain it. See #43, which
-  // asks whether this should be a record type in the first place.
-  SocialHistoryConsent: 'cascade:SocialHistoryConsent',
-
-  // An exact local-name match EXISTS and must not be taken. `clinical.ttl:185`
-  // declares `clinical:CoverageRecord`, deprecated since v1.5 in favour of
-  // `coverage:InsurancePlan`, and #26 is the change that stopped this SDK
-  // writing it. The name survives as an accepted INPUT spelling, so it has to
-  // resolve to something; it resolves to the class that superseded it, and the
-  // deprecated spelling stays readable through `acceptedClassUris`.
+export const NAME_OVERRIDES: Readonly<Record<string, string>> = {
+  // `../spec/contexts/v1/clinical.jsonld:26` publishes `Medication`. This SDK
+  // has published `MedicationRecord` since v1.0.0, in `src/models/medication.ts`
+  // as a string-literal type and in all eleven `med-*` conformance fixtures.
   //
-  // NOT IN #42's LIST OF FIVE, and the difference is a measurement rather than
-  // a judgement: #42 recorded `CoverageRecord` as deriving cleanly. It does
-  // not. The class is marked `owl:deprecated "true"^^xsd:boolean` — the long
-  // spelling — where the four v1.13 deprecations use the bare `true`, so a
-  // detector matching only the short form calls this class live and derives
-  // straight back into #26.
-  CoverageRecord: 'coverage:InsurancePlan',
+  // NOT A LEGACY MISTAKE, which is why it is not simply dropped. Spec names
+  // record classes `*Record` throughout `health:` — AllergyRecord,
+  // ConditionRecord, LabResultRecord, ImmunizationRecord, FamilyHistoryRecord,
+  // SocialHistoryRecord — and bare under the older `clinical:`. This SDK
+  // applied the dominant convention to a class that does not follow it. Which
+  // convention is normative is `jayostis/spec#51`; until that is answered,
+  // changing this would break every `med-*` fixture, and those are upstream.
+  [`${clinical}Medication`]: 'MedicationRecord',
+
+  // Two vocabularies declare `SocialHistoryRecord` and a context key is unique,
+  // so one of the two classes can have no published name however good the data
+  // is — `jayostis/spec#50` gap 3c. `health:` is consumer-reported; `clinical:`
+  // is EHR-extracted from a C-CDA Social History section, with its own consent
+  // scope and its own pod path. They are different records and must not share a
+  // name; this SDK invented the disambiguating one.
+  [`${clinical}SocialHistoryRecord`]: 'ClinicalSocialHistoryRecord',
 };
 
 /**
- * Where several names reach one class, the spelling a read RETURNS.
+ * Spellings accepted on input that spec publishes for nothing.
  *
- * `alias -> canonical`. Every other accepted name maps to itself.
- *
- * THE RULE IS THE MODEL'S OWN LITERAL, not a corpus vote and not source order.
- * `src/models/procedure.ts` declares `type: 'Procedure'` as a single string
- * literal; `'ProcedureRecord'` is not a member of it, there is no
- * `ProcedureRecord` interface and nothing is exported under that name. A
- * deserializer returning it hands back a value this package's own published
- * type says is impossible, which a TypeScript consumer cannot even write the
- * branch for. So this is not a rename — it honours a contract the runtime has
- * been violating.
- *
- * The corpus corroborates rather than decides: all four `proc-*` fixtures carry
- * `Procedure` in both `type` and `dataType`, and none carries `ProcedureRecord`.
- * Where the two could conflict the model wins, because it is the published
- * contract and a fixture is not.
+ * `alias -> class IRI`. Never returned. These exist because callers and stored
+ * JSON use them, and refusing a name this package has accepted for three major
+ * versions would be a breaking change dressed up as tidiness.
  */
-export const CANONICAL_NAMES: Readonly<Record<string, string>> = {
-  Medication: 'MedicationRecord',
-  ProcedureRecord: 'Procedure',
-  CoverageRecord: 'InsurancePlan',
+export const INPUT_ALIASES: Readonly<Record<string, string>> = {
+  // Spec publishes `Procedure` and so does this SDK; `ProcedureRecord` was
+  // additionally accepted, and was — until #42 — what a read RETURNED, though
+  // `src/models/procedure.ts:23` declares the type as `'Procedure'` alone.
+  ProcedureRecord: `${clinical}Procedure`,
+
+  // Settled by #26. Both spellings reach `serialize()` so JSON off disk can
+  // name either, and only `InsurancePlan` comes back.
+  CoverageRecord: `${coverage}InsurancePlan`,
+};
+
+/**
+ * Deprecated classes whose successor spec does not state in a triple.
+ *
+ * `deprecated class IRI -> the class that superseded it`. Four of the five
+ * deprecated classes carry a correct `rdfs:seeAlso` and are derived from it;
+ * this is the fifth.
+ *
+ * `clinical:CoverageRecord`'s `rdfs:seeAlso` points at `fhir:Coverage` — a
+ * documentation link, not the superseding class — so the supersession exists
+ * only in its `rdfs:comment`. It is the one deprecation whose replacement lives
+ * in a different vocabulary, which is the case a consumer is least able to
+ * guess. `jayostis/spec#50` gap 2 asks for the triple; this row goes when it
+ * lands.
+ */
+export const SUPERSEDES_OVERRIDES: Readonly<Record<string, string>> = {
+  [`${clinical}CoverageRecord`]: `${coverage}InsurancePlan`,
 };
