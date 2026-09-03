@@ -623,3 +623,24 @@ pots=1.4
 #   since v2.2; what moved is that both of fromJsonLd's key spellings now go
 #   through the same term. Bumping a row would claim new support for something
 #   one of the two spellings already had.
+
+# 2026-09-02 — NO BUMP. The record-type table moved, not the vocabulary (#42).
+#   src/record-types/ now answers which class a record type is written as, and
+#   src/jsonld/converter.ts reads through it instead of scanning
+#   TYPE_TO_MAPPING_KEY for the first entry whose mapping had a matching local
+#   name. Every class and every predicate involved is unchanged: 33 of the 39
+#   rows are what exact local-name lookup against the six stable ontologies
+#   produces, 6 are declared overrides, and the result agrees with TYPE_MAPPING
+#   on every row. Nothing this SDK writes changes.
+#   What changes is a READ. clinical:Procedure came back as 'ProcedureRecord',
+#   because that spelling is typed one line earlier in TYPE_TO_MAPPING_KEY and
+#   both readers took the first entry reaching each mapping key.
+#   src/models/procedure.ts declares `type: 'Procedure'` as a single string
+#   literal and nothing is exported under the other name, so the old answer was
+#   a value this package's own published type says is impossible — a contract
+#   the runtime was violating, not one this honours the breaking of.
+#   fromJsonLd additionally compared LOCAL NAMES, so clinical:SocialHistoryRecord
+#   and health:SocialHistoryRecord were the same string to it. They are
+#   different classes with different consent scopes and different pod paths.
+#   Bumping a row would claim new support for classes that have been registered
+#   all along and were merely being named back wrongly.

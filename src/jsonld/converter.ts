@@ -7,7 +7,8 @@
  * @module jsonld
  */
 
-import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY, buildReversePredicateMap } from '../vocabularies/namespaces.js';
+import { NAMESPACES, PROPERTY_PREDICATES, buildReversePredicateMap } from '../vocabularies/namespaces.js';
+import { recordTypeFor, recordTypeForClass } from '../record-types/index.js';
 import { termFor } from '../terms/index.js';
 import { CONTEXT_URI } from './context.js';
 import type { CascadeEntity } from '../models/common.js';
@@ -39,16 +40,15 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
  * ```
  */
 export function toJsonLd(record: CascadeEntity): object {
-  const mappingKey = TYPE_TO_MAPPING_KEY[record.type];
-  const mapping = mappingKey ? TYPE_MAPPING[mappingKey] : undefined;
-  if (!mapping) {
+  const recordType = recordTypeFor(record.type);
+  if (!recordType) {
     throw new Error(`Unknown record type: ${record.type}. No TYPE_MAPPING found.`);
   }
 
   const doc: Record<string, unknown> = {
     '@context': CONTEXT_URI,
     '@id': record.id,
-    '@type': mapping.rdfType,
+    '@type': recordType.rdfType,
   };
 
   // Widened once, as `serializeRecord` does at turtle-serializer.ts:642. A term
@@ -90,6 +90,25 @@ export function toJsonLd(record: CascadeEntity): object {
   }
 
   return doc;
+}
+
+/**
+ * The record type a JSON-LD `@type` names, written either way.
+ *
+ * `toJsonLd` writes a CURIE, but a document produced anywhere else may carry
+ * the full IRI, and both name the same class. Tried as an IRI first because a
+ * full IRI contains a colon too, so a CURIE test would claim `https` as its
+ * prefix.
+ */
+function recordTypeOfJsonLd(rdfType: string): ReturnType<typeof recordTypeForClass> {
+  const byIri = recordTypeForClass(rdfType);
+  if (byIri) return byIri;
+
+  const colonIdx = rdfType.indexOf(':');
+  if (colonIdx < 0) return undefined;
+
+  const namespace = (NAMESPACES as Record<string, string>)[rdfType.slice(0, colonIdx)];
+  return namespace ? recordTypeForClass(`${namespace}${rdfType.slice(colonIdx + 1)}`) : undefined;
 }
 
 /**
@@ -142,25 +161,20 @@ export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
     }
   }
 
-  // Resolve to canonical TypeScript type name.
-  // When the RDF local name differs from the TypeScript type name
-  // (e.g., RDF 'clinical:Medication' -> TypeScript 'MedicationRecord'),
-  // find the first TYPE_TO_MAPPING_KEY entry whose mapping's rdfType
-  // has this local name, and use that entry's key as the type.
-  let resolvedType = typeName;
-  for (const [tsType, mappingKey] of Object.entries(TYPE_TO_MAPPING_KEY)) {
-    const mapping = TYPE_MAPPING[mappingKey];
-    if (mapping) {
-      const mColonIdx = mapping.rdfType.indexOf(':');
-      if (mColonIdx >= 0) {
-        const mLocal = mapping.rdfType.slice(mColonIdx + 1);
-        if (mLocal === typeName) {
-          resolvedType = tsType;
-          break;
-        }
-      }
-    }
-  }
+  // Resolve to the canonical type name — the spelling `src/models/` declares.
+  //
+  // THE CLASS DECIDES, NOT THE LOCAL NAME. This used to scan
+  // `TYPE_TO_MAPPING_KEY` for the first entry whose mapping had a matching
+  // local name, which carried both of the defects the deserializer carried.
+  // It broke the tie by key order, so `clinical:Procedure` came back as
+  // `ProcedureRecord`; and it compared LOCAL NAMES, so
+  // `clinical:SocialHistoryRecord` and `health:SocialHistoryRecord` were the
+  // same string to it and whichever was written first won.
+  //
+  // Falls back to the bare local name, which is what a `@type` naming no
+  // registered class already did. Reading is faithful: an unknown class is a
+  // record this SDK has no model for, not a document to refuse.
+  const resolvedType = recordTypeOfJsonLd(rdfType)?.name ?? typeName;
   record['type'] = resolvedType;
 
   // Map all other properties
