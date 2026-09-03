@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { convertToRdf, convertToTurtle } from '../../src/converter/to-rdf.js';
 import { graphDifference, quadsFromTurtle } from '../support/graph.js';
 import { loadFixture } from '../support/fixtures.js';
+import { escapeTurtleString } from '../../src/serializer/turtle-builder.js';
 
 const fixturesDir = resolve(
   dirname(fileURLToPath(import.meta.url)), '../../../conformance/fixtures',
@@ -258,5 +259,67 @@ describe('the Turtle header declares what the document uses', () => {
 
     expect(written).toContain('@prefix health:');
     expect(written).toContain('@prefix xsd:');
+  });
+});
+
+describe('a term whose range names a closed value set', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord', schemaVersion: '1.3' };
+
+  it('refuses a mistyped CURIE rather than writing it as a bare IRI', () => {
+    // `core:ClinicalGenerate` — the trailing `d` dropped — is no member of
+    // `cascade:DataProvenance`, and it satisfies the scheme test because `core`
+    // is a legal IRI scheme. Falling through to that test wrote
+    // `<core:ClinicalGenerate>`: an IRI spec never published, invented by the
+    // writer, in a pod, on a term whose permitted values are enumerated.
+    //
+    // The existing coverage is `MadeItUp`, which has no colon and so fails the
+    // scheme test for an unrelated reason. The colon is what separates the two
+    // cases, and it is the likelier typo.
+    expect(() => convertToRdf({ ...immunization, dataProvenance: 'core:ClinicalGenerate' }))
+      .toThrow(/Cannot express "dataProvenance"/);
+  });
+
+  it('refuses a CURIE under a prefix that names no vocabulary at all', () => {
+    expect(() => convertToRdf({ ...immunization, dataProvenance: 'zz:Whatever' }))
+      .toThrow(/Cannot express "dataProvenance"/);
+  });
+
+  it('still writes a member spelled as its full IRI', () => {
+    // The other direction, so a fix that closed the set by refusing everything
+    // the local-name lookup misses fails here. A member written out in full is
+    // the same value, and the record that carries it is not wrong.
+    expect(convertToRdf({
+      ...immunization,
+      dataProvenance: 'https://ns.cascadeprotocol.org/core/v1#ClinicalGenerated',
+    })).toContain('<https://ns.cascadeprotocol.org/core/v1#ClinicalGenerated>');
+  });
+
+  it('leaves a range-less @id term taking any absolute IRI', () => {
+    // `cascade:creatorWebID` has `rdfs:range rdfs:Resource` and therefore no
+    // value set, so closing the enumerated terms must not close this one.
+    expect(convertToRdf({ ...immunization, creatorWebID: 'did:example:alice' }))
+      .toContain('<did:example:alice>');
+  });
+});
+
+describe('literals are escaped once, by one function', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord' };
+
+  it('spells an awkward literal the way the Turtle serializer spells it', () => {
+    // `convertToRdf` is exported, so its N-Triples reach consumers directly
+    // rather than always being reparsed here. Two independent escaping schemes
+    // in one package means a fix to either is a fix to half the output, and
+    // which half a caller gets depends on whether their record type is routed.
+    const awkward = 'tab\there, bell\u0007, quote " and backslash \\';
+
+    expect(convertToRdf({ ...immunization, vaccineName: awkward }))
+      .toContain(escapeTurtleString(awkward));
+  });
+
+  it('round-trips that literal through the vendored parser unchanged', () => {
+    const awkward = 'tab\there, bell\u0007, quote " and backslash \\';
+    const written = convertToTurtle({ ...immunization, vaccineName: awkward });
+
+    expect(quadsFromTurtle(written).some((quad) => quad.object.value === awkward)).toBe(true);
   });
 });

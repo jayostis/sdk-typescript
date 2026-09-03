@@ -17,8 +17,9 @@
  * substantial portions", and `package.json` `files` ships only `dist`, so
  * `LICENSE.md` has to arrive here as well as in the root `NOTICE`.
  */
-import { cpSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, statSync } from 'node:fs';
+
+import { walk } from './lib/walk.mjs';
 
 const SRC = 'src/vendor';
 const OUT = 'dist/vendor';
@@ -29,12 +30,6 @@ if (!existsSync(SRC)) {
 }
 
 cpSync(SRC, OUT, { recursive: true });
-
-/** Every file under a directory, as `path -> bytes`, for the summary line. */
-function walk(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
-}
 
 const copied = walk(OUT);
 const bytes = copied.reduce((n, f) => n + statSync(f).size, 0);

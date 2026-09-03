@@ -19,17 +19,12 @@
  * would report "that class is not declared" rather than failing. An absence that
  * reads as an answer is the failure mode this repository keeps finding.
  */
-import { cpSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, statSync } from 'node:fs';
+
+import { walk } from './lib/walk.mjs';
 
 const SRC = 'src/spec';
 const OUT = 'dist/spec';
-
-/** Every file under a directory, recursively. */
-function walk(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
-    entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]);
-}
 
 if (!existsSync(SRC) || walk(SRC).length === 0) {
   console.error(

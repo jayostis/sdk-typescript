@@ -33,6 +33,7 @@
 import { createRequire } from 'node:module';
 
 import { recordTypeFor } from '../record-types/index.js';
+import { quoteTurtleString } from '../serializer/turtle-builder.js';
 import { SPEC_TERMS } from '../spec-data/terms.generated.js';
 import type { TermDefinition } from '../spec-data/terms.generated.js';
 
@@ -157,9 +158,18 @@ function termsFor(classIri: string): Record<string, TermDefinition> {
   return merged;
 }
 
-/** A literal, escaped for N-Triples. */
+/**
+ * A literal, escaped for N-Triples.
+ *
+ * ESCAPED BY THE SERIALIZER'S OWN FUNCTION, not by a second scheme here.
+ * `convertToRdf` is exported, so this text reaches consumers directly rather
+ * than always being reparsed by `convertToTurtle` — and a package with two
+ * escapers has no forcing function to fix both. `quoteTurtleString` is the
+ * one-line form; `escapeTurtleString`'s triple-quoted long literal is Turtle
+ * only and is not a term N-Triples can hold.
+ */
 const literal = (value: string, datatype?: string): string =>
-  `${JSON.stringify(value)}${datatype ? `^^<${datatype}>` : ''}`;
+  `${quoteTurtleString(value)}${datatype ? `^^<${datatype}>` : ''}`;
 
 /**
  * One value, as an N-Triples object term.
@@ -188,9 +198,25 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
     // the value set can — the first is a member and members are what this term
     // admits.
     const members = definition.range ? SPEC_TERMS.valueSets[definition.range] : undefined;
-    const resolved = members?.[text.includes(':') ? text.slice(text.indexOf(':') + 1) : text];
 
-    if (resolved) return `<${resolved}>`;
+    // A CLOSED SET IS CLOSED, and the miss does not fall through to the scheme
+    // test below. `ABSOLUTE_IRI` is a SCHEME test, so `core:ClinicalGenerate` —
+    // the trailing `d` dropped — satisfies it, and falling through wrote
+    // `<core:ClinicalGenerate>`: an IRI spec never published, invented by the
+    // writer, on a term whose permitted values are enumerated. That is the
+    // "cannot express" case, not the "any IRI" case, and refusing it is what
+    // CLAUDE.md's faithful-first rule asks for — the two are only ever told
+    // apart by whether the term HAS a value set, never by whether a lookup in
+    // one happened to hit.
+    if (members) {
+      const resolved = members[text.includes(':') ? text.slice(text.indexOf(':') + 1) : text];
+      if (resolved) return `<${resolved}>`;
+
+      // The same member, written out in full. A record that spells a permitted
+      // value as its own IRI is not wrong, and closing the set must not refuse
+      // the one spelling that needs no resolution rule at all.
+      return Object.values(members).includes(text) ? `<${text}>` : null;
+    }
 
     // Any absolute IRI, whatever its scheme. `cascade:creatorWebID` has
     // `rdfs:range rdfs:Resource` and therefore no value set at all, so this is

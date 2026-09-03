@@ -24,7 +24,13 @@
  * in the ontologies so a consumer derives it from the artifact it already
  * loads. `jayostis/spec#50` adds it and is not yet pinned, so this falls back
  * to the old chain plus `src/record-types/pending-spec-50.json` and says so on
- * every build. See {@link recordClasses}.
+ * every build.
+ *
+ * BOTH RULES LIVE IN `scripts/lib/record-population.mjs`, along with the
+ * comparison between them. The flip is not atomic — it happens the moment ONE
+ * class carries the marker — so a checkout that has marked some classes and not
+ * yet others drops the rest of the old population in a single build. That
+ * module reports what left; this one prints it.
  *
  * THE NAME IS THE PUBLISHED CONTEXT TERM, falling back to the local name. A
  * context is a name→IRI mapping and that is the whole of its job, so where spec
@@ -37,21 +43,15 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { MARKER_RULE, recordPopulation } from './lib/record-population.mjs';
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ONTOLOGIES = join(root, 'src/spec/ontologies');
 const CONTEXTS = join(root, 'src/spec/contexts');
 const OUT = join(root, 'src/record-types/generated.ts');
 
-const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
-const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const SEE_ALSO = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
-const RECORD_CLASS = 'https://ns.cascadeprotocol.org/core/v1#RecordClass';
-
-const RECORD_ROOTS = new Set([
-  'http://www.w3.org/ns/prov#Entity',
-  'http://www.w3.org/ns/prov#Activity',
-]);
 
 /**
  * Prefix → namespace, read out of the contexts rather than written here.
@@ -134,67 +134,11 @@ const pendingClasses = new Set(pending.entries.map((entry) => entry.class));
 const contextNames = publishedNames();
 
 const nodes = graph();
-const parentsOf = (iri) => (nodes.get(iri)?.[SUB_CLASS_OF] ?? []).map((v) => v['@id']).filter(Boolean);
-
-/**
- * Does this class's superclass chain reach a PROV root?
- *
- * THE BRIDGE, AND A READING SPEC HAS SINCE RULED OUT. `jayostis/spec#34`
- * (ASK-05) settled it: *"The reading 'subClassOf prov:Entity means instances
- * are stored record data' is not the intent. The axiom is PROV-O alignment …
- * never on `prov:Entity`, which will keep catching alignment axioms."* Measured
- * on spec's `main`: 110 classes are in that population and 96 of them are
- * alignment axioms.
- *
- * It is still used, and only while the marker is absent — see
- * {@link recordClasses}. A build against a checkout that carries
- * `cascade:RecordClass` never calls this.
- *
- * `seen` is not defensiveness about spec: `owl:equivalentClass` cycles and
- * mutual subclass axioms are expressible, and a walk without it never returns.
- */
-function bearsRecords(iri, seen = new Set()) {
-  if (seen.has(iri)) return false;
-  seen.add(iri);
-  return parentsOf(iri).some((parent) => RECORD_ROOTS.has(parent) || bearsRecords(parent, seen));
-}
-
-/**
- * Which classes hold record data, by the rule the checkout supports.
- *
- * `cascade:RecordClass` is the marker `jayostis/spec#50` adds — the explicit
- * list ASK-05's ruling calls for, put in the ontologies so a consumer derives
- * it from the artifact it already loads rather than from a side file. A class
- * carries it directly; nothing is inherited, so an alignment axiom cannot leak
- * a class in.
- *
- * FLIPS ON ITS OWN. The marker does not exist at the pinned revision, so this
- * falls back to the PROV chain plus `pending-spec-50.json` and says so on every
- * build. The moment a checkout carries one marked class, the marker is the
- * population and the fallback is not consulted — no edit here, no flag, and the
- * build line changes to say which rule ran.
- */
-function recordClasses() {
-  const marked = [...nodes]
-    .filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS))
-    .map(([iri]) => iri);
-
-  if (marked.length > 0) return { rule: 'cascade:RecordClass', classes: new Set(marked) };
-
-  const bridged = [...nodes]
-    .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS) && bearsRecords(iri))
-    .map(([iri]) => iri);
-
-  return {
-    rule: 'prov chain + pending-spec-50.json (spec#50 not yet pinned)',
-    classes: new Set([...bridged, ...pendingClasses]),
-  };
-}
 
 const derived = [];
 const wrongly = [];
 
-const population = recordClasses();
+const population = recordPopulation(nodes, pendingClasses);
 
 for (const [iri, node] of nodes) {
   const deprecated = Boolean(node[DEPRECATED]);
@@ -204,7 +148,7 @@ for (const [iri, node] of nodes) {
   // A pending entry the population now reaches on its own has outlived its
   // cause. Reported rather than silently absorbed, because an exception list
   // that quietly stops being needed is how a workaround becomes permanent.
-  if (population.rule === 'cascade:RecordClass' && pendingClasses.has(iri)) wrongly.push(iri);
+  if (population.rule === MARKER_RULE && pendingClasses.has(iri)) wrongly.push(iri);
 
   const localName = iri.slice(Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1);
   const published = contextNames.get(iri) ?? [];
@@ -281,6 +225,24 @@ const banner = [
 ].join('\n');
 
 writeFileSync(OUT, banner, 'utf-8');
+
+// WHAT THE FLIP COST, printed because nothing else would say. The rule changes
+// on the first marked class, so every class the superseded rule reached and the
+// marker does not leaves the table in the same build — and a class that is
+// simply absent from `generated.ts` is indistinguishable from one spec never
+// declared. Not a failure: most of what the marker drops is a correction (the
+// `cascade:DataProvenance` members are values, not records), and a build that
+// refused them would be refusing the marker for working.
+if (population.dropped.length > 0) {
+  console.warn(
+    `\n  NOTE: the ${MARKER_RULE} rule is in effect and ${population.dropped.length} live `
+    + 'class(es) the superseded prov+pending rule reached are NOT marked:\n'
+    + population.dropped.map((iri) => `    ${iri}`).join('\n')
+    + '\n  Each is either a correction (a value class that was never a record) or a gap '
+    + 'upstream. Confirm every one before this table ships — nothing else reports their '
+    + 'absence. See jayostis/spec#50.\n',
+  );
+}
 
 if (wrongly.length > 0) {
   console.warn(

@@ -10,6 +10,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { toJsonLd, fromJsonLd, CONTEXT_URI, getContext } from '../src/jsonld/index.js';
+import { curieOf } from '../src/jsonld/converter.js';
 import type { CascadeRecord } from '../src/models/common.js';
 import type { Medication } from '../src/models/medication.js';
 import type { VitalSign } from '../src/models/vital-sign.js';
@@ -441,5 +442,43 @@ describe('JSON-LD Conversion', () => {
       const result = fromJsonLd(doc);
       expect(result.id).toBe('');
     });
+  });
+});
+
+describe('curieOf contracts against the longest matching namespace', () => {
+  it('contracts an icd10 IRI to icd10:, not to fhir:', () => {
+    // `NAMESPACES.fhir` (`http://hl7.org/fhir/`) is a string-prefix of
+    // `NAMESPACES.icd10` (`http://hl7.org/fhir/sid/icd-10-cm/`) and is declared
+    // first, so a first-match loop contracted every ICD-10 IRI to
+    // `fhir:sid/icd-10-cm/...` — a CURIE whose local part is not a PN_LOCAL and
+    // which no reader resolves back to the term that went in.
+    expect(curieOf(`${NAMESPACES.icd10}E11.9`)).toBe('icd10:E11.9');
+  });
+
+  it('still answers cascade: for the namespace cascade and core share', () => {
+    // The collision the code already knew about, and the reason the tie-break
+    // has to be longest-namespace-wins rather than a re-ordering: these two are
+    // the same string, so length settles nothing and declaration order still
+    // decides. `cascade` is what every context and every serialized document
+    // writes.
+    expect(curieOf(`${NAMESPACES.cascade}PatientProfile`)).toBe('cascade:PatientProfile');
+  });
+
+  it('returns an IRI under no known namespace unchanged', () => {
+    expect(curieOf('https://example.org/nothing#Known')).toBe('https://example.org/nothing#Known');
+  });
+
+  it('has no namespace it would contract two ways', () => {
+    // Generic over the table rather than over the one pair found by hand: the
+    // next vocabulary published under a path of an existing one reintroduces
+    // this, and nothing else would say so.
+    for (const [prefix, namespace] of Object.entries(NAMESPACES)) {
+      const longest = Object.entries(NAMESPACES)
+        .filter(([, other]) => `${namespace}Local`.startsWith(other))
+        .sort(([, a], [, b]) => b.length - a.length)[0];
+
+      expect(curieOf(`${namespace}Local`), `${prefix} <${namespace}>`)
+        .toBe(`${longest?.[0] ?? prefix}:Local`);
+    }
   });
 });

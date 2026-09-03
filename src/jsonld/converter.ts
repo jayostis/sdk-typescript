@@ -17,6 +17,30 @@ import type { CascadeEntity } from '../models/common.js';
 
 const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
 
+/**
+ * `prefix -> namespace`, longest namespace first.
+ *
+ * LONGEST WINS, because one namespace can be a string-prefix of another and the
+ * shorter one then answers for both. `NAMESPACES.fhir`
+ * (`http://hl7.org/fhir/`) contains `NAMESPACES.icd10`
+ * (`http://hl7.org/fhir/sid/icd-10-cm/`) and is declared first, so a first-match
+ * loop contracted every ICD-10 IRI to `fhir:sid/icd-10-cm/E11.9` — a CURIE
+ * whose local part holds `/` and `.` and is not a PN_LOCAL, so it is not the
+ * term that went in and no reader resolves it back to one.
+ *
+ * The rule, not the pair: the next vocabulary spec publishes under a path of an
+ * existing one reintroduces this, and a re-ordering by hand would fix one case
+ * and leave the rule wrong.
+ *
+ * TIES KEEP DECLARATION ORDER, which is what settles the collision this loop
+ * already knew about. `cascade` and `core` name one namespace, so length
+ * separates nothing; `Array.prototype.sort` is stable, and `cascade` — the
+ * prefix every context and every serialized document writes — is declared
+ * first.
+ */
+const CONTRACTIONS: readonly (readonly [string, string])[] = Object.entries(NAMESPACES)
+  .sort(([, a], [, b]) => b.length - a.length);
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -32,13 +56,12 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
  * An IRI under no known prefix comes back unchanged, which is valid JSON-LD and
  * is what a class from a vocabulary this SDK has no prefix for should produce.
  */
-function curieOf(iri: string): string {
-  for (const [prefix, namespace] of Object.entries(NAMESPACES)) {
-    // `cascade` and `core` share a namespace; `cascade` is what every context
-    // and every serialized document uses, and it sorts first here.
-    if (iri.startsWith(namespace)) return `${prefix}:${iri.slice(namespace.length)}`;
-  }
-  return iri;
+export function curieOf(iri: string): string {
+  const match = CONTRACTIONS.find(([, namespace]) => iri.startsWith(namespace));
+  if (!match) return iri;
+
+  const [prefix, namespace] = match;
+  return `${prefix}:${iri.slice(namespace.length)}`;
 }
 
 /**

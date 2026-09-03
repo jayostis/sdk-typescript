@@ -16,6 +16,17 @@
 #   non-ratified ones. The two SDKs disagree about vitals in opposite directions
 #   and should be fixed together.
 #
+# 2026-09-03 — CURIE CONTRACTION ONLY. The versions below are deliberately NOT
+#   bumped. `src/jsonld/converter.ts` gained a longest-namespace-first tie-break
+#   in `curieOf`, because NAMESPACES.fhir (`http://hl7.org/fhir/`) is a
+#   string-prefix of NAMESPACES.icd10 (`http://hl7.org/fhir/sid/icd-10-cm/`) and
+#   iterates first, so an ICD-10 IRI contracted to `fhir:sid/icd-10-cm/...` — a
+#   local part that is not a PN_LOCAL. That is a bug in how an IRI is shortened,
+#   not a term this package newly registers: no predicate, class or value was
+#   added, and every row below would be claiming support that did not change.
+#   The pre-commit hook asks for this file whenever `src/jsonld/` moves, and this
+#   note is the answer rather than a bump.
+#
 core=3.8
 health=2.8
 clinical=1.16
