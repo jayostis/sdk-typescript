@@ -8,11 +8,16 @@
  * (#26). This re-runs the derivation against the shipped data and fails naming
  * what moved.
  *
- * THE PENDING LIST IS COMPARED BOTH WAYS. `src/record-types/pending-spec-50.json`
- * names twelve classes spec's own record-bearing rule does not reach. An entry
- * that stops being needed — because spec declared the axiom — fails here, so
- * the list can only shrink and shrinking it is a deliberate edit. An exception
- * nothing re-checks is an exemption.
+ * THE RULE CHANGED UNDER THIS FILE. It read `rdfs:subClassOf prov:Entity`, and
+ * `jayostis/spec#34` (ASK-05) ruled that out — the axiom is PROV-O alignment and
+ * says nothing about records. The replacement is the marker
+ * `cascade:RecordClass`, which `jayostis/spec#50` adds. Both are asserted here:
+ * which one the build used depends on the checkout, and the flip has to happen
+ * on its own when the pin moves rather than by an edit nobody remembers.
+ *
+ * `src/record-types/pending-spec-50.json` is what the bridge cannot see, and it
+ * is compared both ways — the day the marker is pinned, this file fails, and the
+ * list and the fallback are deleted together rather than one entry at a time.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -31,6 +36,7 @@ const ONTOLOGIES = join(repoRoot, 'src/spec/ontologies');
 const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
 const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
+const RECORD_CLASS = 'https://ns.cascadeprotocol.org/core/v1#RecordClass';
 const RECORD_ROOTS = new Set([
   'http://www.w3.org/ns/prov#Entity',
   'http://www.w3.org/ns/prov#Activity',
@@ -71,7 +77,13 @@ function graph(): Map<string, Node> {
 
 const nodes = graph();
 
-/** Spec's own rule: does this class's superclass chain reach a PROV root? */
+/**
+ * The BRIDGE rule: does this superclass chain reach a PROV root?
+ *
+ * Ruled out as a statement about records by jayostis/spec#34 (ASK-05) — the
+ * axiom is PROV-O alignment. Kept only to assert what the fallback does while
+ * cascade:RecordClass is unpinned.
+ */
 function bearsRecords(iri: string, seen = new Set<string>()): boolean {
   if (seen.has(iri)) return false;
   seen.add(iri);
@@ -95,7 +107,35 @@ describe('the derived table is spec\'s record-bearing population', () => {
     expect(DERIVED_CLASSES.length).toBeGreaterThan(50);
   });
 
-  it('includes every live class the PROV rule reaches, and no deprecated one', () => {
+  it('uses the marker when the checkout carries it, and the bridge when it does not', () => {
+    // THE RULE ITSELF IS UNDER TEST, because it changed. `cascade:RecordClass`
+    // is what `jayostis/spec#50` adds — the explicit list ASK-05's ruling calls
+    // for after ruling out `rdfs:subClassOf prov:Entity` as PROV-O alignment.
+    // The build must flip to it on its own when the pin moves, so this asserts
+    // which rule the checkout in hand supports rather than assuming either.
+    const marked = [...nodes].filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS));
+
+    if (marked.length > 0) {
+      // The marker has landed. The bridge and the pending list are dead, and
+      // the population is exactly what carries the marker.
+      expect(new Set(DERIVED_CLASSES.map((entry) => entry.iri)))
+        .toEqual(new Set(marked.filter(([, node]) => !node[DEPRECATED]).map(([iri]) => iri)));
+      return;
+    }
+
+    // The marker has not landed, so the bridge stands in — and the pending list
+    // is what it cannot see. Both halves asserted, so neither can quietly stop
+    // contributing.
+    const bridged = [...nodes]
+      .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
+        && !node[DEPRECATED] && bearsRecords(iri))
+      .map(([iri]) => iri);
+
+    expect(bridged.length).toBeGreaterThan(50);
+    expect(pending.entries.length).toBeGreaterThan(0);
+  });
+
+  it('includes every live class the current rule reaches, and no deprecated one', () => {
     const expected = [...nodes]
       .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
         && !node[DEPRECATED] && bearsRecords(iri))
@@ -133,19 +173,20 @@ describe('the pending list, compared both ways', () => {
     }
   });
 
-  it('every entry is still needed — spec has not yet declared the axiom', () => {
-    // THE DIRECTION THAT MATTERS. When `jayostis/spec#50` lands, these go red
-    // one at a time and each entry is deleted in the commit that bumps the pin.
-    // Without this, a fixed class would sit in the list forever, read as
-    // deliberate, and quietly stop being derived from spec.
-    const settled = pending.entries
-      .filter((entry) => bearsRecords(entry.class))
-      .map((entry) => entry.class);
+  it('is still needed — the marker has not landed', () => {
+    // THE DIRECTION THAT MATTERS, and it changed with the issue. spec#50 was
+    // rewritten after ASK-05: it no longer adds one `rdfs:subClassOf` axiom per
+    // class — it adds `cascade:RecordClass` and marks 83 classes with it, and
+    // forbids moving a prov axiom to change what the gate sees. So the file
+    // does not shrink entry by entry any more; it is deleted whole the moment
+    // the marker is pinned, and this is what says when.
+    const marked = [...nodes].filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS));
 
     expect(
-      settled,
-      'spec now reaches these classes through its own record-bearing rule, so their entries in '
-      + 'src/record-types/pending-spec-50.json have outlived their cause. Delete them.',
+      marked.map(([iri]) => iri),
+      'the pinned spec now carries cascade:RecordClass, so the bridge rule and '
+      + 'src/record-types/pending-spec-50.json have both outlived their cause. Delete the file '
+      + 'and the prov fallback in scripts/build-record-types.mjs together.',
     ).toEqual([]);
   });
 
@@ -163,7 +204,11 @@ describe('the pending list, compared both ways', () => {
     ) as { $issue: string; $rule: string };
 
     expect(raw.$issue).toBe('jayostis/spec#50');
-    expect(raw.$rule).toContain('prov:Entity');
+    // The rule text must carry the CORRECTION, not just a rule. A reader who
+    // finds only the positive statement can re-derive the mistake from the
+    // axioms, which is what ASK-05 says keeps happening.
+    expect(raw.$rule).toContain('ASK-05');
+    expect(raw.$rule).toContain('cascade:RecordClass');
   });
 });
 

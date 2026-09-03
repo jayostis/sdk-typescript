@@ -116,6 +116,7 @@ function membersOf(rangeIri) {
 const vocabularies = {};
 const valueSets = {};
 const conflicts = [];
+const unresolvable = [];
 const seen = new Map();
 
 for (const file of contextFiles) {
@@ -130,6 +131,28 @@ for (const file of contextFiles) {
     if (typeof id !== 'string') continue;
 
     const predicate = expand(id);
+
+    // A PREDICATE THAT IS NOT AN IRI IS NOT A PREDICATE. `expand` returns its
+    // argument unchanged when no prefix matches, so a term whose value is prose
+    // arrives here as prose — and written into a pod it becomes a triple whose
+    // predicate is a sentence, which no shape can judge and no reader can
+    // resolve.
+    //
+    // Not hypothetical. At the revision `conformance/scripts/SPEC_PIN` names,
+    // eight terms across three contexts are section headers written as term
+    // definitions — `"__comment_core": "=== Core Vocabulary (cascade:) ==="` and
+    // seven more. That is `jayostis/spec#48`, fixed upstream in spec PR #49 and
+    // not yet pinned, so a build here still meets them.
+    //
+    // SKIPPED AND COUNTED, not refused. The pinned data legitimately contains
+    // them and the fix is already upstream, so failing the build would break CI
+    // over something no longer wrong at spec's HEAD. The count is printed on
+    // every run instead, and reaches zero on its own when the pin moves.
+    if (!/^[A-Za-z][A-Za-z0-9+.-]*:\S*$/.test(predicate)) {
+      unresolvable.push(`${vocabulary}: ${JSON.stringify(term)} -> ${JSON.stringify(id)}`);
+      continue;
+    }
+
     const entry = { predicate };
 
     if (typeof value === 'object') {
@@ -220,6 +243,16 @@ export const SPEC_TERMS: SpecTerms = JSON.parse(
 // FILE did not.
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, source, 'utf-8');
+
+if (unresolvable.length > 0) {
+  console.log(
+    `  NOTE: ${unresolvable.length} term(s) skipped, whose value is not an IRI — jayostis/spec#48,`
+    + ` fixed upstream and not yet pinned:
+`
+    + unresolvable.map((line) => `    ${line}`).join(`
+`),
+  );
+}
 
 console.log(
   `build-terms: ${Object.keys(vocabularies).length} vocabularies, `

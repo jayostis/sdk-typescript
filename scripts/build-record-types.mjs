@@ -12,12 +12,19 @@
  * measured 32,502 types for a comparable payload). A generated module costs
  * neither, and `src/spec/` still ships for the engine in #78/#79/#80 to read.
  *
- * THE POPULATION IS SPEC'S RULE, not ours. A class whose `rdfs:subClassOf`
- * chain reaches `prov:Entity` or `prov:Activity` holds record data — the rule
- * `spec/scripts/check-class-coverage.py` enforces, and the only machine-readable
- * statement anywhere that a class carries stored records. Twelve classes this
- * SDK registers are not yet reached by it; they are declared in
- * `src/record-types/pending-spec-50.json` with the issue that deletes them.
+ * THE POPULATION IS SPEC'S, not ours — but which rule states it changed under
+ * this script. It read `rdfs:subClassOf prov:Entity`, and `jayostis/spec#34`
+ * (ASK-05) ruled that reading out: the axiom is PROV-O alignment and confers no
+ * membership, "never on `prov:Entity`, which will keep catching alignment
+ * axioms". Measured on spec's main, 110 classes were in that population and 96
+ * of them were alignment axioms.
+ *
+ * The replacement is `cascade:RecordClass`, a marker carried directly by the
+ * classes that hold record data — the explicit list the ruling calls for, put
+ * in the ontologies so a consumer derives it from the artifact it already
+ * loads. `jayostis/spec#50` adds it and is not yet pinned, so this falls back
+ * to the old chain plus `src/record-types/pending-spec-50.json` and says so on
+ * every build. See {@link recordClasses}.
  *
  * THE NAME IS THE PUBLISHED CONTEXT TERM, falling back to the local name. A
  * context is a name→IRI mapping and that is the whole of its job, so where spec
@@ -39,6 +46,8 @@ const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
 const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const SEE_ALSO = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
+const RECORD_CLASS = 'https://ns.cascadeprotocol.org/core/v1#RecordClass';
+
 const RECORD_ROOTS = new Set([
   'http://www.w3.org/ns/prov#Entity',
   'http://www.w3.org/ns/prov#Activity',
@@ -120,11 +129,26 @@ function publishedNames() {
   return names;
 }
 
+const pending = JSON.parse(readFileSync(join(root, 'src/record-types/pending-spec-50.json'), 'utf-8'));
+const pendingClasses = new Set(pending.entries.map((entry) => entry.class));
+const contextNames = publishedNames();
+
 const nodes = graph();
 const parentsOf = (iri) => (nodes.get(iri)?.[SUB_CLASS_OF] ?? []).map((v) => v['@id']).filter(Boolean);
 
 /**
  * Does this class's superclass chain reach a PROV root?
+ *
+ * THE BRIDGE, AND A READING SPEC HAS SINCE RULED OUT. `jayostis/spec#34`
+ * (ASK-05) settled it: *"The reading 'subClassOf prov:Entity means instances
+ * are stored record data' is not the intent. The axiom is PROV-O alignment …
+ * never on `prov:Entity`, which will keep catching alignment axioms."* Measured
+ * on spec's `main`: 110 classes are in that population and 96 of them are
+ * alignment axioms.
+ *
+ * It is still used, and only while the marker is absent — see
+ * {@link recordClasses}. A build against a checkout that carries
+ * `cascade:RecordClass` never calls this.
  *
  * `seen` is not defensiveness about spec: `owl:equivalentClass` cycles and
  * mutual subclass axioms are expressible, and a walk without it never returns.
@@ -135,25 +159,52 @@ function bearsRecords(iri, seen = new Set()) {
   return parentsOf(iri).some((parent) => RECORD_ROOTS.has(parent) || bearsRecords(parent, seen));
 }
 
-const pending = JSON.parse(readFileSync(join(root, 'src/record-types/pending-spec-50.json'), 'utf-8'));
-const pendingClasses = new Set(pending.entries.map((entry) => entry.class));
-const contextNames = publishedNames();
+/**
+ * Which classes hold record data, by the rule the checkout supports.
+ *
+ * `cascade:RecordClass` is the marker `jayostis/spec#50` adds — the explicit
+ * list ASK-05's ruling calls for, put in the ontologies so a consumer derives
+ * it from the artifact it already loads rather than from a side file. A class
+ * carries it directly; nothing is inherited, so an alignment axiom cannot leak
+ * a class in.
+ *
+ * FLIPS ON ITS OWN. The marker does not exist at the pinned revision, so this
+ * falls back to the PROV chain plus `pending-spec-50.json` and says so on every
+ * build. The moment a checkout carries one marked class, the marker is the
+ * population and the fallback is not consulted — no edit here, no flag, and the
+ * build line changes to say which rule ran.
+ */
+function recordClasses() {
+  const marked = [...nodes]
+    .filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS))
+    .map(([iri]) => iri);
+
+  if (marked.length > 0) return { rule: 'cascade:RecordClass', classes: new Set(marked) };
+
+  const bridged = [...nodes]
+    .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS) && bearsRecords(iri))
+    .map(([iri]) => iri);
+
+  return {
+    rule: 'prov chain + pending-spec-50.json (spec#50 not yet pinned)',
+    classes: new Set([...bridged, ...pendingClasses]),
+  };
+}
 
 const derived = [];
 const wrongly = [];
 
+const population = recordClasses();
+
 for (const [iri, node] of nodes) {
-  const isClass = (node['@type'] ?? []).includes(OWL_CLASS);
   const deprecated = Boolean(node[DEPRECATED]);
-  const pendingHere = pendingClasses.has(iri);
 
-  if (!pendingHere && (!isClass || deprecated || !bearsRecords(iri))) continue;
+  if (!population.classes.has(iri) || deprecated) continue;
 
-  // A pending entry that the rule NOW reaches is a spec fix that landed, and
-  // the entry has to go. Reported rather than silently absorbed, because an
-  // exception list that quietly stops being needed is how a workaround becomes
-  // permanent.
-  if (pendingHere && isClass && !deprecated && bearsRecords(iri)) wrongly.push(iri);
+  // A pending entry the population now reaches on its own has outlived its
+  // cause. Reported rather than silently absorbed, because an exception list
+  // that quietly stops being needed is how a workaround becomes permanent.
+  if (population.rule === 'cascade:RecordClass' && pendingClasses.has(iri)) wrongly.push(iri);
 
   const localName = iri.slice(Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1);
   const published = contextNames.get(iri) ?? [];
@@ -196,10 +247,12 @@ const banner = [
   ' * so nothing here is transcribed and a change upstream arrives as a build',
   ' * diff rather than as a silent disagreement.',
   ' *',
-  ' * The population is spec\'s own rule: an `rdfs:subClassOf` chain reaching',
-  ' * `prov:Entity` or `prov:Activity`. The twelve classes it does not yet reach',
-  ' * are declared in `src/record-types/pending-spec-50.json` with the issue that',
-  ' * deletes them.',
+  ` * The population is spec's, by ${population.rule}.`,
+  ' *',
+  ' * `cascade:RecordClass` is the marker jayostis/spec#50 adds, replacing a',
+  ' * reading of `rdfs:subClassOf prov:Entity` that ASK-05 ruled out as PROV-O',
+  ' * alignment. Until that is pinned, the old chain plus',
+  ' * `src/record-types/pending-spec-50.json` stands in.',
   ' *',
   ' * @module record-types',
   ' */',
@@ -240,5 +293,5 @@ if (wrongly.length > 0) {
 
 console.log(
   `build-record-types: ${derived.filter((e) => !e.deprecated).length} record classes `
-  + `(${pending.entries.length} pending spec#50) -> src/record-types/generated.ts`,
+  + `by ${population.rule} -> src/record-types/generated.ts`,
 );

@@ -8,10 +8,13 @@
  * DERIVED, NOT TRANSCRIBED. The classes and their published names come from
  * `src/spec/`, built from the checkout by `scripts/build-spec-data.mjs` and
  * turned into `./generated.ts` by `scripts/build-record-types.mjs`. The
- * population is spec's own rule — an `rdfs:subClassOf` chain reaching
- * `prov:Entity` or `prov:Activity`, which `spec/scripts/check-class-coverage.py`
- * enforces and which is the only machine-readable statement anywhere that a
- * class holds stored records.
+ * population is spec's, stated by `cascade:RecordClass` — a marker the
+ * record-bearing classes carry directly. It replaces a reading of
+ * `rdfs:subClassOf prov:Entity` that `jayostis/spec#34` (ASK-05) ruled out:
+ * the axiom is PROV-O alignment and says nothing about records, and on spec's
+ * main 96 of the 110 classes it caught were alignment axioms.
+ * `jayostis/spec#50` adds the marker; until that revision is pinned here the
+ * build falls back to the old chain and reports on every run that it did.
  *
  * WHAT THIS FIXES. One RDF class must read back as exactly one JSON `type`, and
  * that choice used to be made by object key order: `buildReverseTypeMap` took

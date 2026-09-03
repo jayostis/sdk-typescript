@@ -6,10 +6,12 @@
  * so nothing here is transcribed and a change upstream arrives as a build
  * diff rather than as a silent disagreement.
  *
- * The population is spec's own rule: an `rdfs:subClassOf` chain reaching
- * `prov:Entity` or `prov:Activity`. The twelve classes it does not yet reach
- * are declared in `src/record-types/pending-spec-50.json` with the issue that
- * deletes them.
+ * The population is spec's, by prov chain + pending-spec-50.json (spec#50 not yet pinned).
+ *
+ * `cascade:RecordClass` is the marker jayostis/spec#50 adds, replacing a
+ * reading of `rdfs:subClassOf prov:Entity` that ASK-05 ruled out as PROV-O
+ * alignment. Until that is pinned, the old chain plus
+ * `src/record-types/pending-spec-50.json` stands in.
  *
  * @module record-types
  */
