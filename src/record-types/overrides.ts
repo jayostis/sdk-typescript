@@ -14,10 +14,18 @@
  * @module record-types
  */
 
-import { NAMESPACES } from '../vocabularies/namespaces.js';
-
-const clinical = NAMESPACES.clinical;
-const coverage = NAMESPACES.coverage;
+/**
+ * The namespaces these five rows name, written out.
+ *
+ * NOT IMPORTED FROM `src/vocabularies/`, which #87 deletes — a module that
+ * survives its own epic cannot import from one that does not. Every other
+ * class IRI in this directory is derived from the shipped ontologies; these
+ * five are hand-written by definition, since an override is a fact spec does
+ * not state, so writing the namespace beside them costs nothing that was not
+ * already being paid.
+ */
+const clinical = 'https://ns.cascadeprotocol.org/clinical/v1#';
+const coverage = 'https://ns.cascadeprotocol.org/coverage/v1#';
 
 /**
  * Where the name this SDK returns is not the name spec publishes.

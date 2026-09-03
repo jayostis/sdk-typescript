@@ -12,6 +12,10 @@
  * have an issue that deletes them.
  */
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect } from 'vitest';
 
 import {
@@ -249,5 +253,34 @@ describe('the assembly refuses what it cannot decide', () => {
       derived('https://example.org/a#ProcedureRecord', 'ProcedureRecord'),
       derived(`${clinical}Procedure`, 'Procedure'),
     ])).toThrow(/"ProcedureRecord"/);
+  });
+});
+
+describe('the module survives its own epic', () => {
+  it('imports nothing from outside src/record-types/', () => {
+    // #87 deletes `src/terms/`, `src/serializer/`, `src/deserializer/`,
+    // `src/validator/`, `src/vocabularies/` and `src/jsonld/`. This directory is
+    // not on that list and must not be, because the public API takes names and
+    // the engine takes class IRIs — something has to translate, permanently.
+    //
+    // It imported `NAMESPACES` and `DEPRECATED_TYPE_ALIASES` from
+    // `src/vocabularies/` until the classes were derived, which would have made
+    // it break at Phase 9 and be discovered there. Both are gone; this is what
+    // keeps them gone.
+    const dir = resolve(dirname(fileURLToPath(import.meta.url)), '../../src/record-types');
+
+    const outward = readdirSync(dir)
+      .filter((file) => file.endsWith('.ts'))
+      .flatMap((file) => [...readFileSync(join(dir, file), 'utf-8')
+        .matchAll(/from '([^']+)'/g)]
+        .map((match) => `${file} -> ${match[1]}`)
+        .filter((line) => !line.includes('-> ./')));
+
+    expect(
+      outward,
+      'src/record-types/ must import nothing outside itself. Phase 9 (#87) deletes six '
+      + 'sibling directories, and a module that imports one of them does not survive the '
+      + 'epic it was built for.',
+    ).toEqual([]);
   });
 });

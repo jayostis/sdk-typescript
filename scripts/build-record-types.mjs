@@ -44,16 +44,41 @@ const RECORD_ROOTS = new Set([
   'http://www.w3.org/ns/prov#Activity',
 ]);
 
-/** Prefix → namespace, the six vocabularies plus `cascade`, which is core's. */
-const NAMESPACES = {
-  cascade: 'https://ns.cascadeprotocol.org/core/v1#',
-  core: 'https://ns.cascadeprotocol.org/core/v1#',
-  clinical: 'https://ns.cascadeprotocol.org/clinical/v1#',
-  health: 'https://ns.cascadeprotocol.org/health/v1#',
-  coverage: 'https://ns.cascadeprotocol.org/coverage/v1#',
-  checkup: 'https://ns.cascadeprotocol.org/checkup/v1#',
-  pots: 'https://ns.cascadeprotocol.org/pots/v1#',
-};
+/**
+ * Prefix → namespace, read out of the contexts rather than written here.
+ *
+ * A JSON-LD context declares its own prefixes as ordinary terms whose value is
+ * an IRI — `"clinical": "https://ns.cascadeprotocol.org/clinical/v1#"` — so the
+ * map a context's CURIEs need is published in the same file that uses them. A
+ * hand-written copy would be one more transcription of a spec fact, in the
+ * script whose whole purpose is to stop transcribing them.
+ */
+function prefixes() {
+  const map = new Map();
+
+  for (const file of readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'))) {
+    const document = JSON.parse(readFileSync(join(CONTEXTS, file), 'utf-8'));
+
+    for (const [term, value] of Object.entries(document['@context'] ?? document)) {
+      // A prefix declaration is a term whose value is an absolute IRI ending in
+      // a delimiter. A term mapping to a full IRI that does NOT end in one is
+      // naming a single thing, not a namespace.
+      if (typeof value === 'string' && /^https?:\/\/.*[#/]$/.test(value)) map.set(term, value);
+    }
+  }
+
+  if (map.size === 0) {
+    throw new Error(
+      `no prefix declarations in ${CONTEXTS}. Every CURIE in every context would then resolve `
+      + 'to itself, and a record type whose class IRI is the string "clinical:Medication" '
+      + 'matches no rdf:type in any pod — an absence that reads as an answer.',
+    );
+  }
+
+  return map;
+}
+
+const NAMESPACES = prefixes();
 
 /** The whole shipped graph, as `iri -> node`. */
 function graph() {
@@ -85,7 +110,7 @@ function publishedNames() {
       if (typeof id !== 'string') continue;
 
       const colon = id.indexOf(':');
-      const namespace = colon > 0 ? NAMESPACES[id.slice(0, colon)] : undefined;
+      const namespace = colon > 0 ? NAMESPACES.get(id.slice(0, colon)) : undefined;
       const iri = namespace ? `${namespace}${id.slice(colon + 1)}` : id;
 
       names.set(iri, [...(names.get(iri) ?? []), term]);
