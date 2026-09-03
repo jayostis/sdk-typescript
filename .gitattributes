@@ -1,0 +1,7 @@
+# Vendored third-party source is copied byte-for-byte and compared byte-for-byte
+# (tests/vendor-drift.test.ts). Git's autocrlf would rewrite line endings on
+# checkout, so a Windows clone would hold 213-byte files where upstream ships
+# 205-byte ones — the drift test would fail there and pass on Linux CI, and
+# `scripts/copy-vendor.mjs` would publish whichever bytes the builder happened to
+# have. `-text` turns the conversion off for this directory only.
+src/vendor/** -text
