@@ -22,15 +22,13 @@
  * The replacement is `cascade:RecordClass`, a marker carried directly by the
  * classes that hold record data — the explicit list the ruling calls for, put
  * in the ontologies so a consumer derives it from the artifact it already
- * loads. `jayostis/spec#50` adds it and is not yet pinned, so this falls back
- * to the old chain plus `src/record-types/pending-spec-50.json` and says so on
- * every build.
+ * loads. `jayostis/spec#50` added it and `conformance/scripts/SPEC_PIN` names
+ * that revision, so the marker is now the only rule: the PROV bridge, the
+ * `pending-spec-50.json` list that patched its blind spots, and the comparison
+ * between the two rules were deleted together once the pin moved.
  *
- * BOTH RULES LIVE IN `scripts/lib/record-population.mjs`, along with the
- * comparison between them. The flip is not atomic — it happens the moment ONE
- * class carries the marker — so a checkout that has marked some classes and not
- * yet others drops the rest of the old population in a single build. That
- * module reports what left; this one prints it.
+ * THE RULE LIVES IN `scripts/lib/record-population.mjs`, which refuses a graph
+ * that marks nothing rather than emitting an empty table.
  *
  * THE NAME IS THE PUBLISHED CONTEXT TERM, falling back to the local name. A
  * context is a name→IRI mapping and that is the whole of its job, so where spec
@@ -55,7 +53,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { duplicateNames } from './lib/duplicate-names.mjs';
-import { MARKER_RULE, recordPopulation } from './lib/record-population.mjs';
+import { recordPopulation } from './lib/record-population.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ONTOLOGIES = join(root, 'src/spec/ontologies');
@@ -141,26 +139,18 @@ function publishedNames() {
   return names;
 }
 
-const pending = JSON.parse(readFileSync(join(root, 'src/record-types/pending-spec-50.json'), 'utf-8'));
-const pendingClasses = new Set(pending.entries.map((entry) => entry.class));
 const contextNames = publishedNames();
 
 const nodes = graph();
 
 const derived = [];
-const wrongly = [];
 
-const population = recordPopulation(nodes, pendingClasses);
+const population = recordPopulation(nodes);
 
 for (const [iri, node] of nodes) {
   const deprecated = Boolean(node[DEPRECATED]);
 
   if (!population.classes.has(iri) || deprecated) continue;
-
-  // A pending entry the population now reaches on its own has outlived its
-  // cause. Reported rather than silently absorbed, because an exception list
-  // that quietly stops being needed is how a workaround becomes permanent.
-  if (population.rule === MARKER_RULE && pendingClasses.has(iri)) wrongly.push(iri);
 
   const localName = iri.slice(Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1);
   const published = contextNames.get(iri) ?? [];
@@ -177,10 +167,12 @@ for (const [iri, node] of nodes) {
 }
 
 // Deprecated classes are not record types — nothing writes one — but they are
-// READ, so each is attached to the class that superseded it. Four of the five
-// carry a correct `rdfs:seeAlso`; `clinical:CoverageRecord` points at
-// `fhir:Coverage` instead, which is spec#50 gap 2 and stays declared in
-// `src/record-types/overrides.ts` until spec states it in a triple.
+// READ, so each is attached to the class that superseded it. All five carry a
+// correct `rdfs:seeAlso` as of the pinned revision: `clinical:CoverageRecord`
+// used to point at `fhir:Coverage` alone, which is why
+// `src/record-types/overrides.ts` declared that one link by hand, and
+// `jayostis/spec#50` gap 2 states it in a triple now. The override went with
+// the pin.
 const byIri = new Map(derived.map((entry) => [entry.iri, entry]));
 
 for (const [iri, node] of nodes) {
@@ -221,10 +213,10 @@ const banner = [
   ' *',
   ` * The population is spec's, by ${population.rule}.`,
   ' *',
-  ' * `cascade:RecordClass` is the marker jayostis/spec#50 adds, replacing a',
+  ' * `cascade:RecordClass` is the marker jayostis/spec#50 added, replacing a',
   ' * reading of `rdfs:subClassOf prov:Entity` that ASK-05 ruled out as PROV-O',
-  ' * alignment. Until that is pinned, the old chain plus',
-  ' * `src/record-types/pending-spec-50.json` stands in.',
+  ' * alignment. It is the only rule: the bridge and its pending list went when',
+  ' * conformance/scripts/SPEC_PIN moved to the revision carrying the marker.',
   ' *',
   ' * @module record-types',
   ' */',
@@ -283,33 +275,6 @@ const banner = [
 // `src/spec/derived/` to write into.
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, banner, 'utf-8');
-
-// WHAT THE FLIP COST, printed because nothing else would say. The rule changes
-// on the first marked class, so every class the superseded rule reached and the
-// marker does not leaves the table in the same build — and a class that is
-// simply absent from `record-types.generated.ts` is indistinguishable from one
-// spec never declared. Not a failure: most of what the marker drops is a
-// correction (the `cascade:DataProvenance` members are values, not records),
-// and a build that refused them would be refusing the marker for working.
-if (population.dropped.length > 0) {
-  console.warn(
-    `\n  NOTE: the ${MARKER_RULE} rule is in effect and ${population.dropped.length} live `
-    + 'class(es) the superseded prov+pending rule reached are NOT marked:\n'
-    + population.dropped.map((iri) => `    ${iri}`).join('\n')
-    + '\n  Each is either a correction (a value class that was never a record) or a gap '
-    + 'upstream. Confirm every one before this table ships — nothing else reports their '
-    + 'absence. See jayostis/spec#50.\n',
-  );
-}
-
-if (wrongly.length > 0) {
-  console.warn(
-    `\n  NOTE: ${wrongly.length} entr${wrongly.length === 1 ? 'y' : 'ies'} in `
-    + 'pending-spec-50.json no longer needed — spec now reaches:\n'
-    + wrongly.map((iri) => `    ${iri}`).join('\n')
-    + '\n  Delete them; tests/record-types/derivation.test.ts asserts this too.\n',
-  );
-}
 
 // WRITTEN ANYWAY, AND SAID OUT LOUD. A refusal here would stop every
 // uncontested class over one ambiguous name — the same cost as throwing at

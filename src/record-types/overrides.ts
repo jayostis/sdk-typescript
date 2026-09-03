@@ -75,20 +75,14 @@ export const INPUT_ALIASES: Readonly<Record<string, string>> = {
   CoverageRecord: `${coverage}InsurancePlan`,
 };
 
-/**
- * Deprecated classes whose successor spec does not state in a triple.
- *
- * `deprecated class IRI -> the class that superseded it`. Four of the five
- * deprecated classes carry a correct `rdfs:seeAlso` and are derived from it;
- * this is the fifth.
- *
- * `clinical:CoverageRecord`'s `rdfs:seeAlso` points at `fhir:Coverage` — a
- * documentation link, not the superseding class — so the supersession exists
- * only in its `rdfs:comment`. It is the one deprecation whose replacement lives
- * in a different vocabulary, which is the case a consumer is least able to
- * guess. `jayostis/spec#50` gap 2 asks for the triple; this row goes when it
- * lands.
- */
-export const SUPERSEDES_OVERRIDES: Readonly<Record<string, string>> = {
-  [`${clinical}CoverageRecord`]: `${coverage}InsurancePlan`,
-};
+// There is no SUPERSEDES_OVERRIDES table any more, and its absence is the
+// point. It held one row — `clinical:CoverageRecord -> coverage:InsurancePlan`
+// — because that class's `rdfs:seeAlso` pointed at `fhir:Coverage`, a
+// documentation link rather than the superseding class, leaving the
+// supersession stated only in an `rdfs:comment` no reader can act on. That was
+// `jayostis/spec#50` gap 2. Spec states the triple now, all five deprecated
+// classes derive their successor from `rdfs:seeAlso`, and the row was deleted
+// when `conformance/scripts/SPEC_PIN` moved to the revision carrying it.
+//
+// It was found by the test that asserted it was still needed, not by anyone
+// remembering to look.

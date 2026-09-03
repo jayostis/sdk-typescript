@@ -14,8 +14,9 @@
  * `rdfs:subClassOf prov:Entity` that `jayostis/spec#34` (ASK-05) ruled out:
  * the axiom is PROV-O alignment and says nothing about records, and on spec's
  * main 96 of the 110 classes it caught were alignment axioms.
- * `jayostis/spec#50` adds the marker; until that revision is pinned here the
- * build falls back to the old chain and reports on every run that it did.
+ * `jayostis/spec#50` added the marker and `conformance/scripts/SPEC_PIN` names
+ * that revision, so it is the only rule: the PROV bridge and the pending list
+ * that patched its blind spots were deleted once the pin moved.
  *
  * WHAT THIS FIXES. One RDF class must read back as exactly one JSON `type`, and
  * that choice used to be made by object key order: `buildReverseTypeMap` took
@@ -49,7 +50,7 @@
  */
 
 export * from './types.js';
-export { NAME_OVERRIDES, INPUT_ALIASES, SUPERSEDES_OVERRIDES } from './overrides.js';
+export { NAME_OVERRIDES, INPUT_ALIASES } from './overrides.js';
 export type { DerivedClass, NameCollision } from '../spec/derived/record-types.generated.js';
 
 /**
@@ -67,7 +68,7 @@ export { NAME_COLLISIONS } from '../spec/derived/record-types.generated.js';
 
 import { DERIVED_CLASSES } from '../spec/derived/record-types.generated.js';
 import type { DerivedClass } from '../spec/derived/record-types.generated.js';
-import { INPUT_ALIASES, NAME_OVERRIDES, SUPERSEDES_OVERRIDES } from './overrides.js';
+import { INPUT_ALIASES, NAME_OVERRIDES } from './overrides.js';
 import type { RecordType } from './types.js';
 
 /**
@@ -164,22 +165,15 @@ export function assembleRecordTypes(classes: readonly DerivedClass[]): RecordTyp
 
     const aliases = [...displaced, ...(aliasesFor.get(derived.iri) ?? [])].sort();
 
-    const superseded = Object.entries(SUPERSEDES_OVERRIDES)
-      .filter(([, supersedingIri]) => supersedingIri === derived.iri)
-      .map(([deprecatedIri]) => deprecatedIri);
-
-    // DEDUPLICATED, because the derived table and the override can both name
-    // one class and the class index below treats a repeat as a conflict.
-    // `SUPERSEDES_OVERRIDES` exists precisely because spec has not yet stated
-    // `clinical:CoverageRecord rdfs:seeAlso coverage:InsurancePlan`
-    // (`jayostis/spec#50` gap 2). When that triple lands,
-    // `scripts/build-record-types.mjs` puts the class into `supersedes` and the
-    // override still adds it — so without this the class would be claimed twice
-    // by ONE record type, land in `contestedClasses`, and make
-    // `recordTypeForClass` refuse to answer for it, describing a conflict
-    // between a record type and itself. The upstream fix this row waits for
-    // must not be the thing that breaks it.
-    const accepted = new Set([derived.iri, ...derived.supersedes, ...superseded]);
+    // STILL A SET, with no override left to collide with it. Supersession is
+    // spec's to state and all five deprecated classes now state it in
+    // `rdfs:seeAlso`, so `derived.supersedes` is the whole of it — the
+    // `SUPERSEDES_OVERRIDES` row that declared the fifth by hand went when
+    // `jayostis/spec#50` gap 2 landed. The set stays because a class named twice
+    // by ONE record type would land in `contestedClasses` and make
+    // `recordTypeForClass` refuse to answer, describing a conflict between a
+    // record type and itself; nothing in spec's data forbids the repeat.
+    const accepted = new Set([derived.iri, ...derived.supersedes]);
 
     return Object.freeze({
       name: override ?? derived.name,

@@ -1,25 +1,25 @@
 /**
- * The flip to `cascade:RecordClass` announces what it drops.
+ * The marker is the population, and a graph without it is refused.
  *
- * `tests/record-types/derivation.test.ts` asserts the rule the checkout in hand
- * supports, and it can only ever assert one of the two — a checkout either
- * carries the marker or it does not. The state that has to be right is the one
- * in between: spec marking some classes and not yet others, which is what a
- * multi-file upstream change actually looks like from here.
+ * WHAT THIS USED TO TEST, and why most of it is gone. The rule was in flux:
+ * `rdfs:subClassOf prov:Entity` plus `pending-spec-50.json` for the classes that
+ * reading missed, flipping to `cascade:RecordClass` on the first marked class
+ * it saw. The flip was not atomic, so this file drove the state in between —
+ * spec marking some classes and not yet others — which is what a multi-file
+ * upstream change looks like from here and which the real data can never be.
  *
- * WHAT WENT WRONG WITHOUT THIS. The rule changes the moment ONE class carries
- * the marker, so every class the PROV bridge reached and the marker does not
- * leaves `DERIVED_CLASSES` in the same build, with no error and no entry in
- * `pending-spec-50.json` to catch it. A class that is simply absent looks
- * exactly like a class spec never declared — the absence that reads as an
- * answer, again. Reproduced against spec branch
- * `fix/50-record-class-derivability`, where `checkup:WellnessProfileReference`
- * is reachable only through the bridge, is unmarked, and is in no pending
- * entry.
+ * `conformance/scripts/SPEC_PIN` moved to the revision carrying the marker, the
+ * bridge and the pending list were deleted together, and the tests for a flip
+ * that can no longer happen went with them. A test whose subject is deleted is
+ * deleted; keeping it green against a stub would be the suite lying about what
+ * it covers.
  *
- * Driven with synthetic graphs, for the reason `assembleRecordTypes` takes its
- * classes as an argument: the interesting case cannot be produced from the real
- * data, and a detector is proven by making it speak (`tests/README.md`).
+ * WHAT REPLACES THEM is the one failure the new rule can still have, and it is
+ * worse than anything the old one could: a graph carrying no marker at all
+ * yields an EMPTY population, which reads exactly like a spec declaring no
+ * record types. Driven with synthetic graphs for the reason
+ * `assembleRecordTypes` takes its classes as an argument — a detector is proven
+ * by making it speak (`tests/README.md`), and the real data cannot be made to.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 // @ts-expect-error -- a build script, deliberately plain JavaScript and untyped.
-import { recordPopulation, MARKER_RULE, BRIDGE_RULE } from '../../scripts/lib/record-population.mjs';
+import { recordPopulation, MARKER_RULE } from '../../scripts/lib/record-population.mjs';
 import { DERIVED_CLASSES } from '../../src/spec/derived/record-types.generated.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -38,104 +38,77 @@ const ONTOLOGIES = join(repoRoot, 'src/spec/ontologies');
 const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
 const RECORD_CLASS = 'https://ns.cascadeprotocol.org/core/v1#RecordClass';
 const PROV_ENTITY = 'http://www.w3.org/ns/prov#Entity';
+const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
 
 type Node = Record<string, unknown> & { '@id': string };
 
 /** A class node, marked or not, with or without the PROV superclass. */
-function klass(iri: string, { marked = false, prov = false, deprecated = false } = {}): Node {
+function klass(iri: string, { marked = false, prov = false } = {}): Node {
   return {
     '@id': iri,
     '@type': marked ? [OWL_CLASS, RECORD_CLASS] : [OWL_CLASS],
     ...(prov ? { 'http://www.w3.org/2000/01/rdf-schema#subClassOf': [{ '@id': PROV_ENTITY }] } : {}),
-    ...(deprecated ? { 'http://www.w3.org/2002/07/owl#deprecated': true } : {}),
   };
 }
 
 const graphOf = (...nodes: Node[]) => new Map(nodes.map((node) => [node['@id'], node]));
 
-describe('the rule the population is derived by', () => {
-  it('is the bridge while no class carries the marker', () => {
-    const nodes = graphOf(klass('urn:A', { prov: true }), klass('urn:B'));
-    const population = recordPopulation(nodes, new Set(['urn:B']));
+describe('the marker states the population', () => {
+  it('takes the classes that carry it and leaves the ones that do not', () => {
+    const population = recordPopulation(graphOf(
+      klass('urn:Marked', { marked: true }),
+      klass('urn:Plain'),
+    ));
 
-    expect(population.rule).toBe(BRIDGE_RULE);
-    expect([...population.classes].sort()).toEqual(['urn:A', 'urn:B']);
+    expect(population.rule).toBe(MARKER_RULE);
+    expect([...population.classes]).toEqual(['urn:Marked']);
   });
 
-  it('has nothing to report while the bridge is the population', () => {
-    // There is no earlier rule to compare against, so a non-empty list here
-    // would be the fallback reporting losses against itself.
-    const nodes = graphOf(klass('urn:A', { prov: true }));
+  it('does not let a PROV superclass put a class in', () => {
+    // The reading `jayostis/spec#34` (ASK-05) ruled out, asserted so that
+    // deleting the bridge cannot be quietly undone: `rdfs:subClassOf
+    // prov:Entity` is alignment and confers no membership. On spec's main it
+    // caught 110 classes of which 96 were alignment axioms.
+    const population = recordPopulation(graphOf(
+      klass('urn:Marked', { marked: true }),
+      klass('urn:AlignedOnly', { prov: true }),
+    ));
 
-    expect(recordPopulation(nodes, new Set()).dropped).toEqual([]);
+    expect(population.classes.has('urn:AlignedOnly')).toBe(false);
   });
 
-  it('is the marker the moment one class carries it', () => {
-    const nodes = graphOf(klass('urn:A', { marked: true }), klass('urn:B', { prov: true }));
+  it('does not inherit the marker from a marked superclass', () => {
+    // A class carries it directly or not at all. Inheritance would let one
+    // marked root readmit every alignment axiom under it, which is the defect
+    // the marker replaced.
+    const child: Node = {
+      ...klass('urn:Child'),
+      'http://www.w3.org/2000/01/rdf-schema#subClassOf': [{ '@id': 'urn:MarkedParent' }],
+    };
 
-    expect(recordPopulation(nodes, new Set()).rule).toBe(MARKER_RULE);
+    const population = recordPopulation(graphOf(klass('urn:MarkedParent', { marked: true }), child));
+
+    expect(population.classes.has('urn:Child')).toBe(false);
   });
 });
 
-describe('what the flip drops, when a checkout marks only some classes', () => {
-  it('names a class the bridge reached and the marker does not', () => {
-    // The `checkup:WellnessProfileReference` case, in miniature: a sibling is
-    // marked, this one is not yet, and it silently left the population.
-    const nodes = graphOf(
-      klass('urn:Marked', { marked: true, prov: true }),
-      klass('urn:NotYetMarked', { prov: true }),
-    );
-
-    const population = recordPopulation(nodes, new Set());
-
-    expect(population.classes.has('urn:NotYetMarked')).toBe(false);
-    expect(population.dropped).toEqual(['urn:NotYetMarked']);
+describe('a graph that marks nothing', () => {
+  it('is refused rather than answered with an empty population', () => {
+    // The one hard failure in this pipeline, and the reason it is not reported
+    // and worked around like every other spec gap: the permissive answer here
+    // is an empty table, indistinguishable from a spec that declares no record
+    // types, and every test that counts classes would go green against zero.
+    expect(() => recordPopulation(graphOf(klass('urn:A', { prov: true }))))
+      .toThrow(/carries https:\/\/ns\.cascadeprotocol\.org\/core\/v1#RecordClass/);
   });
 
-  it('names a pending entry the marker does not reach', () => {
-    // The pending list is the declared half of the old population. An entry the
-    // marker misses is a class this SDK registered yesterday and does not today.
-    const nodes = graphOf(klass('urn:Marked', { marked: true }), klass('urn:Pending'));
-
-    expect(recordPopulation(nodes, new Set(['urn:Pending'])).dropped).toEqual(['urn:Pending']);
-  });
-
-  it('is silent when the marker reaches everything the bridge did', () => {
-    // The other direction, so a report that simply listed the bridge's
-    // population would fail here.
-    const nodes = graphOf(
-      klass('urn:A', { marked: true, prov: true }),
-      klass('urn:B', { marked: true, prov: true }),
-    );
-
-    expect(recordPopulation(nodes, new Set()).dropped).toEqual([]);
-  });
-
-  it('does not report a deprecated class as dropped', () => {
-    // A deprecated class is not a record type under either rule — the build
-    // filters it out and attaches it to whatever superseded it — so its absence
-    // from the marked set is not a loss.
-    const nodes = graphOf(
-      klass('urn:Marked', { marked: true }),
-      klass('urn:Gone', { prov: true, deprecated: true }),
-    );
-
-    expect(recordPopulation(nodes, new Set()).dropped).toEqual([]);
-  });
-
-  it('reports every dropped class, not the first', () => {
-    const nodes = graphOf(
-      klass('urn:Marked', { marked: true }),
-      klass('urn:LostOne', { prov: true }),
-      klass('urn:LostTwo', { prov: true }),
-    );
-
-    expect(recordPopulation(nodes, new Set()).dropped).toEqual(['urn:LostOne', 'urn:LostTwo']);
+  it('names the likely cause, which is a pin moved backwards', () => {
+    expect(() => recordPopulation(graphOf(klass('urn:A')))).toThrow(/SPEC_PIN/);
   });
 });
 
 describe('against the graph this package actually ships', () => {
-  it('produces the population the committed table was built from', () => {
+  it('produces the population the generated table was built from', () => {
     // The wiring, so the synthetic cases above cannot pass while the build uses
     // something else. Deprecated classes are derived and then filtered out of
     // `DERIVED_CLASSES`, so this compares the live ones.
@@ -147,15 +120,10 @@ describe('against the graph this package actually ships', () => {
       }
     }
 
-    const pending = JSON.parse(
-      readFileSync(join(repoRoot, 'src/record-types/pending-spec-50.json'), 'utf-8'),
-    ) as { entries: { class: string }[] };
-
-    const population = recordPopulation(nodes, new Set(pending.entries.map((e) => e.class)));
+    const population = recordPopulation(nodes);
     const derived = new Set(DERIVED_CLASSES.map((entry) => entry.iri));
 
-    expect([...population.classes].filter((iri) => !derived.has(iri) && !nodes.get(iri)?.[
-      'http://www.w3.org/2002/07/owl#deprecated'
-    ])).toEqual([]);
+    expect([...population.classes].filter((iri) => !derived.has(iri) && !nodes.get(iri)?.[DEPRECATED]))
+      .toEqual([]);
   });
 });

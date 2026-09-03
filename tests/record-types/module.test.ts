@@ -8,8 +8,15 @@
  *
  * The rows fall into two kinds and the file is arranged by which: what spec
  * says, which must survive a spec bump unchanged, and what
- * `src/record-types/overrides.ts` declares, which is five rows and four of them
- * have an issue that deletes them.
+ * `src/record-types/overrides.ts` declares, which is four rows across two
+ * tables, each naming the issue that deletes it.
+ *
+ * IT WAS FIVE ROWS ACROSS THREE TABLES. `SUPERSEDES_OVERRIDES` held the fifth —
+ * `clinical:CoverageRecord -> coverage:InsurancePlan`, stated upstream only in
+ * an `rdfs:comment` — and went when `jayostis/spec#50` gap 2 put it in a triple
+ * and the pin moved. That is the shape these rows are meant to have: an
+ * override with an issue behind it, deleted by the upstream fix rather than
+ * kept out of caution.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -21,7 +28,6 @@ import { describe, it, expect } from 'vitest';
 import {
   INPUT_ALIASES,
   NAME_OVERRIDES,
-  SUPERSEDES_OVERRIDES,
   allRecordTypes,
   assembleRecordTypes,
   recordTypeFor,
@@ -146,11 +152,15 @@ describe('deprecated class spellings still resolve', () => {
     expect(recordTypeForClass(`${clinical}Immunization`)?.name).toBe('ImmunizationRecord');
   });
 
-  it('the fifth, which spec states only in prose', () => {
-    // `clinical:CoverageRecord`'s `rdfs:seeAlso` points at `fhir:Coverage` — a
-    // documentation link, not the superseding class. `jayostis/spec#50` gap 2.
+  it('the fifth, which spec used to state only in prose', () => {
+    // `clinical:CoverageRecord`'s `rdfs:seeAlso` pointed at `fhir:Coverage` — a
+    // documentation link, not the superseding class — so the supersession lived
+    // in an `rdfs:comment` and `SUPERSEDES_OVERRIDES` declared it by hand.
+    // `jayostis/spec#50` gap 2 states the triple, and the override is deleted:
+    // this resolves by derivation now, like the other four.
     expect(recordTypeForClass(`${clinical}CoverageRecord`)?.name).toBe('InsurancePlan');
-    expect(SUPERSEDES_OVERRIDES[`${clinical}CoverageRecord`]).toBe(`${coverage}InsurancePlan`);
+    expect(recordTypeFor('InsurancePlan')?.acceptedClassUris)
+      .toContain(`${clinical}CoverageRecord`);
   });
 
   it('carries them on the record type, not in a table beside it', () => {
@@ -207,12 +217,28 @@ describe('the invariants that make the two directions agree', () => {
     }
   });
 
-  it('registers the classes pending spec#50, which the PROV rule does not reach', () => {
-    // Without the pending list these would simply be absent, and an absent
-    // record type is indistinguishable from a class that does not exist.
+  it('registers the classes the old PROV rule could not reach', () => {
+    // These needed `pending-spec-50.json` to be registered at all, because the
+    // bridge could not see them and an absent record type is indistinguishable
+    // from a class that does not exist. The marker reaches them directly now,
+    // and the list is gone.
     expect(recordTypeForClass(`${health}AllergyRecord`)).toBeDefined();
     expect(recordTypeForClass(`${cascade}PatientProfile`)).toBeDefined();
-    expect(recordTypeForClass(`${cascade}SocialHistoryConsent`)).toBeDefined();
+  });
+
+  it('does not register cascade:SocialHistoryConsent, which is a value', () => {
+    // IT USED TO, and losing it is a correction rather than a regression. The
+    // pending list registered it as a record class; spec declares it
+    // `a owl:NamedIndividual, cascade:ConsentScope` — a consent-scope VALUE,
+    // not a class holding record data — so the marker does not mark it and it
+    // left the population when the bridge did.
+    //
+    // Asserted rather than left to the absence, because that absence is exactly
+    // what nothing else would report: 13 classes left the table on the day the
+    // pin moved, 11 of them `cascade:DataProvenance` and its members, and a
+    // class simply missing from the table reads like a class spec never
+    // declared.
+    expect(recordTypeForClass(`${cascade}SocialHistoryConsent`)).toBeUndefined();
   });
 });
 
@@ -335,23 +361,29 @@ describe('the module survives its own epic', () => {
   });
 });
 
-describe('the assembly survives the upstream fix its overrides wait for', () => {
-  it('does not repeat a class the derived table and an override both supersede', () => {
-    // `SUPERSEDES_OVERRIDES` exists because spec has not yet stated
-    // `clinical:CoverageRecord rdfs:seeAlso coverage:InsurancePlan`
-    // (`jayostis/spec#50` gap 2). When that triple lands,
-    // `scripts/build-record-types.mjs` puts the class into `supersedes` AND the
-    // override still adds it — so `acceptedClassUris` would hold it twice, the
-    // class index would call it contested, and `recordTypeForClass` would
-    // refuse to answer for it, describing a conflict between a record type and
-    // itself.
-    const [deprecated, superseding] = Object.entries(SUPERSEDES_OVERRIDES)[0];
+describe('one record type naming a class twice is not a conflict', () => {
+  it('does not report a class as contested against its own record type', () => {
+    // THE INVARIANT OUTLIVED THE CASE THAT MOTIVATED IT.
+    // `SUPERSEDES_OVERRIDES` used to declare
+    // `clinical:CoverageRecord -> coverage:InsurancePlan` by hand, and the risk
+    // was the upstream fix: once spec stated the triple, the derivation would
+    // put the class in `supersedes` while the override still added it, so
+    // `acceptedClassUris` would hold it twice, the class index would call it
+    // contested, and `recordTypeForClass` would refuse to answer — describing a
+    // conflict between a record type and itself.
+    //
+    // Spec states it, the override is deleted, and that path is gone. The
+    // invariant is kept because nothing in spec's data forbids a class
+    // appearing twice in one row's `supersedes`, and the failure it produces
+    // would be a refusal that reads like a real ambiguity. Driven with a
+    // synthetic row now, since the shipped table can no longer produce one.
+    const deprecated = 'https://ns.cascadeprotocol.org/clinical/v1#CoverageRecord';
 
     const table = assembleRecordTypes([{
-      iri: superseding,
+      iri: `${coverage}InsurancePlan`,
       name: 'InsurancePlan',
       localName: 'InsurancePlan',
-      supersedes: [deprecated],
+      supersedes: [deprecated, deprecated],
     }]);
 
     const [assembled] = table.recordTypes;

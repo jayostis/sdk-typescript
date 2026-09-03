@@ -8,16 +8,19 @@
  * (#26). This re-runs the derivation against the shipped data and fails naming
  * what moved.
  *
- * THE RULE CHANGED UNDER THIS FILE. It read `rdfs:subClassOf prov:Entity`, and
- * `jayostis/spec#34` (ASK-05) ruled that out — the axiom is PROV-O alignment and
- * says nothing about records. The replacement is the marker
- * `cascade:RecordClass`, which `jayostis/spec#50` adds. Both are asserted here:
- * which one the build used depends on the checkout, and the flip has to happen
- * on its own when the pin moves rather than by an edit nobody remembers.
+ * THE RULE CHANGED UNDER THIS FILE, AND THIS FILE IS WHAT SAID SO. It read
+ * `rdfs:subClassOf prov:Entity`, and `jayostis/spec#34` (ASK-05) ruled that out
+ * — the axiom is PROV-O alignment and says nothing about records. The
+ * replacement is the marker `cascade:RecordClass`, which `jayostis/spec#50`
+ * adds, with `src/record-types/pending-spec-50.json` standing in for what the
+ * bridge could not see until the pin moved.
  *
- * `src/record-types/pending-spec-50.json` is what the bridge cannot see, and it
- * is compared both ways — the day the marker is pinned, this file fails, and the
- * list and the fallback are deleted together rather than one entry at a time.
+ * That list was compared BOTH WAYS — asserted still needed, not merely
+ * consulted — so the day `conformance/scripts/SPEC_PIN` moved to the revision
+ * carrying the marker, these tests went red saying exactly what to delete
+ * rather than going quietly green on a workaround nobody needed any more. The
+ * bridge, the pending list and the one hand-declared supersedes link were
+ * removed together in the commit that answered them.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -39,14 +42,8 @@ import { DERIVED_CLASSES } from '../../src/spec/derived/record-types.generated.j
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ONTOLOGIES = join(repoRoot, 'src/spec/ontologies');
 
-const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
-const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
 const RECORD_CLASS = 'https://ns.cascadeprotocol.org/core/v1#RecordClass';
-const RECORD_ROOTS = new Set([
-  'http://www.w3.org/ns/prov#Entity',
-  'http://www.w3.org/ns/prov#Activity',
-]);
 
 /**
  * Build the artifacts if they are absent.
@@ -83,27 +80,10 @@ function graph(): Map<string, Node> {
 
 const nodes = graph();
 
-/**
- * The BRIDGE rule: does this superclass chain reach a PROV root?
- *
- * Ruled out as a statement about records by jayostis/spec#34 (ASK-05) — the
- * axiom is PROV-O alignment. Kept only to assert what the fallback does while
- * cascade:RecordClass is unpinned.
- */
-function bearsRecords(iri: string, seen = new Set<string>()): boolean {
-  if (seen.has(iri)) return false;
-  seen.add(iri);
-
-  const parents = ((nodes.get(iri)?.[SUB_CLASS_OF] ?? []) as { '@id'?: string }[])
-    .map((value) => value['@id'])
-    .filter((value): value is string => Boolean(value));
-
-  return parents.some((parent) => RECORD_ROOTS.has(parent) || bearsRecords(parent, seen));
-}
-
-const pending = JSON.parse(
-  readFileSync(join(repoRoot, 'src/record-types/pending-spec-50.json'), 'utf-8'),
-) as { entries: { class: string; declares: string; detail: string }[] };
+/** Every live class carrying the marker — the population, re-derived here. */
+const marked = [...nodes]
+  .filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS) && !node[DEPRECATED])
+  .map(([iri]) => iri);
 
 describe('the derived table is spec\'s record-bearing population', () => {
   it('finds classes at all', () => {
@@ -113,42 +93,22 @@ describe('the derived table is spec\'s record-bearing population', () => {
     expect(DERIVED_CLASSES.length).toBeGreaterThan(50);
   });
 
-  it('uses the marker when the checkout carries it, and the bridge when it does not', () => {
-    // THE RULE ITSELF IS UNDER TEST, because it changed. `cascade:RecordClass`
-    // is what `jayostis/spec#50` adds — the explicit list ASK-05's ruling calls
-    // for after ruling out `rdfs:subClassOf prov:Entity` as PROV-O alignment.
-    // The build must flip to it on its own when the pin moves, so this asserts
-    // which rule the checkout in hand supports rather than assuming either.
-    const marked = [...nodes].filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS));
-
-    if (marked.length > 0) {
-      // The marker has landed. The bridge and the pending list are dead, and
-      // the population is exactly what carries the marker.
-      expect(new Set(DERIVED_CLASSES.map((entry) => entry.iri)))
-        .toEqual(new Set(marked.filter(([, node]) => !node[DEPRECATED]).map(([iri]) => iri)));
-      return;
-    }
-
-    // The marker has not landed, so the bridge stands in — and the pending list
-    // is what it cannot see. Both halves asserted, so neither can quietly stop
-    // contributing.
-    const bridged = [...nodes]
-      .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
-        && !node[DEPRECATED] && bearsRecords(iri))
-      .map(([iri]) => iri);
-
-    expect(bridged.length).toBeGreaterThan(50);
-    expect(pending.entries.length).toBeGreaterThan(0);
+  it('is derived by the marker, and the marker is actually present', () => {
+    // THE RULE ITSELF IS UNDER TEST. `cascade:RecordClass` is what
+    // `jayostis/spec#50` adds — the explicit list ASK-05's ruling calls for
+    // after ruling out `rdfs:subClassOf prov:Entity` as PROV-O alignment.
+    //
+    // The count assertion is not decoration. `recordPopulation` refuses a graph
+    // that marks nothing, but this file re-derives the population itself, and a
+    // re-derivation that found zero would agree with a generated table that
+    // also found zero — two empty sets comparing equal, and every assertion
+    // below vacuous.
+    expect(marked.length).toBeGreaterThan(50);
   });
 
-  it('includes every live class the current rule reaches, and no deprecated one', () => {
-    const expected = [...nodes]
-      .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
-        && !node[DEPRECATED] && bearsRecords(iri))
-      .map(([iri]) => iri);
-
+  it('includes every live class the marker reaches, and no deprecated one', () => {
     const derived = new Set(DERIVED_CLASSES.map((entry) => entry.iri));
-    const missing = expected.filter((iri) => !derived.has(iri));
+    const missing = marked.filter((iri) => !derived.has(iri));
 
     expect(
       missing,
@@ -157,87 +117,50 @@ describe('the derived table is spec\'s record-bearing population', () => {
     ).toEqual([]);
   });
 
-  it('adds exactly the classes the pending list declares, and nothing else', () => {
-    const byRule = new Set([...nodes]
-      .filter(([iri, node]) => (node['@type'] ?? []).includes(OWL_CLASS)
-        && !node[DEPRECATED] && bearsRecords(iri))
-      .map(([iri]) => iri));
-
+  it('adds nothing the marker does not reach', () => {
+    // The other direction, and the one that used to need the pending list. A
+    // table that merely CONTAINED the population would pass the assertion above
+    // while registering classes spec never marked — which is what the bridge
+    // did, 96 alignment axioms at a time.
+    const byRule = new Set(marked);
     const extra = DERIVED_CLASSES.map((entry) => entry.iri).filter((iri) => !byRule.has(iri));
 
-    expect(extra.sort()).toEqual(pending.entries.map((entry) => entry.class).sort());
-  });
-});
-
-describe('the pending list, compared both ways', () => {
-  it('names twelve classes, each with a reason', () => {
-    expect(pending.entries).toHaveLength(12);
-
-    for (const entry of pending.entries) {
-      expect(entry.declares, entry.class).toBeTruthy();
-      expect(entry.detail, entry.class).toBeTruthy();
-    }
-  });
-
-  it('is still needed — the marker has not landed', () => {
-    // THE DIRECTION THAT MATTERS, and it changed with the issue. spec#50 was
-    // rewritten after ASK-05: it no longer adds one `rdfs:subClassOf` axiom per
-    // class — it adds `cascade:RecordClass` and marks 83 classes with it, and
-    // forbids moving a prov axiom to change what the gate sees. So the file
-    // does not shrink entry by entry any more; it is deleted whole the moment
-    // the marker is pinned, and this is what says when.
-    const marked = [...nodes].filter(([, node]) => (node['@type'] ?? []).includes(RECORD_CLASS));
-
     expect(
-      marked.map(([iri]) => iri),
-      'the pinned spec now carries cascade:RecordClass, so the bridge rule and '
-      + 'src/record-types/pending-spec-50.json have both outlived their cause. Delete the file '
-      + 'and the prov fallback in scripts/build-record-types.mjs together.',
+      extra.sort(),
+      'the table registers a class the marker does not reach. There is no pending list any '
+      + 'more — spec states the population — so an extra class is a derivation bug here, not a '
+      + 'declared exception.',
     ).toEqual([]);
-  });
-
-  it('every entry names a class the shipped data actually declares', () => {
-    // The other direction: an entry for a class spec deleted or renamed would
-    // silently register nothing at all.
-    for (const entry of pending.entries) {
-      expect(nodes.has(entry.class), `${entry.class} is in no shipped ontology`).toBe(true);
-    }
-  });
-
-  it('cites the issue that deletes it', () => {
-    const raw = JSON.parse(
-      readFileSync(join(repoRoot, 'src/record-types/pending-spec-50.json'), 'utf-8'),
-    ) as { $issue: string; $rule: string };
-
-    expect(raw.$issue).toBe('jayostis/spec#50');
-    // The rule text must carry the CORRECTION, not just a rule. A reader who
-    // finds only the positive statement can re-derive the mistake from the
-    // axioms, which is what ASK-05 says keeps happening.
-    expect(raw.$rule).toContain('ASK-05');
-    expect(raw.$rule).toContain('cascade:RecordClass');
   });
 });
 
 describe('names come from the published contexts', () => {
-  it('derives four supersedes links from rdfs:seeAlso, not from a table', () => {
-    // The four deprecations spec states correctly. A fifth landing upstream
-    // needs no change in this repository at all.
+  it('derives all five supersedes links from rdfs:seeAlso, not from a table', () => {
+    // FIVE, AND IT WAS FOUR. `clinical:CoverageRecord`'s `rdfs:seeAlso` used to
+    // point at `fhir:Coverage` — a documentation link, not the superseding
+    // class — leaving the supersession stated only in an `rdfs:comment` no
+    // reader can act on, which is why `SUPERSEDES_OVERRIDES` declared that one
+    // link by hand. `jayostis/spec#50` gap 2 states the triple now, so the
+    // override was deleted and this became a derivation like the other four.
     const withSupersedes = DERIVED_CLASSES
       .filter((entry) => entry.supersedes.length > 0)
       .map((entry) => entry.name)
       .sort();
 
     expect(withSupersedes).toEqual([
-      'AllergyRecord', 'ConditionRecord', 'ImmunizationRecord', 'LabResultRecord',
+      'AllergyRecord', 'ConditionRecord', 'ImmunizationRecord', 'InsurancePlan', 'LabResultRecord',
     ]);
   });
 
-  it('does not derive one for clinical:CoverageRecord, whose seeAlso points at FHIR', () => {
-    // `jayostis/spec#50` gap 2. It resolves through a declared override
-    // instead, and this is what says the derivation is not the reason.
+  it('derives the InsurancePlan link from spec rather than from an override', () => {
+    // The override is gone, so this now asserts the DERIVATION carries it —
+    // which is the half a passing `recordTypeForClass` could not distinguish.
+    // Read one way it says spec was fixed; read the other it says nothing here
+    // is quietly standing in for spec any more.
     const insurancePlan = DERIVED_CLASSES.find((entry) => entry.name === 'InsurancePlan');
 
-    expect(insurancePlan?.supersedes).toEqual([]);
+    expect(insurancePlan?.supersedes)
+      .toEqual(['https://ns.cascadeprotocol.org/clinical/v1#CoverageRecord']);
     expect(recordTypeForClass('https://ns.cascadeprotocol.org/clinical/v1#CoverageRecord')?.name)
       .toBe('InsurancePlan');
   });
