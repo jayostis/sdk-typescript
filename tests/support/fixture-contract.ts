@@ -24,9 +24,10 @@
  *
  * ALL HELP COMES FROM THE CALL SITE. There is no table keyed by fixture id
  * anywhere: a reader sees the fixture, the contract line, and everything that
- * line needed to know, together. And none of it is an opt-out — no argument
- * lets a fixture skip a question. An unmapped violation is reported, not
- * silently passed; see `unreportedViolations`.
+ * line needed to know, together. And none of it is an opt-out. An unmapped
+ * violation is reported, not silently passed (`unreportedViolations`), and a
+ * declared `unconstrained` predicate is compared BOTH ways — a gap that closes
+ * upstream turns the fixture red rather than staying declared forever.
  *
  * @see tests/README.md  where a test goes, and what it may claim
  */
@@ -43,7 +44,7 @@ import type { CascadeRecord } from '../../src/models/common.js';
 
 import type { Fixture } from './fixtures.js';
 import { graphDifference, quadsFromJsonLd, quadsFromTurtle } from './graph.js';
-import { shaclCheck } from './shacl.js';
+import { shaclReport, shaclUnconstrained } from './shacl.js';
 
 /**
  * One row of the predicate-to-field translation question 7 needs.
@@ -72,6 +73,22 @@ export interface ContractHelp {
    * work out for itself.
    */
   readonly fields?: readonly FieldMapping[];
+
+  /**
+   * The curies this record writes that the shapes declare nothing for.
+   *
+   * Empty for most fixtures, and that is what question 8 asserts by default: a
+   * SHACL verdict covers every triple. Where spec genuinely constrains nothing
+   * — `health:notes` is declared in `health.ttl` and named by no `sh:path` —
+   * the fixture declares it here rather than losing the verdict on its other
+   * fields to a refusal.
+   *
+   * COMPARED BOTH WAYS. A predicate that becomes constrained upstream makes
+   * this list wrong and turns question 8 red, which is when the line should be
+   * deleted. Declaring one is a record of a gap, not a way to stop looking at
+   * it.
+   */
+  readonly unconstrained?: readonly string[];
 }
 
 /**
@@ -130,7 +147,7 @@ export function reportedFields(result: ValidationResult): string[] {
 }
 
 /**
- * Ask a fixture the seven questions, in the caller's describe.
+ * Ask a fixture the eight questions, in the caller's describe.
  *
  * Both directions across both formats, and then the verdict:
  *   1  it is the fixture the file thinks it is
@@ -140,9 +157,10 @@ export function reportedFields(result: ValidationResult): string[] {
  *   5  JSON-LD -> Record   is the record it started as
  *   6  the shipped validator agrees with the corpus
  *   7  the shipped validator reports every violation the shapes name
+ *   8  the shapes constrain every field, but for the exceptions noted in the test
  */
 export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp): void {
-  const { shouldAccept, fields = [] } = help;
+  const { shouldAccept, fields = [], unconstrained = [] } = help;
 
   it('is the fixture this file thinks it is', ({ task }) => {
     // `task.suite` is the enclosing describe — the caller's, because this
@@ -210,11 +228,25 @@ export function followsTheFixtureContract(fixture: Fixture, help: ContractHelp):
     // `shaclCheck` refuses a graph the loaded shapes are silent on rather
     // than returning the vacuous `conforms: true` that silence produces, so
     // reaching a report at all is part of what this asserts.
-    const report = await shaclCheck(fixture.input as CascadeRecord);
+    const report = await shaclReport(fixture.input as CascadeRecord);
     const paths = report.results.map((result) => result.path?.value ?? null);
 
     expect(
       unreportedViolations(paths, reportedFields(validate(fixture.input)), fields),
     ).toEqual([]);
+  });
+
+  it('has every field constrained by the shapes, but for the exceptions noted in the test', () => {
+    // What question 7's verdict is worth. SHACL is open: a predicate no shape
+    // names is neither judged nor reported, so a report that skipped half the
+    // record reads exactly like one that approved it. Compared with `toEqual`
+    // rather than thrown, so a failure names the predicate as a diff — and so
+    // a gap that closes upstream fails too, rather than staying declared.
+    expect(
+      shaclUnconstrained(fixture.input as CascadeRecord),
+      'no shape declares an sh:path for these, so no SHACL verdict covers them. Either spec '
+      + 'constrains them nowhere yet — declare them in `unconstrained` and open an issue there — '
+      + 'or a shape now does and the declaration should be deleted.',
+    ).toEqual([...unconstrained]);
   });
 }

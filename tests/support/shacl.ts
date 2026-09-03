@@ -104,6 +104,25 @@ if (CONSTRAINED_PREDICATES.size === 0 || TARGETED_CLASSES.size === 0) {
  * because a blank-node sub-structure's predicates are validated too.
  */
 export function assertCovered(dataset: ReturnType<typeof env.dataset>, record: CascadeEntity): void {
+  const { untargeted, unconstrained } = uncovered(dataset, record);
+
+  refuse('judge', 'sh:targetClass', untargeted);
+  refuse('judge the triples on', 'sh:path', unconstrained);
+}
+
+/**
+ * What the shapes declare nothing for, split by which declaration is missing.
+ *
+ * A MISSING `rdf:type` STAYS A THROW rather than becoming a returned entry.
+ * The other two mean spec publishes no shape yet, which a caller may knowingly
+ * accept and declare; this one means `serialize()` wrote a graph with no type
+ * on the record, which is a defect in this repository and not something any
+ * test should be able to declare away.
+ */
+function uncovered(
+  dataset: ReturnType<typeof env.dataset>,
+  record: CascadeEntity,
+): { untargeted: string[]; unconstrained: string[] } {
   const types = env.clownface({ dataset }).namedNode(record.id).out(rdf.type).values;
   if (types.length === 0) {
     throw new Error(
@@ -112,15 +131,15 @@ export function assertCovered(dataset: ReturnType<typeof env.dataset>, record: C
     );
   }
 
-  refuse('judge', 'sh:targetClass', types.filter((iri) => !TARGETED_CLASSES.has(iri)));
-
   const predicates = new Set<string>();
   for (const quad of dataset) predicates.add(quad.predicate.value);
-  refuse(
-    'judge the triples on',
-    'sh:path',
-    [...predicates].filter((iri) => namespaceOf(iri) !== RDF_NS && !CONSTRAINED_PREDICATES.has(iri)),
-  );
+
+  return {
+    untargeted: types.filter((iri) => !TARGETED_CLASSES.has(iri)),
+    unconstrained: [...predicates].filter(
+      (iri) => namespaceOf(iri) !== RDF_NS && !CONSTRAINED_PREDICATES.has(iri),
+    ),
+  };
 }
 
 /**
@@ -162,8 +181,38 @@ export const sh = env.namespace(SHACL_NS);
  *
  * Returns the library's own ValidationReport unchanged — flattening its terms to
  * strings would throw away the constraint identity, which is the thing worth
- * asserting on. Throws rather than returning a verdict when the shapes cannot
- * judge the record; see `assertCovered`.
+ * asserting on.
+ *
+ * NO COVERAGE GUARD. What the shapes say about a record and what they are
+ * silent about are two answers, and fusing them means one uncovered predicate
+ * costs the verdict on every other field. Ask {@link shaclUnconstrained} for
+ * the second one, and assert it — a report read without it is the vacuous
+ * `conforms: true` this module exists to refuse.
+ */
+export async function shaclReport(record: CascadeRecord): Promise<ValidationReport> {
+  return shacl.validate(parseDataset(serialize(record)));
+}
+
+/**
+ * The IRIs this record writes that the shapes declare nothing for, as curies.
+ *
+ * Empty means every triple reached a constraint, so a `conforms: true` from
+ * {@link shaclReport} means what it says. Non-empty names what the verdict did
+ * not cover, which a caller may knowingly declare — `health:notes` is declared
+ * in `health.ttl` and constrained by no shape — rather than lose the verdict to.
+ *
+ * Sorted, so a caller's declared list can be compared with `toEqual` and a
+ * mismatch reads as a diff naming the predicate.
+ */
+export function shaclUnconstrained(record: CascadeRecord): string[] {
+  const { untargeted, unconstrained } = uncovered(parseDataset(serialize(record)), record);
+  return [...untargeted, ...unconstrained].map(curieOf).sort();
+}
+
+/**
+ * @deprecated Fuses two questions into one throw. Use {@link shaclReport} for
+ * the verdict and {@link shaclUnconstrained} for what it does not cover,
+ * asserting both — see `followsTheFixtureContract`.
  */
 export async function shaclCheck(record: CascadeRecord): Promise<ValidationReport> {
   const dataset = parseDataset(serialize(record));
