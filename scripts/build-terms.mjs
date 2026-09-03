@@ -46,6 +46,8 @@ const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
 const OWL_NAMED_INDIVIDUAL = 'http://www.w3.org/2002/07/owl#NamedIndividual';
 const CASCADE_NAMESPACE = 'https://ns.cascadeprotocol.org/';
 
+import { localNameOf, namespaceOwners } from './lib/iri.mjs';
+
 const contextFiles = readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'));
 
 /** A term whose value is a namespace IRI is a prefix declaration, not a term. */
@@ -152,7 +154,7 @@ function membersOf(rangeIri) {
     const isNamedIndividual = types.includes(OWL_NAMED_INDIVIDUAL) && types.includes(rangeIri);
 
     if (!isSubclass && !isNamedIndividual) continue;
-    members[iri.slice(Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1)] = iri;
+    members[localNameOf(iri)] = iri;
   }
 
   return Object.keys(members).length > 0 ? members : undefined;
@@ -172,7 +174,7 @@ function membersOf(rangeIri) {
  * before calling.
  */
 function specFixFor(rangeIri) {
-  const local = rangeIri.slice(Math.max(rangeIri.lastIndexOf('#'), rangeIri.lastIndexOf('/')) + 1);
+  const local = localNameOf(rangeIri);
 
   return `spec declares ${local} but gives it no rdfs:domain-linked property and no published `
     + `members (subclasses or named individuals), so nothing marks it a structured class or a `
@@ -272,6 +274,10 @@ const payload = JSON.stringify({
   // absent for every other range, including the five open-by-design
   // references (#91).
   unclassifiableRanges,
+  // Which context owns each namespace, DERIVED from the terms rather than
+  // parsed out of a class IRI. See `scripts/lib/iri.mjs` for the rule and for
+  // what it replaced.
+  namespaceOwners: namespaceOwners(vocabularies),
   // The prefixes the contexts declare, carried so a routed writer can render
   // Turtle rather than N-Triples. `serialize()` is documented as returning a
   // Turtle document, and routing a record type must not change the FORMAT of
@@ -330,6 +336,17 @@ export interface SpecTerms {
    * correctly open rather than a gap.
    */
   readonly unclassifiableRanges: Readonly<Record<string, UnclassifiableRange>>;
+  /**
+   * \`namespace -> the context that owns it\`, derived from the terms themselves.
+   *
+   * Which vocabulary a record resolves against used to be read out of its class
+   * IRI with a regex — spec's URI shape as an assumption in code, silently
+   * defaulting to \`core\` on any IRI it did not match. This is the same fact
+   * taken from spec: each per-vocabulary context has 100% of its terms in one
+   * namespace, while \`cascade.jsonld\` never exceeds 34% of any, so the owner is
+   * the context with the largest share. See \`scripts/lib/iri.mjs\`.
+   */
+  readonly namespaceOwners: Readonly<Record<string, string>>;
   /** Prefixes, as the contexts declare them, for rendering Turtle. */
   readonly prefixes: Readonly<Record<string, string>>;
 }
