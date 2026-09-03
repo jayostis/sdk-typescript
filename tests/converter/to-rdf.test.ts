@@ -104,9 +104,27 @@ describe('what it refuses', () => {
     schemaVersion: '1.3',
   };
 
-  it('refuses a record type spec does not declare', () => {
+  it('refuses a name no context publishes, and says the class is missing', () => {
     expect(() => convertToRdf({ ...immunization, type: 'NotARecordType' }))
-      .toThrow(/names no class spec declares/);
+      .toThrow(/No context spec publishes names it/);
+  });
+
+  it('refuses a published class that is not a record class, and says THAT instead', () => {
+    // The two refusals had one message until the second was noticed to be
+    // false: `cascade:Address` is named by `core.jsonld` and declared in
+    // `core.ttl`, so "names no class spec declares" was untrue of it. What it
+    // lacks is membership of the record population — a different situation
+    // with a different remedy, and a reader sent to check their spelling would
+    // find nothing wrong with it.
+    expect(() => convertToRdf({ ...immunization, type: 'Address' }))
+      .toThrow(/spec publishes the name but does not mark its class a record class/);
+  });
+
+  it('points the second refusal at the roster, not at the caller', () => {
+    // Where a class SHOULD be a record and is not marked, the fix is upstream.
+    // The message has to say so, or the reader concludes their record is wrong.
+    expect(() => convertToRdf({ ...immunization, type: 'Address' }))
+      .toThrow(/jayostis\/spec#50/);
   });
 
   it('refuses a key no context defines, naming the key', () => {

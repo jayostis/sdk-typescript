@@ -236,9 +236,27 @@ export function convertToRdf(record: Record<string, unknown>): string {
   const recordType = recordTypeFor(String(record['type']));
 
   if (!recordType) {
+    // TWO REFUSALS, NOT ONE, and they had the same message until the second was
+    // noticed to be a lie. `type: "Address"` was refused with "names no class
+    // spec declares" while `../spec/contexts/v1/core.jsonld` names
+    // `cascade:Address` plainly — the class exists, and what it lacks is
+    // membership of the record population.
+    //
+    // They are different situations with different remediations: one is a
+    // spelling or a class spec has not published, the other is a roster question
+    // upstream or a caller reaching for the wrong function. A single message
+    // sends both readers to the wrong place.
+    const named = Object.values(SPEC_TERMS.vocabularies)
+      .some((terms) => Object.prototype.hasOwnProperty.call(terms, String(record['type'])));
+
     throw new Error(
-      `Unknown record type: ${String(record['type'])}. It names no class spec declares as `
-      + 'holding record data.',
+      named
+        ? `Cannot serialize "${String(record['type'])}" as a record: spec publishes the name but `
+          + 'does not mark its class a record class, so it is not a top-level subject. A nested '
+          + 'structure is written as part of its parent. If it should be a record in its own '
+          + 'right, that is a roster question upstream — see jayostis/spec#50.'
+        : `Unknown record type: ${String(record['type'])}. No context spec publishes names it, `
+          + 'so there is no class to write. Check the spelling, or the class is not published yet.',
     );
   }
 
