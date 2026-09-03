@@ -20,6 +20,8 @@
 
 import { NAMESPACES, buildReversePredicateMap } from '../vocabularies/namespaces.js';
 import { recordTypeFor } from '../record-types/index.js';
+import type { ParsedTriple } from './parsed-triple.js';
+import { parseTurtleWithN3 } from './n3-adapter.js';
 import {
   DEFAULT_NESTED_PREFIX,
   blankNodeTermKeys,
@@ -32,14 +34,6 @@ import { BLANK_NODE_PREDICATE_PREFIXES } from '../serializer/turtle-serializer.j
 import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
-
-interface ParsedTriple {
-  subject: string;
-  predicate: string;
-  object: string;
-  objectType: 'uri' | 'literal' | 'boolean' | 'integer' | 'double' | 'list' | 'blankNode';
-  datatype?: string;
-}
 
 interface ParsedPrefix {
   prefix: string;
@@ -423,12 +417,33 @@ function stripAngleBrackets(uri: string): string {
 }
 
 /**
- * Parse Turtle content into a list of parsed triples.
+ * The hand-written Turtle parser. NO LONGER ON THE PRODUCTION PATH.
  *
- * This is a lightweight regex-based parser that handles the subset of Turtle
- * used by Cascade Protocol records. It does NOT implement a full Turtle grammar.
+ * `deserialize` reads through `parseTurtleWithN3` now. This is retained as the
+ * differential's oracle — `tests/deserializer/parser-differential.test.ts`
+ * runs both over all 92 fixtures and declares every difference — and exported
+ * for no other reason.
+ *
+ * IT IS DEAD CODE THAT SHIPS, and that is a real cost, not a neutral one:
+ * roughly 700 lines reach `dist` and every consumer downloads them. The case
+ * for keeping it is that the differential is what makes the swap reviewable,
+ * and a differential with one side deleted asserts nothing. Deleting it is
+ * #71's to finish, along with the helpers only it reaches.
+ *
+ * What the differential found, so it is written where the code is:
+ *
+ * - **It has no branch for the comma object list** `:p :a , :b`. Four fixtures
+ *   in the corpus carry one, and each lost every object after the first —
+ *   `absent-003`, `lab-009` (twice), `lab-013` and `pod-001`, where nineteen
+ *   `ldp:contains` entries came back as one object holding the raw text of the
+ *   whole block. `lab-013` is the fixture that exists to be written in full
+ *   and rejected for carrying two values; it was being read with one, and a
+ *   record with one violates nothing.
+ * - **It decides a value's kind from the lexical form.** A bare `5` was an
+ *   integer and `"5"^^xsd:integer` an uninterpreted literal, though they are
+ *   the same RDF term.
  */
-function parseTurtleContent(content: string): {
+export function parseTurtleContent(content: string): {
   prefixes: ParsedPrefix[];
   triples: ParsedTriple[];
 } {
@@ -1374,7 +1389,7 @@ function triplesToRecord<T extends CascadeEntity>(
  * ```
  */
 export function deserialize<T extends CascadeEntity>(turtle: string, type: string): T[] {
-  const { triples } = parseTurtleContent(turtle);
+  const triples = parseTurtleWithN3(turtle);
 
   // Every class this type answers to, deprecated spellings included.
   const acceptedUris = acceptedClassUris(type);
