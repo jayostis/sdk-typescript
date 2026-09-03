@@ -49,7 +49,11 @@ const N3Writer = require('../vendor/n3/N3Writer.js').default as new (options: {
 }) => { addQuad(quad: unknown): void; end(callback: (error: unknown, result: string) => void): void };
 
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
-const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const RDF_TYPE = `${RDF}type`;
+const RDF_FIRST = `${RDF}first`;
+const RDF_REST = `${RDF}rest`;
+const RDF_NIL = `${RDF}nil`;
 
 /**
  * An absolute IRI: a scheme, then anything N-Triples may hold between angles.
@@ -58,8 +62,13 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
  * own record id is a `urn:uuid:`, so cross-record references in that form are
  * the expected case and `did:` WebIDs are the other obvious one. Matching
  * `^https?://` reported both as inexpressible, which they are not.
+ *
+ * EXCLUDES `\x00`-`\x20` AS A RANGE, not `\s` plus the delimiters. `\s` misses
+ * most of the C0 controls — NUL, ESC and the rest of `\x00`-`\x1F` other than
+ * the whitespace ones — and the N-Triples/Turtle IRIREF grammar excludes all of
+ * `#x00`-`#x20`, not only the ones JavaScript calls whitespace.
  */
-const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\s<>"{}|\\^`]*$/;
+const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\x00-\x20<>"{}|\\^`]*$/;
 
 /** Keys that name the record rather than describing it. */
 const STRUCTURAL = new Set(['id', 'type']);
@@ -225,7 +234,20 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
     // apart by whether the term HAS a value set, never by whether a lookup in
     // one happened to hit.
     if (members) {
-      const resolved = members[text.includes(':') ? text.slice(text.indexOf(':') + 1) : text];
+      // A colon alone does not make `text` a CURIE — `bogus:ClinicalGenerated`
+      // has one, and stripping everything up to it regardless of what the
+      // prefix actually is looks up "ClinicalGenerated" and finds it, which is
+      // the closed set treating an unrecognized prefix as if it were `cascade:`.
+      // The local name is trusted only once the prefix is one `SPEC_TERMS`
+      // actually publishes.
+      const colon = text.indexOf(':');
+      const prefix = colon === -1 ? undefined : text.slice(0, colon);
+      const localName =
+        prefix !== undefined && Object.prototype.hasOwnProperty.call(SPEC_TERMS.prefixes, prefix)
+          ? text.slice(colon + 1)
+          : text;
+
+      const resolved = members[localName];
       if (resolved) return `<${resolved}>`;
 
       // The same member, written out in full. A record that spells a permitted
@@ -258,7 +280,16 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
   // 3 — the JavaScript value, last.
   if (typeof value === 'boolean') return literal(String(value), `${XSD}boolean`);
   if (typeof value === 'number') {
-    return literal(String(value), Number.isInteger(value) ? `${XSD}integer` : `${XSD}double`);
+    if (Number.isInteger(value)) return literal(String(value), `${XSD}integer`);
+
+    // `String()` is not the XSD lexical form for every double. `NaN` happens to
+    // coincide, but XSD Schema Part 2 spells the infinities `INF` / `-INF`,
+    // never JavaScript's `"Infinity"` / `"-Infinity"` — a lexical form no SHACL
+    // datatype check accepts.
+    if (Number.isNaN(value)) return literal('NaN', `${XSD}double`);
+    if (!Number.isFinite(value)) return literal(value > 0 ? 'INF' : '-INF', `${XSD}double`);
+
+    return literal(String(value), `${XSD}double`);
   }
   if (typeof value === 'object') return null;
 
@@ -323,6 +354,25 @@ export function convertToRdf(record: Record<string, unknown>): string {
   const terms = termsFor(recordType.rdfTypeUri);
   const triples = [`${subject} <${RDF_TYPE}> <${recordType.rdfTypeUri}> .`];
 
+  /** A value with no expressible form, turned into the throw naming the field. */
+  const expressOrThrow = (key: string, item: unknown, definition: TermDefinition): string => {
+    const object = objectTerm(item, definition);
+
+    if (object === null) {
+      throw new Error(
+        `Cannot express "${key}" = ${JSON.stringify(item)} as RDF. The term declares `
+        + `${definition.type ?? definition.range ?? 'no type'}, which this value is not a `
+        + 'member of. Refusing rather than dropping it: a record that reaches the graph '
+        + 'incomplete validates clean.',
+      );
+    }
+
+    return object;
+  };
+
+  // Blank-node labels for `@list` chains, unique within this record.
+  let listNodeCounter = 0;
+
   for (const [key, value] of Object.entries(record)) {
     if (STRUCTURAL.has(key) || value === undefined || value === null) continue;
 
@@ -342,23 +392,38 @@ export function convertToRdf(record: Record<string, unknown>): string {
       );
     }
 
+    const items = Array.isArray(value) ? value : [value];
+
+    // `@container: @list` is order-sensitive — `provenanceLayers` and the three
+    // other core v3.4 fields `src/jsonld/context.ts` marks this way — and flat
+    // repeated triples cannot carry an order at all. Written instead as an
+    // `rdf:List`: a chain of blank nodes, each holding one `rdf:first` and
+    // pointing `rdf:rest` at the next, terminated by `rdf:nil`.
+    if (definition.container === '@list') {
+      if (items.length === 0) {
+        triples.push(`${subject} <${definition.predicate}> <${RDF_NIL}> .`);
+      } else {
+        const nodes = items.map(() => `_:list${listNodeCounter++}`);
+        triples.push(`${subject} <${definition.predicate}> ${nodes[0]} .`);
+
+        items.forEach((item, index) => {
+          triples.push(`${nodes[index]} <${RDF_FIRST}> ${expressOrThrow(key, item, definition)} .`);
+          triples.push(
+            `${nodes[index]} <${RDF_REST}> `
+            + `${index === items.length - 1 ? `<${RDF_NIL}>` : nodes[index + 1]} .`,
+          );
+        });
+      }
+
+      continue;
+    }
+
     // EVERY value, whatever the field's declared cardinality. A writer that
     // kept the first would hand the validator a record with nothing left to
     // violate: the JSON that went in breaks sh:maxCount 1, the graph that comes
     // out does not, and the verdict is clean on data that is wrong.
-    for (const item of Array.isArray(value) ? value : [value]) {
-      const object = objectTerm(item, definition);
-
-      if (object === null) {
-        throw new Error(
-          `Cannot express "${key}" = ${JSON.stringify(item)} as RDF. The term declares `
-          + `${definition.type ?? definition.range ?? 'no type'}, which this value is not a `
-          + 'member of. Refusing rather than dropping it: a record that reaches the graph '
-          + 'incomplete validates clean.',
-        );
-      }
-
-      triples.push(`${subject} <${definition.predicate}> ${object} .`);
+    for (const item of items) {
+      triples.push(`${subject} <${definition.predicate}> ${expressOrThrow(key, item, definition)} .`);
     }
   }
 

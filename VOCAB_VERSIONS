@@ -27,6 +27,17 @@
 #   The pre-commit hook asks for this file whenever `src/jsonld/` moves, and this
 #   note is the answer rather than a bump.
 #
+#   Same day, same file, the reading half of the same ambiguity: `fromJsonLd`'s
+#   full-IRI fallback now reuses that same longest-match `CONTRACTIONS` table
+#   instead of scanning `Object.values(NAMESPACES)` in declaration order, so it
+#   no longer mis-derives the local name of an unregistered class the same way.
+#   Also review fixes to `src/converter/to-rdf.ts` (a value-set prefix check, the
+#   XSD lexical forms for Infinity/-Infinity, C0 control characters in
+#   ABSOLUTE_IRI, and `@list` containers written as rdf:List) — that file is
+#   under `src/converter/`, outside what the hook watches, but named here for
+#   the same reason: none of the four register a term, class or value this SDK
+#   did not already claim.
+#
 core=3.8
 health=2.8
 clinical=1.16

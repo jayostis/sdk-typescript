@@ -442,6 +442,18 @@ describe('JSON-LD Conversion', () => {
       const result = fromJsonLd(doc);
       expect(result.id).toBe('');
     });
+
+    it('derives the local name of an unregistered class by the longest namespace, not the first', () => {
+      // The reading half of the same ambiguity `curieOf` sorts `CONTRACTIONS` by
+      // length to avoid: `NAMESPACES.fhir` is a string-prefix of
+      // `NAMESPACES.icd10` and is declared first, so a declaration-order scan
+      // over the full-IRI `@type` derived `sid/icd-10-cm/E11.9` instead of
+      // `E11.9`. No record type registers this class, so `type` falls back to
+      // the local name `recordTypeOfJsonLd` could not resolve.
+      const doc = { '@id': 'urn:uuid:test', '@type': `${NAMESPACES.icd10}E11.9` };
+
+      expect(fromJsonLd(doc).type).toBe('E11.9');
+    });
   });
 });
 

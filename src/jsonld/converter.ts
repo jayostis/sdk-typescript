@@ -198,8 +198,13 @@ export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
     }
   }
 
-  // If full URI, extract local name
-  for (const ns of Object.values(NAMESPACES)) {
+  // If full URI, extract local name. LONGEST NAMESPACE FIRST, via `CONTRACTIONS`
+  // — the same table `curieOf` sorts by length for the same reason: `fhir`
+  // (`http://hl7.org/fhir/`) is a string-prefix of `icd10`
+  // (`http://hl7.org/fhir/sid/icd-10-cm/`) and is declared first in
+  // `NAMESPACES`, so scanning declaration order mis-derived `sid/icd-10-cm/E11.9`
+  // for every ICD-10 IRI instead of `E11.9`.
+  for (const [, ns] of CONTRACTIONS) {
     if (rdfType.startsWith(ns)) {
       typeName = rdfType.slice(ns.length);
       break;

@@ -284,6 +284,17 @@ describe('a term whose range names a closed value set', () => {
       .toThrow(/Cannot express "dataProvenance"/);
   });
 
+  it('refuses an unrecognized prefix even when the local name it strips off is a real member', () => {
+    // `zz:Whatever` above fails the scheme test for an unrelated reason —
+    // `Whatever` is not a member either. `bogus:ClinicalGenerated` isolates the
+    // real bug: stripping everything up to the first colon, regardless of
+    // whether the prefix means anything, finds `ClinicalGenerated` — a genuine
+    // member — and accepts an IRI spec never published under a prefix this SDK
+    // does not recognize.
+    expect(() => convertToRdf({ ...immunization, dataProvenance: 'bogus:ClinicalGenerated' }))
+      .toThrow(/Cannot express "dataProvenance"/);
+  });
+
   it('still writes a member spelled as its full IRI', () => {
     // The other direction, so a fix that closed the set by refusing everything
     // the local-name lookup misses fails here. A member written out in full is
@@ -321,5 +332,93 @@ describe('literals are escaped once, by one function', () => {
     const written = convertToTurtle({ ...immunization, vaccineName: awkward });
 
     expect(quadsFromTurtle(written).some((quad) => quad.object.value === awkward)).toBe(true);
+  });
+});
+
+describe('a JavaScript number with no expressible XSD String() form', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord' };
+
+  // `trendPolarity` carries neither a context `@type` nor an ontology
+  // `rdfs:range`, so `objectTerm` falls all the way to "the JavaScript value,
+  // last" and infers `xsd:double` from `typeof value === 'number'`.
+
+  it('spells Infinity as the XSD lexical form INF, not String(Infinity)', () => {
+    expect(convertToRdf({ ...immunization, trendPolarity: Infinity }))
+      .toContain('"INF"^^<http://www.w3.org/2001/XMLSchema#double>');
+  });
+
+  it('spells -Infinity as -INF', () => {
+    expect(convertToRdf({ ...immunization, trendPolarity: -Infinity }))
+      .toContain('"-INF"^^<http://www.w3.org/2001/XMLSchema#double>');
+  });
+
+  it('still spells NaN as NaN, which happens to already be the XSD form', () => {
+    expect(convertToRdf({ ...immunization, trendPolarity: NaN }))
+      .toContain('"NaN"^^<http://www.w3.org/2001/XMLSchema#double>');
+  });
+});
+
+describe('the absolute-IRI test excludes every C0 control character', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord', schemaVersion: '1.3' };
+
+  it('refuses a NUL byte, which \\s does not match but the IRIREF grammar excludes', () => {
+    expect(() => convertToRdf({ ...immunization, creatorWebID: 'urn:webid:al\x00ice' }))
+      .toThrow(/"creatorWebID"/);
+  });
+
+  it('refuses an ESC byte, for the same reason', () => {
+    expect(() => convertToRdf({ ...immunization, creatorWebID: 'urn:webid:al\x1bice' }))
+      .toThrow(/"creatorWebID"/);
+  });
+
+  it('still accepts an ordinary IRI with none of those bytes', () => {
+    expect(convertToRdf({ ...immunization, creatorWebID: 'urn:webid:alice' }))
+      .toContain('<urn:webid:alice>');
+  });
+});
+
+describe('a `@container: @list` field is written as an ordered rdf:List', () => {
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord', schemaVersion: '1.3' };
+
+  it('chains the subject through blank nodes in the given order, not as flat repeated triples', () => {
+    // `provenanceLayers` is core v3.4's, `@container: @list`, `@type: @id`.
+    // Flat repeated triples — what every other multi-valued field above gets —
+    // cannot carry an order at all; a reader recovering `["a", "b"]` from them
+    // has no way to tell that from `["b", "a"]`.
+    const written = convertToRdf({
+      ...immunization,
+      provenanceLayers: ['urn:uuid:layer-a', 'urn:uuid:layer-b'],
+    });
+    const quads = quadsFromTurtle(written);
+
+    const head = quads.find((quad) =>
+      quad.predicate.value === 'https://ns.cascadeprotocol.org/core/v1#provenanceLayers');
+    expect(head, 'the subject points at a list node, not directly at a value').toBeDefined();
+
+    const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+    const firstNode = head!.object;
+    const first = quads.find((q) => q.subject.value === firstNode.value && q.predicate.value === `${RDF}first`);
+    const rest = quads.find((q) => q.subject.value === firstNode.value && q.predicate.value === `${RDF}rest`);
+    expect(first?.object.value).toBe('urn:uuid:layer-a');
+
+    const secondNode = rest!.object;
+    const second = quads.find((q) => q.subject.value === secondNode.value && q.predicate.value === `${RDF}first`);
+    const tail = quads.find((q) => q.subject.value === secondNode.value && q.predicate.value === `${RDF}rest`);
+    expect(second?.object.value).toBe('urn:uuid:layer-b');
+    expect(tail?.object.value).toBe(`${RDF}nil`);
+  });
+
+  it('writes rdf:nil directly for an empty list, rather than an empty blank-node chain', () => {
+    const written = convertToRdf({ ...immunization, provenanceLayers: [] });
+
+    expect(written).toContain(
+      '<https://ns.cascadeprotocol.org/core/v1#provenanceLayers> '
+      + '<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .',
+    );
+  });
+
+  it('still refuses an item with no expressible form, naming the field', () => {
+    expect(() => convertToRdf({ ...immunization, provenanceLayers: ['not an iri', 'urn:uuid:ok'] }))
+      .toThrow(/Cannot express "provenanceLayers"/);
   });
 });
