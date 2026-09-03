@@ -36,7 +36,7 @@ import { createRequire } from 'node:module';
 import { recordTypeFor } from '../record-types/index.js';
 import { quoteTurtleString } from '../serializer/turtle-builder.js';
 import { SPEC_TERMS } from '../spec/derived/terms.generated.js';
-import type { TermDefinition } from '../spec/derived/terms.generated.js';
+import type { TermDefinition, UnclassifiableRange } from '../spec/derived/terms.generated.js';
 
 const require = createRequire(import.meta.url);
 
@@ -86,14 +86,35 @@ const STRUCTURAL = new Set(['id', 'type']);
  * could not be called with a record alone. `recordTypeFor` answers it now, and
  * a namespace is what a class IRI already carries.
  */
-function vocabularyOf(classIri: string): string {
-  const match = /\/([a-z]+)\/v\d+#/.exec(classIri);
-  const vocabulary = match?.[1];
+function vocabularyOf(classIri: string): string | undefined {
+  // LOOKED UP, NOT PARSED. This read the vocabulary out of the IRI with
+  // `/\/([a-z]+)\/v\d+#/` — spec's URI shape written as an assumption, in the
+  // module whose whole purpose is to stop encoding spec by hand. It also failed
+  // SILENTLY: `[a-z]+` matches no digit and no hyphen, so a vocabulary segment
+  // carrying either fell through to `'core'` and the record resolved with its
+  // own vocabulary invisible — keys refused as undefined, or worse, answered by
+  // a core term that happened to share the name.
+  //
+  // `namespaceOwners` is the same fact taken from spec: see
+  // `scripts/lib/iri.mjs` for how it is derived, and why `core` wins over
+  // `cascade` for the shared namespace without anyone saying so.
+  //
+  // LONGEST MATCH, because nothing forbids one namespace being a prefix of
+  // another; picking the first that matched would answer by object order.
+  let owner: string | undefined;
+  let matched = 0;
 
-  // `core`'s namespace segment is `core` and its context is published under
-  // both `core.jsonld` and `cascade.jsonld`; `core` is the narrower of the two
-  // and the one whose terms are core's own.
-  return vocabulary && vocabulary in SPEC_TERMS.vocabularies ? vocabulary : 'core';
+  for (const [namespace, vocabulary] of Object.entries(SPEC_TERMS.namespaceOwners ?? {})) {
+    if (namespace.length > matched && classIri.startsWith(namespace)) {
+      owner = vocabulary;
+      matched = namespace.length;
+    }
+  }
+
+  // `undefined`, NOT `'core'`. A class in a namespace spec publishes no context
+  // for cannot be resolved, and saying "core" would be an answer rather than a
+  // refusal — `termsFor` is where that becomes a message naming the class.
+  return owner;
 }
 
 /**
@@ -164,6 +185,26 @@ const TERMS_BY_VOCABULARY = new Map<string, Record<string, TermDefinition>>();
  */
 function termsFor(classIri: string): Record<string, TermDefinition> {
   const vocabulary = vocabularyOf(classIri);
+
+  // REFUSED RATHER THAN DEFAULTED. The old code answered `'core'` here for any
+  // IRI it could not parse, so a class from a namespace spec publishes no
+  // context for was resolved against core's terms — every key either refused as
+  // undefined or, where a core term shared the name, written with core's
+  // predicate. A wrong predicate no shape can judge is the failure this module
+  // exists to avoid, and it is worth a throw naming the class.
+  //
+  // Unreachable at the pinned revision: every registered class is in one of the
+  // six namespaces, and `recordTypeFor` gates entry. It is the day spec adds a
+  // vocabulary that this has to speak.
+  if (!vocabulary) {
+    throw new Error(
+      `No context resolves ${classIri}: its namespace is not one any published context owns. `
+      + `Spec publishes the JSON-to-RDF mapping per vocabulary, so a class outside all of them `
+      + 'has no term table to resolve its keys against, and guessing one would write predicates '
+      + 'no shape can judge.',
+    );
+  }
+
   const cached = TERMS_BY_VOCABULARY.get(vocabulary);
   if (cached) return cached;
 
@@ -195,6 +236,21 @@ function termsFor(classIri: string): Record<string, TermDefinition> {
  */
 const literal = (value: string, datatype?: string): string =>
   `${quoteTurtleString(value)}${datatype ? `^^<${datatype}>` : ''}`;
+
+/**
+ * The spec-fix entry for a range, if `range` names one of the classes spec
+ * declared and never gave a field or a published member (#91).
+ *
+ * `SPEC_TERMS.unclassifiableRanges` is declared non-optional on `SpecTerms`,
+ * but that only binds a freshly generated `terms.generated.ts` — the map
+ * itself is a JSON literal baked in at generation time, so a copy of the file
+ * built by a pre-#91 version of `scripts/build-terms.mjs` has no such key at
+ * runtime despite the type saying otherwise. `?.` here is what stands between
+ * that stale-file case and a `TypeError` thrown from every `@id`-typed term,
+ * unclassifiable or not — one shared check, so the two call sites can't drift.
+ */
+const unclassifiableRangeFor = (range: string | undefined): UnclassifiableRange | undefined =>
+  range ? SPEC_TERMS.unclassifiableRanges?.[range] : undefined;
 
 /**
  * One value, as an N-Triples object term.
@@ -255,6 +311,17 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
       // the one spelling that needs no resolution rule at all.
       return Object.values(members).includes(text) ? `<${text}>` : null;
     }
+
+    // A range with no members is not automatically an open reference.
+    // `cascade:creatorWebID` (`rdfs:range rdfs:Resource`) is open by design and
+    // belongs here; `health:hrvHistory` (`rdfs:range health:HRVReading`) is a
+    // Cascade class spec declared and never gave a single field, and accepting
+    // any IRI for it would write a reference spec cannot judge into the graph.
+    // `SPEC_TERMS.unclassifiableRanges` is exactly that second group (#91), so
+    // it is refused here — `null`, turned by the caller into the throw naming
+    // the term, the range and what spec would need to add — rather than
+    // silently taking the permissive branch below.
+    if (unclassifiableRangeFor(definition.range)) return null;
 
     // Any absolute IRI, whatever its scheme. `cascade:creatorWebID` has
     // `rdfs:range rdfs:Resource` and therefore no value set at all, so this is
@@ -352,6 +419,12 @@ export function convertToRdf(record: Record<string, unknown>): string {
 
   const subject = `<${id}>`;
   const terms = termsFor(recordType.rdfTypeUri);
+
+  // Computed once for the refusal messages below. `termsFor` has already thrown
+  // if this were undefined, so the fallback is unreachable — it is here because
+  // a message that read "core or undefined" would be worse than one that names
+  // only the context it is sure of.
+  const stack = vocabularyOf(recordType.rdfTypeUri) ?? 'core';
   const triples = [`${subject} <${RDF_TYPE}> <${recordType.rdfTypeUri}> .`];
 
   /** A value with no expressible form, turned into the throw naming the field. */
@@ -359,6 +432,21 @@ export function convertToRdf(record: Record<string, unknown>): string {
     const object = objectTerm(item, definition);
 
     if (object === null) {
+      // PER VALUE, NOT PER TYPE (#91). A range spec declares and never gives
+      // members or fields — `health:HRVReading` and five more — is not a
+      // mistake in THIS record; the record just happens to be the one that
+      // exercised a gap on spec's side. The refusal has to say so, or a reader
+      // goes looking for a typo that is not there.
+      const gap = unclassifiableRangeFor(definition.range);
+
+      if (gap) {
+        throw new Error(
+          `Cannot express "${key}" = ${JSON.stringify(item)} as RDF: its range `
+          + `${definition.range} is unclassifiable — neither a code list nor a structured class `
+          + `with any field spec has declared. ${gap.specFix}`,
+        );
+      }
+
       throw new Error(
         `Cannot express "${key}" = ${JSON.stringify(item)} as RDF. The term declares `
         + `${definition.type ?? definition.range ?? 'no type'}, which this value is not a `
@@ -382,10 +470,10 @@ export function convertToRdf(record: Record<string, unknown>): string {
       throw new Error(
         CONTESTED_KEYS.has(key)
           ? `"${key}" names a different predicate in each context that declares it, and neither `
-            + `core nor ${vocabularyOf(recordType.rdfTypeUri)} — the contexts a `
+            + `core nor ${stack} — the contexts a `
             + `${recordType.name} resolves against — is one of them. See jayostis/spec#4. `
             + 'Picking one would write the wrong predicate for every record of the other class.'
-          : `No context entry for "${key}" in core or ${vocabularyOf(recordType.rdfTypeUri)}. `
+          : `No context entry for "${key}" in core or ${stack}. `
             + 'Spec publishes the JSON-to-RDF mapping; a key it does not define has no '
             + 'predicate, and writing a guessed one would put a triple in a pod that no shape '
             + 'can judge.',

@@ -53,6 +53,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { duplicateNames } from './lib/duplicate-names.mjs';
+import { localNameOf } from './lib/iri.mjs';
 import { recordPopulation } from './lib/record-population.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -152,7 +153,7 @@ for (const [iri, node] of nodes) {
 
   if (!population.classes.has(iri) || deprecated) continue;
 
-  const localName = iri.slice(Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1);
+  const localName = localNameOf(iri);
   const published = contextNames.get(iri) ?? [];
 
   derived.push({

@@ -422,3 +422,34 @@ describe('a `@container: @list` field is written as an ordered rdf:List', () => 
       .toThrow(/Cannot express "provenanceLayers"/);
   });
 });
+
+describe('a term whose range is unclassifiable — neither members nor fields', () => {
+  // `health:HRVReading` is one of the six structured classes spec declares and
+  // never gives a single `rdfs:domain`-linked property (#91). It is not a code
+  // list — `SPEC_TERMS.valueSets` has no entry for it — so today's `objectTerm`
+  // falls through the closed-set branch to "any absolute IRI", and a value that
+  // happens to look like one is written permissively: an IRI spec never
+  // published, into a pod, on a term nothing here can tell a valid value from
+  // an invalid one for. No conformance fixture carries `hrvHistory` or any of
+  // the other ten unclassifiable terms — measured, not assumed — so this
+  // record is constructed rather than loaded.
+  const immunization = { id: 'urn:uuid:test', type: 'ImmunizationRecord', schemaVersion: '1.3' };
+
+  it('refuses a value on hrvHistory, naming the term, its range and what spec would add', () => {
+    const withValue = { ...immunization, hrvHistory: 'urn:uuid:some-hrv-reading' };
+
+    expect(() => convertToRdf(withValue)).toThrow(/hrvHistory/);
+    expect(() => convertToRdf(withValue)).toThrow(/HRVReading/);
+    // Not just "this value is invalid" — the refusal must point at spec, since
+    // the fix is a class spec declares and never populates, not a mistake in
+    // the record.
+    expect(() => convertToRdf(withValue)).toThrow(/spec/i);
+  });
+
+  it('leaves a record that does not carry hrvHistory at all unaffected', () => {
+    // Both directions, so the refusal cannot quietly become a blanket one:
+    // the ambiguity is per VALUE, not per type. A record that never mentions
+    // the term must convert exactly as it does today.
+    expect(() => convertToRdf(immunization)).not.toThrow();
+  });
+});

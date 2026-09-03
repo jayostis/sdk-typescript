@@ -41,7 +41,12 @@ const OUT = join(root, 'src/spec/derived/terms.generated.ts');
 
 const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const RANGE = 'http://www.w3.org/2000/01/rdf-schema#range';
+const DOMAIN = 'http://www.w3.org/2000/01/rdf-schema#domain';
 const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
+const OWL_NAMED_INDIVIDUAL = 'http://www.w3.org/2002/07/owl#NamedIndividual';
+const CASCADE_NAMESPACE = 'https://ns.cascadeprotocol.org/';
+
+import { localNameOf, namespaceOwners } from './lib/iri.mjs';
 
 const contextFiles = readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'));
 
@@ -82,6 +87,23 @@ for (const file of readdirSync(ONTOLOGIES).filter((f) => f.endsWith('.jsonld')))
 const rangeOf = (predicate) => nodes.get(predicate)?.[RANGE]?.[0]?.['@id'];
 
 /**
+ * The classes whose fields spec has actually declared — every class named as
+ * the `rdfs:domain` of at least one property, anywhere in the corpus.
+ *
+ * This is NOT the enum-vs-structured test (`jayostis/spec` disagrees with the
+ * members test on 39/89 ranges if it were used that way — see #91). It exists
+ * for exactly one narrower question, asked only of a range that already
+ * failed the members test: does spec consider this class structured at all,
+ * or did it publish a class with nothing on it?
+ */
+const classesWithFields = new Set();
+for (const node of nodes.values()) {
+  for (const domain of node[DOMAIN] ?? []) {
+    if (domain['@id']) classesWithFields.add(domain['@id']);
+  }
+}
+
+/**
  * The classes a range class admits, by local name.
  *
  * `cascade:dataProvenance` has `rdfs:range cascade:DataProvenance`, and the
@@ -90,6 +112,29 @@ const rangeOf = (predicate) => nodes.get(predicate)?.[RANGE]?.[0]?.['@id'];
  * `"ClinicalGenerated"` under `"@type": "@id"` resolves through the range,
  * which is the fact `jayostis/spec#47` asks a context to state and the ontology
  * already carries.
+ *
+ * MEMBERS ARE PUBLISHED TWO WAYS, and both count. `cascade:DataProvenance`
+ * declares its three values as SUBCLASSES; `cascade:ConsentScope` and five
+ * more (`GenerationTrigger`, `ReconciliationStatus`,
+ * `ConflictResolutionStrategy`, `LayerPromotionStatusValue`,
+ * `health:SleepQuality`) declare theirs as NAMED INDIVIDUALS — each member
+ * typed `owl:NamedIndividual` and typed AGAIN, directly, to the range class,
+ * rather than related to it by `rdfs:subClassOf` at all (#91). A rule that
+ * only walked `rdfs:subClassOf` was invisible to the second form, so
+ * `cascade:consentScope` carrying `"SocialHistoryConsent"` resolved to
+ * nothing.
+ *
+ * `health:WalkingSteadinessLevel` is NOT one of the six: its members
+ * (`WalkingSteadinessLow/OK/Unknown/VeryLow`) carry only the range type, with
+ * no `owl:NamedIndividual` in their `@type` array, so `isNamedIndividual`
+ * evaluates false for all of them below. That is currently latent only
+ * because the context's `walkingSteadiness` term resolves to an unrelated
+ * `xsd:string` range rather than this enum range — a separate, pre-existing
+ * naming mismatch that happens to keep this class from ever being looked up
+ * here. If that mismatch is fixed independently, this class would wrongly
+ * fall into `unclassifiableRanges` with a `specFix` message asking spec to
+ * add members it has already published as plain-typed individuals, not
+ * named individuals.
  */
 function membersOf(rangeIri) {
   // A PROV root is not a code list. `rdfs:range prov:Entity` says "the value is
@@ -103,18 +148,46 @@ function membersOf(rangeIri) {
   const members = {};
 
   for (const [iri, node] of nodes) {
-    if (!(node['@type'] ?? []).includes(OWL_CLASS)) continue;
-    if (!(node[SUB_CLASS_OF] ?? []).some((parent) => parent['@id'] === rangeIri)) continue;
-    members[iri.slice(Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/')) + 1)] = iri;
+    const types = node['@type'] ?? [];
+    const isSubclass =
+      types.includes(OWL_CLASS) && (node[SUB_CLASS_OF] ?? []).some((parent) => parent['@id'] === rangeIri);
+    const isNamedIndividual = types.includes(OWL_NAMED_INDIVIDUAL) && types.includes(rangeIri);
+
+    if (!isSubclass && !isNamedIndividual) continue;
+    members[localNameOf(iri)] = iri;
   }
 
   return Object.keys(members).length > 0 ? members : undefined;
+}
+
+/**
+ * Why spec would need to change before this range stops being ambiguous.
+ *
+ * Reached only for a Cascade-namespace range that failed BOTH tests above: no
+ * member (neither a subclass nor a named individual) and no `rdfs:domain`-
+ * linked property either. That is neither a code list nor a structured class
+ * with anything to write — a class spec declared and never populated, which
+ * is `spec`'s gap to close, not this SDK's to guess at. `rdfs:Resource`,
+ * `rdf:List`, `prov:Entity`, `prov:Agent` and `xsd:anyURI` fail the same two
+ * tests and never reach this function — they are open-by-design references,
+ * not Cascade-namespace classes, and the caller filters on the namespace
+ * before calling.
+ */
+function specFixFor(rangeIri) {
+  const local = localNameOf(rangeIri);
+
+  return `spec declares ${local} but gives it no rdfs:domain-linked property and no published `
+    + `members (subclasses or named individuals), so nothing marks it a structured class or a `
+    + `code list. Add fields to spec's ontology for ${local} — or, if it is meant to enumerate a `
+    + 'closed set of values, declare its members the way cascade:DataProvenance or '
+    + 'cascade:ConsentScope do — before a converter can express a value for it.';
 }
 
 // ── the per-vocabulary term tables ───────────────────────────────────────────
 
 const vocabularies = {};
 const valueSets = {};
+const unclassifiableRanges = {};
 const conflicts = [];
 const unresolvable = [];
 const seen = new Map();
@@ -171,7 +244,16 @@ for (const file of contextFiles) {
     if (range) entry.range = range;
     if (range && !valueSets[range]) {
       const members = membersOf(range);
-      if (members) valueSets[range] = members;
+      if (members) {
+        valueSets[range] = members;
+      } else if (range.startsWith(CASCADE_NAMESPACE) && !classesWithFields.has(range)) {
+        // Neither a code list nor a structured class with anything declared —
+        // spec's gap, not a value to guess at. Scoped to the Cascade namespace
+        // ONLY: `rdfs:Resource`, `rdf:List`, `prov:Entity`, `prov:Agent` and
+        // `xsd:anyURI` fail these same two tests and are open-by-design
+        // references, never a spec-row worklist entry (#91).
+        unclassifiableRanges[range] = { specFix: specFixFor(range) };
+      }
     }
 
     terms[term] = entry;
@@ -187,6 +269,15 @@ for (const file of contextFiles) {
 const payload = JSON.stringify({
   vocabularies,
   valueSets,
+  // The worklist: ranges neither test could classify, and why. Present ONLY
+  // for the Cascade-namespace classes spec declares and never populates —
+  // absent for every other range, including the five open-by-design
+  // references (#91).
+  unclassifiableRanges,
+  // Which context owns each namespace, DERIVED from the terms rather than
+  // parsed out of a class IRI. See `scripts/lib/iri.mjs` for the rule and for
+  // what it replaced.
+  namespaceOwners: namespaceOwners(vocabularies),
   // The prefixes the contexts declare, carried so a routed writer can render
   // Turtle rather than N-Triples. `serialize()` is documented as returning a
   // Turtle document, and routing a record type must not change the FORMAT of
@@ -223,12 +314,40 @@ export interface TermDefinition {
   readonly range?: string;
 }
 
+/**
+ * Why a range is neither a code list nor a structured class with anything on
+ * it — spec's gap, named so a converter can point at it instead of guessing.
+ */
+export interface UnclassifiableRange {
+  /** What spec would need to add before a value for this range is expressible. */
+  readonly specFix: string;
+}
+
 export interface SpecTerms {
   /** \`vocabulary -> JSON key -> definition\`. */
   readonly vocabularies: Readonly<Record<string, Readonly<Record<string, TermDefinition>>>>;
   /** \`range class IRI -> local name -> member IRI\`, for resolving a bare value. */
   readonly valueSets: Readonly<Record<string, Readonly<Record<string, string>>>>;
-  /** , as the contexts declare them, for rendering Turtle. */
+  /**
+   * \`range class IRI -> why\`. Present ONLY for a Cascade-namespace class spec
+   * declares and gives neither members nor fields — absent for every other
+   * range, including the five open-by-design references (\`rdfs:Resource\`,
+   * \`rdf:List\`, \`prov:Entity\`, \`prov:Agent\`, \`xsd:anyURI\`), which are
+   * correctly open rather than a gap.
+   */
+  readonly unclassifiableRanges: Readonly<Record<string, UnclassifiableRange>>;
+  /**
+   * \`namespace -> the context that owns it\`, derived from the terms themselves.
+   *
+   * Which vocabulary a record resolves against used to be read out of its class
+   * IRI with a regex — spec's URI shape as an assumption in code, silently
+   * defaulting to \`core\` on any IRI it did not match. This is the same fact
+   * taken from spec: each per-vocabulary context has 100% of its terms in one
+   * namespace, while \`cascade.jsonld\` never exceeds 34% of any, so the owner is
+   * the context with the largest share. See \`scripts/lib/iri.mjs\`.
+   */
+  readonly namespaceOwners: Readonly<Record<string, string>>;
+  /** Prefixes, as the contexts declare them, for rendering Turtle. */
   readonly prefixes: Readonly<Record<string, string>>;
 }
 
@@ -254,9 +373,25 @@ if (unresolvable.length > 0) {
   );
 }
 
+// A HOTSPOT, NOT A BUILD FAILURE. Each of these ranges is a class spec
+// declares and gives neither members nor fields — not this SDK's to invent,
+// so the build still succeeds and `unclassifiableRanges` carries the same
+// reasoning into `convertToRdf`, which refuses per VALUE rather than
+// blanket-refusing the type (#91).
+const unclassifiableEntries = Object.entries(unclassifiableRanges);
+if (unclassifiableEntries.length > 0) {
+  console.warn(
+    `\n  NOTE: ${unclassifiableEntries.length} range(s) are neither a code list nor a structured `
+    + 'class with any field spec has declared:\n'
+    + unclassifiableEntries.map(([range, { specFix }]) => `    ${range}\n      ${specFix}`).join('\n')
+    + '\n',
+  );
+}
+
 console.log(
   `build-terms: ${Object.keys(vocabularies).length} vocabularies, `
   + `${Object.values(vocabularies).reduce((n, t) => n + Object.keys(t).length, 0)} terms, `
-  + `${Object.keys(valueSets).length} value sets, ${conflicts.length} cross-context conflicts, `
+  + `${Object.keys(valueSets).length} value sets, ${unclassifiableEntries.length} unclassifiable `
+  + `ranges, ${conflicts.length} cross-context conflicts, `
   + `${Math.round(payload.length / 1024)}K -> src/spec/derived/terms.generated.ts`,
 );
