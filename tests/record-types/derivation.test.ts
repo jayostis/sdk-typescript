@@ -27,7 +27,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect, beforeAll } from 'vitest';
 
-import { allRecordTypes, recordTypeForClass } from '../../src/record-types/index.js';
+import {
+  NAME_COLLISIONS,
+  allRecordTypes,
+  assembleRecordTypes,
+  recordTypeFor,
+  recordTypeForClass,
+} from '../../src/record-types/index.js';
 import { DERIVED_CLASSES } from '../../src/spec/derived/record-types.generated.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -236,13 +242,33 @@ describe('names come from the published contexts', () => {
       .toBe('InsurancePlan');
   });
 
-  it('every derived name is non-empty and unique', () => {
+  it('every derived name is non-empty, and every duplicate is carried as data', () => {
+    // WHAT THIS USED TO PIN, AND WHY THAT STOPPED MEANING ANYTHING. It asserted
+    // `names.length - new Set(names).size === 1` — a count that was only ever a
+    // proxy for "the assembly throws if this grows", back when a second
+    // collision would have taken the package down at import. The assembly no
+    // longer throws (#89), so the count would have gone on passing while
+    // asserting nothing about what happens to the contested name. The four
+    // assertions below say what does.
     const names = DERIVED_CLASSES.map((entry) => entry.name);
 
     expect(names.every((name) => name.length > 0)).toBe(true);
-    // One collision exists — the two `SocialHistoryRecord` classes — and it is
-    // resolved by an override at assembly, not by the derivation.
-    expect(names.length - new Set(names).size).toBe(1);
+
+    // The generator's own detector, checked against the table it ships beside:
+    // a `NAME_COLLISIONS` that went stale relative to `DERIVED_CLASSES` would
+    // be a report of a collision that is not there, or silence about one that
+    // is.
+    const duplicated = [...new Set(names.filter((name, i) => names.indexOf(name) !== i))].sort();
+
+    expect(NAME_COLLISIONS.map((collision) => collision.name)).toEqual(duplicated);
+
+    for (const collision of NAME_COLLISIONS) {
+      expect(collision.claimants.length, collision.name).toBeGreaterThan(1);
+      expect(
+        DERIVED_CLASSES.filter((entry) => entry.name === collision.name).map((entry) => entry.iri),
+        collision.name,
+      ).toEqual([...collision.claimants]);
+    }
   });
 
   it('registers more classes than this SDK has models for', () => {
@@ -252,6 +278,79 @@ describe('names come from the published contexts', () => {
     // clothes.
     expect(allRecordTypes().length).toBe(DERIVED_CLASSES.length);
     expect(allRecordTypes().length).toBeGreaterThan(60);
+  });
+});
+
+describe('a collision costs the contested name and nothing else', () => {
+  /**
+   * SYNTHETIC, because the real table has no collision left to test against.
+   * Spec publishes one duplicate name and `src/record-types/overrides.ts`
+   * settles it, so `assembleRecordTypes(DERIVED_CLASSES)` is exactly the case
+   * that cannot exhibit the behaviour — which is why the function takes its
+   * classes as an argument.
+   */
+  const derived = (iri: string, name: string) => ({ iri, name, localName: name, supersedes: [] });
+
+  const contested = [
+    derived('https://example.org/a#Widget', 'Widget'),
+    derived('https://example.org/b#Widget', 'Widget'),
+    derived('https://example.org/c#Sprocket', 'Sprocket'),
+  ];
+
+  it('assembles, and every uncontested type in the table still resolves', () => {
+    // THE WHOLE POINT OF DEFERRING. This used to throw, and it ran at module
+    // evaluation: `src/index.ts` re-exports from five modules that import
+    // `src/record-types/index.js` at module scope, so one duplicate name in a
+    // regenerated table failed `import '@the-cascade-protocol/sdk'` — and
+    // `serialize`, `deserialize`, `toJsonLd` and `validate` with it — over one
+    // ambiguous name, while every other type in the table was untouched.
+    const table = assembleRecordTypes(contested);
+
+    expect(table.recordTypes).toHaveLength(3);
+    expect(table.recordTypeFor('Sprocket')?.rdfTypeUri).toBe('https://example.org/c#Sprocket');
+    // Both contested CLASSES still read back, because neither class is
+    // ambiguous — only the name they share is.
+    expect(table.recordTypeForClass('https://example.org/a#Widget')?.name).toBe('Widget');
+    expect(table.recordTypeForClass('https://example.org/b#Widget')?.name).toBe('Widget');
+  });
+
+  it('throws for the contested name, naming both classes that claim it', () => {
+    const table = assembleRecordTypes(contested);
+
+    expect(() => table.recordTypeFor('Widget'))
+      .toThrow(/https:\/\/example\.org\/a#Widget and https:\/\/example\.org\/b#Widget/);
+    // And says what to do about it. A reader has to know where the answer is
+    // declared, or the exception is just a stop.
+    expect(() => table.recordTypeFor('Widget')).toThrow(/NAME_OVERRIDES/);
+  });
+
+  it('still answers undefined for a name nothing registers', () => {
+    // THE DISTINCTION THAT MAKES THE DEFERRAL SAFE. Every caller of
+    // `recordTypeFor` reads `undefined` as "not a record type" and takes a
+    // different path on it, so a contested name answering `undefined` would be
+    // four quiet wrong answers rather than one loud one. An unknown name and a
+    // contested name are two questions with two answers.
+    const table = assembleRecordTypes(contested);
+
+    expect(table.recordTypeFor('NotARecordType')).toBeUndefined();
+    expect(table.recordTypeForClass('https://example.org/z#Nothing')).toBeUndefined();
+    expect(recordTypeFor('NotARecordType')).toBeUndefined();
+  });
+
+  it('leaves the shipped table with nothing contested', () => {
+    // Asserted rather than assumed, because the deferral is what would let the
+    // next duplicate name in a regenerated table be absorbed silently — no
+    // throw at import, and every uncontested type carrying on as normal. This
+    // is what says the day it happens.
+    const table = assembleRecordTypes(DERIVED_CLASSES);
+
+    expect(
+      [...table.contestedNames.keys()],
+      'spec now publishes a name for two record classes that no NAME_OVERRIDES entry settles. '
+      + 'recordTypeFor() throws for it and nothing else is affected — but until an override says '
+      + 'which spelling each class returns, that name resolves to nothing at all.',
+    ).toEqual([]);
+    expect([...table.contestedClasses.keys()]).toEqual([]);
   });
 });
 

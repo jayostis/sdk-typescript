@@ -216,43 +216,82 @@ describe('the invariants that make the two directions agree', () => {
   });
 });
 
-describe('the assembly refuses what it cannot decide', () => {
-  // Handed classes it MUST speak about. Exactly one name collision exists in
-  // the real data, so a guard exercised only against that would be tested once,
-  // by accident of what spec currently declares.
+describe('the lookup refuses what the assembly cannot decide', () => {
+  // Handed classes it MUST speak about. Every name collision spec publishes is
+  // settled by an override, so a guard exercised only against the real table
+  // would never be exercised at all.
+  //
+  // THE REFUSAL MOVED, and #89 is why. It used to happen in
+  // `assembleRecordTypes`, which runs at module evaluation, so one duplicate
+  // name in a regenerated table failed `import '@the-cascade-protocol/sdk'`
+  // outright — every record type down over one ambiguous name. It now happens
+  // in the lookup, for that name alone.
   const derived = (iri: string, name: string) => ({ iri, name, localName: name, supersedes: [] });
 
-  it('throws when two classes claim one name', () => {
-    expect(() => assembleRecordTypes([
+  it('assembles a colliding table instead of throwing at load', () => {
+    const table = assembleRecordTypes([
       derived('https://example.org/a#Widget', 'Widget'),
       derived('https://example.org/b#Widget', 'Widget'),
-    ])).toThrow(/claimed by more than one class/);
+    ]);
+
+    expect(table.recordTypes).toHaveLength(2);
+    expect([...table.contestedNames.keys()]).toEqual(['Widget']);
   });
 
-  it('names both classes and the contested name', () => {
+  it('names both classes and the contested name, from the lookup', () => {
     // The message is the whole value: a reader has to know which two classes,
     // to write the override that settles it.
-    expect(() => assembleRecordTypes([
+    const table = assembleRecordTypes([
       derived('https://example.org/a#Widget', 'Widget'),
       derived('https://example.org/b#Widget', 'Widget'),
-    ])).toThrow(/"Widget" by https:\/\/example\.org\/a#Widget and https:\/\/example\.org\/b#Widget/);
+    ]);
+
+    expect(() => table.recordTypeFor('Widget'))
+      .toThrow(/"Widget" is claimed by more than one class/);
+    expect(() => table.recordTypeFor('Widget'))
+      .toThrow(/https:\/\/example\.org\/a#Widget and https:\/\/example\.org\/b#Widget/);
+    expect(() => table.recordTypeFor('Widget')).toThrow(/overrides\.ts/);
   });
 
   it('accepts two classes whose names differ', () => {
-    expect(() => assembleRecordTypes([
+    const table = assembleRecordTypes([
       derived('https://example.org/a#Widget', 'Widget'),
       derived('https://example.org/b#Sprocket', 'Sprocket'),
-    ])).not.toThrow();
+    ]);
+
+    expect([...table.contestedNames.keys()]).toEqual([]);
+    expect(table.recordTypeFor('Widget')?.rdfTypeUri).toBe('https://example.org/a#Widget');
+    expect(table.recordTypeFor('Sprocket')?.rdfTypeUri).toBe('https://example.org/b#Sprocket');
   });
 
   it('reports a collision between an alias and a name', () => {
     // `INPUT_ALIASES` is hand-written and the derived names are not, so the
     // hazard is real: a class arriving upstream under a name this SDK already
     // accepts as an alias for something else.
-    expect(() => assembleRecordTypes([
+    const table = assembleRecordTypes([
       derived('https://example.org/a#ProcedureRecord', 'ProcedureRecord'),
       derived(`${clinical}Procedure`, 'Procedure'),
-    ])).toThrow(/"ProcedureRecord"/);
+    ]);
+
+    expect(() => table.recordTypeFor('ProcedureRecord')).toThrow(/"ProcedureRecord"/);
+    // The OTHER name of the same record type still answers. A contested alias
+    // costs that one spelling, not the type.
+    expect(table.recordTypeFor('Procedure')?.rdfTypeUri).toBe(`${clinical}Procedure`);
+  });
+
+  it('refuses a class two record types would read back as, and nothing else', () => {
+    // The class direction, deferred on the same terms. Two record types
+    // accepting one class IRI is the `BY_CLASS` conflict that used to throw at
+    // module evaluation.
+    const table = assembleRecordTypes([
+      { iri: 'https://example.org/a#Widget', name: 'Widget', localName: 'Widget', supersedes: ['https://example.org/x#Old'] },
+      { iri: 'https://example.org/b#Sprocket', name: 'Sprocket', localName: 'Sprocket', supersedes: ['https://example.org/x#Old'] },
+    ]);
+
+    expect([...table.contestedClasses.keys()]).toEqual(['https://example.org/x#Old']);
+    expect(() => table.recordTypeForClass('https://example.org/x#Old'))
+      .toThrow(/Widget and Sprocket/);
+    expect(table.recordTypeForClass('https://example.org/a#Widget')?.name).toBe('Widget');
   });
 });
 
@@ -302,18 +341,23 @@ describe('the assembly survives the upstream fix its overrides wait for', () => 
     // `clinical:CoverageRecord rdfs:seeAlso coverage:InsurancePlan`
     // (`jayostis/spec#50` gap 2). When that triple lands,
     // `scripts/build-record-types.mjs` puts the class into `supersedes` AND the
-    // override still adds it — so `acceptedClassUris` holds it twice and the
-    // `BY_CLASS` loop throws at MODULE EVALUATION, taking the whole package
-    // down at import with a message describing a conflict that does not exist.
+    // override still adds it — so `acceptedClassUris` would hold it twice, the
+    // class index would call it contested, and `recordTypeForClass` would
+    // refuse to answer for it, describing a conflict between a record type and
+    // itself.
     const [deprecated, superseding] = Object.entries(SUPERSEDES_OVERRIDES)[0];
 
-    const [assembled] = assembleRecordTypes([{
+    const table = assembleRecordTypes([{
       iri: superseding,
       name: 'InsurancePlan',
       localName: 'InsurancePlan',
       supersedes: [deprecated],
     }]);
 
+    const [assembled] = table.recordTypes;
+
     expect(new Set(assembled.acceptedClassUris).size).toBe(assembled.acceptedClassUris.length);
+    expect(table.contestedClasses.size).toBe(0);
+    expect(table.recordTypeForClass(deprecated)?.name).toBe('InsurancePlan');
   });
 });

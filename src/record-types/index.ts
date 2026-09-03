@@ -22,15 +22,48 @@
  * "the first entry in `TYPE_TO_MAPPING_KEY` that maps to each mapping key", so
  * `clinical:Procedure` read back as `ProcedureRecord` — a spelling
  * `src/models/procedure.ts:23` does not declare and `src/index.ts` does not
- * export. Here the name comes from spec, and where two classes would claim one
- * name the assembly throws rather than picking.
+ * export. Here the name comes from spec, and where two classes claim one name
+ * nothing picks between them.
+ *
+ * A CONTESTED NAME FAILS; THE PACKAGE DOES NOT. The assembly used to throw on a
+ * collision, and it ran at module evaluation — so one duplicate name arriving
+ * in a regenerated table would fail `import '@the-cascade-protocol/sdk'`
+ * outright, taking `serialize`, `deserialize`, `toJsonLd` and `validate` down
+ * together over one ambiguous name among every unambiguous one. The
+ * collision is now carried as data: every uncontested type assembles, and the
+ * contested name throws from `recordTypeFor` at the point something actually
+ * asks for it. See #89.
+ *
+ * WHICH IS NOT THE SAME AS ANSWERING `undefined`. That was the trap in
+ * deferring, and the reason the throw is where it is. Every caller of
+ * `recordTypeFor` already reads `undefined` as "not a record type" and takes a
+ * different path on it — `src/serializer/turtle-serializer.ts` falls through to
+ * the legacy writer, `src/deserializer/turtle-parser.ts` falls back to the
+ * spelling the caller asked under (the `ProcedureRecord`/`Procedure` defect
+ * above, exactly), `src/converter/to-rdf.ts` reports that no context publishes
+ * a name for it, and `src/migration/index.ts` counts it as unmigrated. All four
+ * would be wrong, quietly. An unknown name and a contested name are two
+ * questions, and they get two answers: `undefined` and an exception.
  *
  * @module record-types
  */
 
 export * from './types.js';
 export { NAME_OVERRIDES, INPUT_ALIASES, SUPERSEDES_OVERRIDES } from './overrides.js';
-export type { DerivedClass } from '../spec/derived/record-types.generated.js';
+export type { DerivedClass, NameCollision } from '../spec/derived/record-types.generated.js';
+
+/**
+ * What spec publishes for two classes at once, before the overrides speak.
+ *
+ * Re-exported through the front door for the reason everything else here is:
+ * a caller reaching the generated module directly gets rows with no statement
+ * of what was done about them. This list is the UPSTREAM fact — every name a
+ * `NAME_OVERRIDES` entry then settles stays in it, because the override
+ * resolves the collision here while leaving the gap upstream exactly where it
+ * was. {@link recordTypeFor} throwing is the other half: this says what spec
+ * published, that says what is still unanswerable.
+ */
+export { NAME_COLLISIONS } from '../spec/derived/record-types.generated.js';
 
 import { DERIVED_CLASSES } from '../spec/derived/record-types.generated.js';
 import type { DerivedClass } from '../spec/derived/record-types.generated.js';
@@ -38,17 +71,69 @@ import { INPUT_ALIASES, NAME_OVERRIDES, SUPERSEDES_OVERRIDES } from './overrides
 import type { RecordType } from './types.js';
 
 /**
+ * One assembled table: the record types, both lookups, and what neither can
+ * answer.
+ *
+ * THE LOOKUPS BELONG TO THE TABLE, not to the module, because the module's
+ * table is the one case that cannot exhibit the interesting behaviour. Every
+ * duplicate name spec publishes is settled by an override, so `DERIVED_CLASSES`
+ * assembles with nothing contested — a collision has to be constructed to be
+ * tested at all, and a lookup reachable only as a module-level function could
+ * not be handed one. The exported `recordTypeFor` and `recordTypeForClass` are
+ * this table's, on the shipped classes.
+ */
+export interface RecordTypeTable {
+  /** Every record type these classes produced, contested ones included. */
+  readonly recordTypes: readonly RecordType[];
+
+  /**
+   * `name -> the class IRIs claiming it`, for the names more than one does.
+   *
+   * Empty in the ordinary case, and empty for the shipped table today. A name
+   * in here resolves to nothing: {@link RecordTypeTable.recordTypeFor} throws
+   * on it rather than picking a claimant, which is the choice by table order
+   * this module exists to remove.
+   */
+  readonly contestedNames: ReadonlyMap<string, readonly string[]>;
+
+  /** `class IRI -> the record type names claiming it`, likewise. */
+  readonly contestedClasses: ReadonlyMap<string, readonly string[]>;
+
+  /**
+   * The record type a JSON `type` names, under any accepted spelling.
+   *
+   * `undefined` for a name nothing registers. THROWS for a name two classes
+   * claim — see the module header: every caller reads `undefined` as "not a
+   * record type" and would take a wrong path quietly on it.
+   */
+  recordTypeFor(name: string): RecordType | undefined;
+
+  /**
+   * The record type a class IRI reads back as, deprecated spellings included.
+   *
+   * `undefined` for an unregistered class, and throws for one two record types
+   * claim — the same two questions, the same two answers.
+   */
+  recordTypeForClass(classUri: string): RecordType | undefined;
+}
+
+/**
  * Assemble record types from derived classes and the declared overrides.
  *
  * TAKES ITS CLASSES AS AN ARGUMENT, for the reason `deriveRecordTypes` did and
  * `thirdPartyImports(dir)` does: the interesting cases cannot be produced from
- * the real data. Exactly one name collision exists across the 79 derived
- * classes, so a function that read `DERIVED_CLASSES` directly could be tested
- * against one instance of the case it exists to handle — and the next
- * vocabulary to introduce a duplicate name is precisely the event that must not
- * pass silently.
+ * the real data. Every name collision spec publishes is settled by an override,
+ * so a function that read `DERIVED_CLASSES` directly could not be tested
+ * against the case it exists to handle at all — and the next vocabulary to
+ * introduce a duplicate name is precisely the event that must not pass
+ * silently.
+ *
+ * REFUSES NOTHING AT ASSEMBLY. It used to throw here, at module evaluation, and
+ * the module header says why that is no longer where the failure belongs. The
+ * collision is recorded and carried; the refusal happens in the lookup, for the
+ * contested name alone.
  */
-export function assembleRecordTypes(classes: readonly DerivedClass[]): readonly RecordType[] {
+export function assembleRecordTypes(classes: readonly DerivedClass[]): RecordTypeTable {
   const aliasesFor = new Map<string, string[]>();
 
   for (const [alias, iri] of Object.entries(INPUT_ALIASES)) {
@@ -84,15 +169,16 @@ export function assembleRecordTypes(classes: readonly DerivedClass[]): readonly 
       .map(([deprecatedIri]) => deprecatedIri);
 
     // DEDUPLICATED, because the derived table and the override can both name
-    // one class and the `BY_CLASS` loop treats a repeat as a conflict.
+    // one class and the class index below treats a repeat as a conflict.
     // `SUPERSEDES_OVERRIDES` exists precisely because spec has not yet stated
     // `clinical:CoverageRecord rdfs:seeAlso coverage:InsurancePlan`
     // (`jayostis/spec#50` gap 2). When that triple lands,
     // `scripts/build-record-types.mjs` puts the class into `supersedes` and the
-    // override still adds it — so the loop below would throw at MODULE
-    // EVALUATION, taking the whole package down at import, over a class
-    // claimed twice by the same record type. The upstream fix this row waits
-    // for must not be the thing that breaks it.
+    // override still adds it — so without this the class would be claimed twice
+    // by ONE record type, land in `contestedClasses`, and make
+    // `recordTypeForClass` refuse to answer for it, describing a conflict
+    // between a record type and itself. The upstream fix this row waits for
+    // must not be the thing that breaks it.
     const accepted = new Set([derived.iri, ...derived.supersedes, ...superseded]);
 
     return Object.freeze({
@@ -103,77 +189,124 @@ export function assembleRecordTypes(classes: readonly DerivedClass[]): readonly 
     }) as RecordType;
   });
 
-  // Checked here rather than where a caller happens to look. An invariant
-  // enforced at assembly holds for every consumer and every test and cannot be
-  // skipped by forgetting to assert it — the argument `src/terms/index.ts`
-  // makes for building its map with an explicit loop.
-  const claimants = new Map<string, string[]>();
+  // Indexed here rather than where a caller happens to look. A table built at
+  // assembly is the same table for every consumer and every test and cannot be
+  // skipped by forgetting to build it — the argument `src/terms/index.ts` makes
+  // for building its map with an explicit loop, and the reason a collision
+  // found here is still found here now that it is deferred rather than thrown.
+  const named = new Map<string, RecordType[]>();
 
   for (const recordType of assembled) {
     for (const name of [recordType.name, ...recordType.aliases]) {
-      claimants.set(name, [...(claimants.get(name) ?? []), recordType.rdfTypeUri]);
+      named.set(name, [...(named.get(name) ?? []), recordType]);
     }
   }
 
-  const contested = [...claimants].filter(([, iris]) => iris.length > 1);
+  const byName = new Map<string, RecordType>();
+  const contestedNames = new Map<string, readonly string[]>();
 
-  if (contested.length > 0) {
-    throw new Error(
-      `${contested.length} name(s) are claimed by more than one class: `
-      + contested.map(([name, iris]) => `"${name}" by ${iris.join(' and ')}`).join('; ')
-      + '. A class reads back as exactly one type. Add a NAME_OVERRIDES entry naming which '
-      + 'spelling each class returns, rather than letting the order of the derived table decide.',
-    );
+  for (const [name, claiming] of named) {
+    const [first] = claiming;
+
+    // A contested name is registered in NEITHER map, deliberately. Putting one
+    // claimant in `byName` and recording the collision beside it would leave a
+    // lookup that answers — with whichever row the iteration reached first,
+    // which is the accident this module was built to remove.
+    if (claiming.length > 1) {
+      contestedNames.set(name, Object.freeze(claiming.map((recordType) => recordType.rdfTypeUri)));
+    } else if (first) {
+      byName.set(name, first);
+    }
   }
 
-  return Object.freeze(assembled);
-}
+  // The class direction, indexed the same way and for the same reason. A
+  // `new Map(...)` over pairs keeps the last of two claimants and reports
+  // nothing, so which one won would depend on order and the loser would be
+  // unreachable with no way to notice.
+  const claimed = new Map<string, RecordType[]>();
 
-const RECORD_TYPES = assembleRecordTypes(DERIVED_CLASSES);
-
-const BY_NAME: ReadonlyMap<string, RecordType> = new Map(
-  RECORD_TYPES.flatMap((recordType) =>
-    [recordType.name, ...recordType.aliases].map((name) => [name, recordType] as const)),
-);
-
-/**
- * Class IRI → the record type it reads back as, deprecated spellings included.
- *
- * Built with an explicit loop for the reason `src/terms/index.ts` gives: a
- * `new Map(...)` over pairs keeps the last of two claimants and reports
- * nothing, so which one won would depend on order and the loser would be
- * unreachable with no way to notice.
- */
-const BY_CLASS: ReadonlyMap<string, RecordType> = (() => {
-  const byClass = new Map<string, RecordType>();
-
-  for (const recordType of RECORD_TYPES) {
+  for (const recordType of assembled) {
     for (const classUri of recordType.acceptedClassUris) {
-      const clash = byClass.get(classUri);
+      claimed.set(classUri, [...(claimed.get(classUri) ?? []), recordType]);
+    }
+  }
 
-      if (clash) {
+  const byClass = new Map<string, RecordType>();
+  const contestedClasses = new Map<string, readonly string[]>();
+
+  for (const [classUri, claiming] of claimed) {
+    const [first] = claiming;
+
+    if (claiming.length > 1) {
+      contestedClasses.set(classUri, Object.freeze(claiming.map((recordType) => recordType.name)));
+    } else if (first) {
+      byClass.set(classUri, first);
+    }
+  }
+
+  return Object.freeze({
+    recordTypes: Object.freeze(assembled),
+    contestedNames,
+    contestedClasses,
+
+    recordTypeFor(name: string): RecordType | undefined {
+      const claimants = contestedNames.get(name);
+
+      if (claimants) {
         throw new Error(
-          `${classUri} would read back as both "${clash.name}" and "${recordType.name}". A class `
-          + 'reads back as exactly one type; if one of these is a deprecated spelling, it belongs '
-          + 'in a supersedes link rather than in the derived table.',
+          `"${name}" is claimed by more than one class: ${claimants.join(' and ')}. A name reads `
+          + 'back as exactly one record type, and this SDK will not pick between them — an answer '
+          + 'chosen by the order of the derived table is the defect src/record-types/ exists to '
+          + 'remove. Declare which spelling each class returns in NAME_OVERRIDES '
+          + '(src/record-types/overrides.ts). Every other record type is unaffected; only this '
+          + 'name fails.',
         );
       }
 
-      byClass.set(classUri, recordType);
-    }
-  }
+      return byName.get(name);
+    },
 
-  return byClass;
-})();
+    recordTypeForClass(classUri: string): RecordType | undefined {
+      const claimants = contestedClasses.get(classUri);
+
+      if (claimants) {
+        throw new Error(
+          `${classUri} would read back as more than one record type: ${claimants.join(' and ')}. `
+          + 'A class reads back as exactly one type; if one of these is a deprecated spelling, it '
+          + 'belongs in a supersedes link rather than in the derived table. Every other class is '
+          + 'unaffected; only this one fails.',
+        );
+      }
+
+      return byClass.get(classUri);
+    },
+  });
+}
+
+/**
+ * The shipped classes, assembled once.
+ *
+ * Memoised by being a module-level constant, as `src/migration/index.ts` says:
+ * ES modules evaluate once per realm, so the indexing above runs at first
+ * import and every lookup afterwards is a `Map.get`. Nothing here can throw at
+ * evaluation any more — that is the whole of #89 — so importing this module,
+ * and therefore importing the package, no longer depends on what spec published
+ * last night.
+ */
+const TABLE: RecordTypeTable = assembleRecordTypes(DERIVED_CLASSES);
 
 /**
  * The record type a JSON `type` names, under any accepted spelling.
  *
  * `undefined` for a name this SDK does not register — a question, not a
  * failure, and every caller already has a "not a record type" branch.
+ *
+ * THROWS for a name two classes claim, because that same branch would be the
+ * wrong one: the module header traces all four callers and what each would do
+ * quietly. A contested name is not an unknown name.
  */
 export function recordTypeFor(name: string): RecordType | undefined {
-  return BY_NAME.get(name);
+  return TABLE.recordTypeFor(name);
 }
 
 /**
@@ -183,12 +316,14 @@ export function recordTypeFor(name: string): RecordType | undefined {
  * rather than a scan: `recordTypeForClass(clinical:Procedure).name` is
  * `'Procedure'` because spec publishes that name, not because of where a row
  * sits in a file.
+ *
+ * Throws for a class two record types claim, on the same terms as above.
  */
 export function recordTypeForClass(classUri: string): RecordType | undefined {
-  return BY_CLASS.get(classUri);
+  return TABLE.recordTypeForClass(classUri);
 }
 
 /** Every record type spec declares, in name order. */
 export function allRecordTypes(): readonly RecordType[] {
-  return RECORD_TYPES;
+  return TABLE.recordTypes;
 }
