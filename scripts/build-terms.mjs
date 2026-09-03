@@ -30,7 +30,7 @@
  * costs one, and `JSON.parse` of 138K is about a millisecond at load.
  */
 
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -214,6 +214,11 @@ export const SPEC_TERMS: SpecTerms = JSON.parse(
 ) as SpecTerms;
 `;
 
+// The directory is not in git: everything it holds is generated and ignored,
+// and git does not track an empty directory. A clean clone therefore has no
+// src/spec-data/ at all, which CI found and a local test that deleted only the
+// FILE did not.
+mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, source, 'utf-8');
 
 console.log(
