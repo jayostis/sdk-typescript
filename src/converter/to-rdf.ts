@@ -112,11 +112,26 @@ const [SHARED_TERMS, CONTESTED_KEYS] = ((): [Record<string, TermDefinition>, Set
   const shared: Record<string, TermDefinition> = {};
   const contested = new Set<string>();
 
+  // AGREEING MEANS AGREEING ABOUT ALL OF IT, not just the predicate. A
+  // definition also carries `@type`, `@container` and the ontology's range, and
+  // two contexts naming one predicate while declaring different datatypes for
+  // it is a disagreement — resolved, if only the predicate were compared, by
+  // whichever vocabulary this loop reached last. Iteration order deciding a
+  // field's datatype is the defect `src/record-types/` exists to remove, one
+  // layer down.
+  //
+  // No key does this today: across all seven contexts, zero agree on a
+  // predicate and differ on type or container. Compared in full anyway, because
+  // the alternative is a rule that is right by luck and silent when the luck
+  // runs out.
+  const shape = (definition: TermDefinition): string =>
+    [definition.predicate, definition.type ?? '', definition.container ?? '', definition.range ?? ''].join('|');
+
   for (const terms of Object.values(SPEC_TERMS.vocabularies)) {
     for (const [key, definition] of Object.entries(terms)) {
       const agreed = shared[key];
 
-      if (agreed && agreed.predicate !== definition.predicate) contested.add(key);
+      if (agreed && shape(agreed) !== shape(definition)) contested.add(key);
       else shared[key] = definition;
     }
   }

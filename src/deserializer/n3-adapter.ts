@@ -163,11 +163,22 @@ export function parseTurtleWithN3(content: string): ParsedTriple[] {
   for (const quad of quads) {
     const subject = termValue(quad.subject, label);
 
-    // The chain itself is not data — its members are, and they are carried on
-    // the triple that points at the head.
-    if (chainNodes.has(subject)) continue;
-
     const predicate = String(quad.predicate.value);
+
+    // The chain's OWN triples are not data — its members are, and they are
+    // carried on the triple that points at the head. Only `rdf:first` and
+    // `rdf:rest` are the chain's own.
+    //
+    // This skipped every triple whose subject was a chain node, which drops any
+    // OTHER predicate on that blank node silently: no error, a shorter record,
+    // and a graph with nothing left for a shape to catch. `_:l rdf:first "x" ;
+    // rdf:rest rdf:nil ; c:note "KEEP ME"` lost the note.
+    //
+    // Legal RDF, and the same failure the hand-written parser had with comma
+    // lists — in the replacement written to fix it, one layer along. This
+    // module opens by promising it drops nothing on validity grounds, and a
+    // promise the code does not keep is worse than no promise.
+    if (chainNodes.has(subject) && (predicate === RDF_FIRST || predicate === RDF_REST)) continue;
     const object = quad.object;
 
     if (object.termType === 'BlankNode' && chainNodes.has(label(object.value))) {
