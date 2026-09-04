@@ -32,11 +32,11 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
  * existing one reintroduces this, and a re-ordering by hand would fix one case
  * and leave the rule wrong.
  *
- * TIES KEEP DECLARATION ORDER, which is what settles the collision this loop
- * already knew about. `cascade` and `core` name one namespace, so length
- * separates nothing; `Array.prototype.sort` is stable, and `cascade` — the
- * prefix every context and every serialized document writes — is declared
- * first.
+ * TIES KEEP DECLARATION ORDER. No two entries in `NAMESPACES` currently share
+ * an IRI — every value here is distinct — so nothing is settled by this today;
+ * it guards the day two prefixes do name the same namespace. `Array.prototype.sort`
+ * is stable, so that day the prefix declared first in `NAMESPACES` wins, rather
+ * than the winner depending on the sort implementation's own tie-breaking.
  */
 const CONTRACTIONS: readonly (readonly [string, string])[] = Object.entries(NAMESPACES)
   .sort(([, a], [, b]) => b.length - a.length);

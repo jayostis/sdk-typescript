@@ -74,14 +74,42 @@ export function expandCurie(prefixes, id) {
 }
 
 /**
+ * Two nodes for the same `@id`, combined so an array-valued predicate keeps
+ * both sides' entries rather than losing one wholesale.
+ *
+ * A shallow `{ ...existing, ...node }` replaces `existing[key]` outright for
+ * any key `node` also carries — correct for a scalar, wrong for an array like
+ * `@type`: if the same class `@id` is ever declared across two files, each
+ * contributing part of its `@type` array, the file merged second would
+ * silently drop whichever markers the first file alone carried, including
+ * `cascade:RecordClass`, which record-type population reads off `@type`.
+ * Concatenating and deduping keeps both files' entries regardless of which is
+ * merged first.
+ *
+ * @param {Record<string, unknown>} existing
+ * @param {Record<string, unknown>} node
+ * @returns {Record<string, unknown>}
+ */
+function mergeNode(existing, node) {
+  const merged = { ...existing, ...node };
+  for (const key of Object.keys(node)) {
+    if (Array.isArray(existing[key]) && Array.isArray(node[key])) {
+      merged[key] = [...new Set([...existing[key], ...node[key]])];
+    }
+  }
+  return merged;
+}
+
+/**
  * The whole shipped ontology graph, as `@id -> node`, merged across every
  * `.jsonld` file under `ontologiesDir`.
  *
  * MERGED ACROSS FILES rather than kept per-file: a subclass chain crosses
  * vocabularies — `clinical:SocialHistoryRecord`'s parent is in `core` — so a
  * per-file read would report a class as unreachable purely because its parent
- * was declared elsewhere. Later files win a shallow-spread conflict on a
- * shared key, which matches what both callers did before this was shared.
+ * was declared elsewhere. A shared key's array values are merged via
+ * {@link mergeNode} rather than replaced; a shared scalar key still has the
+ * later file win, which matches what both callers did before this was shared.
  *
  * @param {string} ontologiesDir - Directory of `.jsonld` ontology files.
  * @returns {Map<string, Record<string, unknown>>}
@@ -92,7 +120,7 @@ export function mergedOntologyGraph(ontologiesDir) {
   for (const file of readdirSync(ontologiesDir).filter((f) => f.endsWith('.jsonld'))) {
     for (const node of JSON.parse(readFileSync(join(ontologiesDir, file), 'utf-8'))) {
       const existing = nodes.get(node['@id']);
-      nodes.set(node['@id'], existing ? { ...existing, ...node } : node);
+      nodes.set(node['@id'], existing ? mergeNode(existing, node) : node);
     }
   }
 

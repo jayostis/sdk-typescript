@@ -38,6 +38,16 @@
 #   the same reason: none of the four register a term, class or value this SDK
 #   did not already claim.
 #
+#   Same day, review followup: the CONTRACTIONS comment above the tie-break was
+#   itself wrong — it named `cascade` and `core` as two prefixes for one
+#   namespace, but NAMESPACES has no `core` key, only `cascade`. Reworded to
+#   say what's actually true (no two NAMESPACES entries share an IRI today; the
+#   tie-break guards a future one). Comment-only, no code or predicate changed.
+#   `scripts/lib/spec-source.mjs`'s `mergedOntologyGraph` also stopped letting a
+#   second ontology file's `@type` array silently replace the first file's
+#   instead of merging with it — a build-tooling fix under `scripts/`, outside
+#   both what ships and what the hook watches, named here for the same reason.
+#
 core=3.8
 health=2.8
 clinical=1.16
