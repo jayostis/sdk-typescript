@@ -139,13 +139,15 @@ describe('nodeGlobalsIn', () => {
 
   it('is silent for iterating a DOM collection, which every browser and tsconfig.json allow', () => {
     // `tsconfig.json` names no `lib`, so for target ES2022 it gets the
-    // default set, which includes `DOM.Iterable`. `tsconfig.browser.json`
-    // names its `lib` explicitly and must name that one too, or spreading a
-    // `URLSearchParams` — which passes `npm run typecheck` and runs in every
-    // browser — is reported by the gate as if it were a Node global.
+    // default set, which includes `DOM.Iterable` AND `DOM.AsyncIterable`.
+    // `tsconfig.browser.json` names its `lib` explicitly and must name both,
+    // or spreading a `URLSearchParams` or streaming a response body with
+    // `for await` — each of which passes `npm run typecheck` and runs in
+    // every browser — is reported by the gate as if it were a Node global.
     expect(nodeGlobalsIn(
       'export const pairs = [...new URLSearchParams("a=1")];\n'
-      + 'export const names = [...new Headers({ a: "1" })].map(([k]) => k);\n',
+      + 'export const names = [...new Headers({ a: "1" })].map(([k]) => k);\n'
+      + 'export async function drain(r: Response) { for await (const chunk of r.body!) void chunk; }\n',
     )).toEqual([]);
   });
 

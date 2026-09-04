@@ -31,6 +31,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
+// @ts-expect-error -- build scripts, deliberately plain JavaScript and untyped.
+import { runtimeImportsOf } from '../scripts/lib/runtime-imports.mjs';
 import { installedN3Version } from '../scripts/vendor-n3.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,8 +56,6 @@ describe('vendored n3 has not drifted', () => {
     // child process started in the temp directory, which is always somewhere
     // Node can start. A bundle equal to the committed bytes from there is
     // equal to them from here; a second, in-process build would add nothing.
-    // `buildVendoredN3` itself throws on anything left for a runtime to
-    // resolve, so equality carries that guarantee too.
     const mine = readFileSync(join(VENDORED, BUNDLE), 'utf-8');
     const script = pathToFileURL(resolve(root, 'scripts/vendor-n3.mjs')).href;
     const theirs = execFileSync(process.execPath, [
@@ -88,6 +88,23 @@ describe('vendored n3 has not drifted', () => {
     // edit: code nobody reviewed, under a licence header that does not cover
     // it. `n3.d.ts` is ours — n3@2 ships no types — and says so at its top.
     expect(readdirSync(VENDORED).sort()).toEqual(['LICENSE.md', 'VENDOR.md', 'n3.d.ts', 'n3.js']);
+  });
+
+  it('carries no import or require for a runtime to resolve', async () => {
+    // The reason the bundle exists. A surviving specifier is a module the
+    // browser is expected to supply, and `buffer` is the one n3 would leave.
+    //
+    // ASKED OF THE SHIPPED FILE, NOT OF THE BUILDER. `buildVendoredN3` throws
+    // on a survivor, and the test above holds the committed bytes equal to its
+    // output, so on paper this cannot fail first. But that throw has no test
+    // of its own — the function takes no arguments, so nothing can hand it a
+    // bundle that reaches for something — and relaxing it then rebuilding
+    // passes the equality with a `buffer` import in the artifact. This reads
+    // the file the package ships and trusts nothing upstream of it. Asked of
+    // esbuild, which reads syntax, rather than of the text, where a statement
+    // quoted inside a string would match too.
+    const code = readFileSync(join(VENDORED, BUNDLE), 'utf-8');
+    expect(await runtimeImportsOf(code, { resolveDir: VENDORED })).toEqual([]);
   });
 
   it('carries upstream\'s licence, unaltered', () => {

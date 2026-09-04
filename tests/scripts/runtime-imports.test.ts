@@ -20,7 +20,7 @@ import { build } from 'esbuild';
 import { describe, it, expect } from 'vitest';
 
 // @ts-expect-error -- a build script, deliberately plain JavaScript and untyped.
-import { runtimeImports } from '../../scripts/lib/runtime-imports.mjs';
+import { runtimeImports, runtimeImportsOf } from '../../scripts/lib/runtime-imports.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -61,5 +61,25 @@ describe('runtimeImports', () => {
     const result = await bundle(QUOTED_IMPORT);
 
     expect(runtimeImports(result.metafile)).toEqual([]);
+  });
+});
+
+describe('runtimeImportsOf', () => {
+  it('names every specifier a finished bundle reaches for, relative ones included', async () => {
+    // A shipped file that imports `./x.js` is reaching for a file exactly as
+    // one importing `buffer` is reaching for a package; nothing is resolved,
+    // so nothing has to exist for the answer to be complete.
+    const survivors = await runtimeImportsOf(
+      "import { Buffer } from 'buffer';\n"
+      + "const local = require('./local.js');\n"
+      + "export const c = Buffer.concat([local]);\n",
+      { resolveDir: root },
+    );
+
+    expect(survivors).toEqual(['buffer (import-statement)', './local.js (require-call)']);
+  });
+
+  it('is silent for an import spelled inside a string', async () => {
+    expect(await runtimeImportsOf(QUOTED_IMPORT, { resolveDir: root })).toEqual([]);
   });
 });

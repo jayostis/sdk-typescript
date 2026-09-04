@@ -14,16 +14,20 @@
  * its `imports`, and the ones left for the runtime carry `external: true` —
  * an `import-statement`, a `require-call`, a `dynamic-import`, each with the
  * specifier as written. Nothing inside a string is among them, because
- * esbuild read syntax. `tests/scripts/runtime-imports.test.ts` makes it speak
- * before anything points it at ours.
+ * esbuild read syntax. `tests/scripts/runtime-imports.test.ts` makes both
+ * functions speak before anything points them at ours.
  *
- * NO VARIANT FOR A FINISHED FILE. The committed `n3.js` is held byte-equal to
- * what `buildVendoredN3` returns, and that function throws on a survivor
- * from this same metafile read, so a second esbuild pass over the committed
- * text could only fail after the equality already had.
+ * TWO ENTRY POINTS, ONE READ. `runtimeImports(metafile)` is for a build in
+ * progress, and is what `vendor-n3.mjs` and `check-browser-bundle.mjs` refuse
+ * on. `runtimeImportsOf(code)` is for a file already on disk, and exists so
+ * `tests/vendor-drift.test.ts` can ask the SHIPPED bundle the question
+ * without trusting the builder's refusal — which has no test of its own, and
+ * whose removal the byte-equality test cannot see.
  *
  * @module scripts/lib/runtime-imports
  */
+
+import { build } from 'esbuild';
 
 /**
  * Every import esbuild left for the runtime in `metafile`'s outputs, as
@@ -37,4 +41,42 @@ export function runtimeImports(metafile) {
     output.imports
       .filter((entry) => entry.external)
       .map((entry) => `${entry.path} (${entry.kind})`));
+}
+
+/**
+ * Every specifier a FINISHED bundle reaches for — for a file in hand rather
+ * than a build in progress.
+ *
+ * Run through esbuild with a plugin that marks every specifier external, so
+ * nothing is resolved, inlined or refused: whatever the file names is listed,
+ * relative paths included. A shipped bundle that imports `./x.js` is reaching
+ * for a file exactly as one importing `buffer` is reaching for a package.
+ *
+ * @param {string} code - The bundle's text.
+ * @param {{ resolveDir: string }} options - Where esbuild would resolve from;
+ *   only used to anchor the build, since nothing is resolved.
+ * @returns {Promise<string[]>} As {@link runtimeImports}.
+ */
+export async function runtimeImportsOf(code, { resolveDir }) {
+  const leaveEverything = {
+    name: 'leave-everything',
+    setup(api) {
+      api.onResolve({ filter: /.*/ }, (args) =>
+        (args.kind === 'entry-point' ? undefined : { path: args.path, external: true }));
+    },
+  };
+
+  const result = await build({
+    stdin: { contents: code, resolveDir, loader: 'js', sourcefile: 'bundle.js' },
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'browser',
+    logLevel: 'silent',
+    metafile: true,
+    absWorkingDir: resolveDir,
+    plugins: [leaveEverything],
+  });
+
+  return runtimeImports(result.metafile);
 }

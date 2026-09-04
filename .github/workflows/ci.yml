@@ -94,11 +94,11 @@ jobs:
 
       # `src/spec/` is derived from the spec checkout and gitignored. Each of
       # the four steps below has a `pre` hook that generates it, so a bare
-      # `npm test` on a fresh clone works; run through those hooks here, an
-      # unchanged checkout was regenerated four times per job at ~6 s each.
-      # Generated once, as a named step, and the four steps below pass
-      # --ignore-scripts, which skips a script's pre/post hooks and nothing
-      # else — the script named still runs.
+      # `npm test` on a fresh clone works. Run through those hooks here, an
+      # unchanged checkout was regenerated four times per job at ~6 s each,
+      # so it is generated once, as a named step, and the four steps below
+      # pass --ignore-scripts, which skips a script's pre/post hooks and
+      # nothing else — the script named still runs.
       - name: Generate
         working-directory: sdk-typescript
         run: npm run generate

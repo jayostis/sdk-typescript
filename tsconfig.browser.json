@@ -13,11 +13,14 @@
   // `types: []` is what does the work here; the DOM lib is what
   // `globalThis.crypto` and `TextEncoder` compile against without it.
   //
-  // `lib` must be what `tsconfig.json` gets by default for target ES2022,
-  // which is `ES2022`, `DOM` AND `DOM.Iterable`. Naming `lib` at all replaces
-  // the default set, and without the third a `[...new URLSearchParams(q)]`
-  // that passes `npm run typecheck` and runs in every browser is reported
-  // here as if it were a Node global.
+  // `lib` must be what `tsconfig.json` gets by default for target ES2022 —
+  // `lib.es2022.full.d.ts`, which is `ES2022`, `DOM`, `DOM.Iterable` and
+  // `DOM.AsyncIterable` (plus `ScriptHost` and `WebWorker.ImportScripts`,
+  // which declare nothing `src/` could reach). Naming `lib` at all replaces
+  // the default set, and without the iterable pair a
+  // `[...new URLSearchParams(q)]` or a `for await (const chunk of body)` that
+  // passes `npm run typecheck` and runs in every browser is reported here as
+  // if it were a Node global.
   //
   // Read by `scripts/lib/node-globals.mjs` through the TypeScript API, so the
   // same options judge a scratch source in a test and `src/` in the gate.
@@ -26,7 +29,7 @@
   "compilerOptions": {
     "noEmit": true,
     "types": [],
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "DOM.AsyncIterable"]
   },
   "include": ["src/**/*.ts"]
 }
