@@ -3,9 +3,13 @@ dist/
 *.tsbuildinfo
 
 # Everything generated from the spec checkout, and nothing else, lives here:
-# the JSON-LD data written by scripts/build-spec-data.mjs, and the TypeScript
+# the JSON-LD data written by scripts/build-spec-data.mjs, the TypeScript
 # tables scripts/build-record-types.mjs and scripts/build-terms.mjs derive from
-# it under src/spec/derived/.
+# it under src/spec/derived/, and the build's findings about spec — the
+# per-generator files under src/spec/diagnostics/ and the merged
+# src/spec/diagnostics.json and .md — which are read by nobody but the people
+# fixing spec and this SDK, and which scripts/copy-spec-data.mjs keeps out of
+# dist/.
 #
 # One directory, one rule, no exceptions. Not committed on purpose: a generated
 # artifact cannot fall behind its source, because there is no copy to go stale.

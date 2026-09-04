@@ -2,14 +2,17 @@
  * Derive the JSON-key→predicate tables from the shipped contexts and ontologies.
  *
  * PER VOCABULARY, NOT ONE FLAT MAP, and that is forced rather than chosen.
- * Thirty-four JSON keys resolve to DIFFERENT predicates in different contexts —
+ * Dozens of JSON keys resolve to DIFFERENT predicates in different contexts —
  * `notes` is `clinical:notes` under `clinical` and `health:notes` under
- * `health`, and `status`, `severity`, `sourceRecordId` and thirty more are the
+ * `health`, and `status`, `severity`, `sourceRecordId` and many more are the
  * same. A single `key -> predicate` map would have to pick one, silently, and
  * write the wrong predicate for every record of the other class. That is #42's
  * "six JSON keys mean a different predicate depending on the record's class"
  * measured across the whole corpus, and `jayostis/spec#4` is the proposal that
- * would fix it properly with JSON-LD 1.1 type-scoped terms.
+ * would fix it properly with JSON-LD 1.1 type-scoped terms. How many keys is
+ * not written here — a count in a comment goes stale the way "28 comments" did
+ * — it is measured on every build and recorded, key by key, as
+ * `term-cross-context-conflict` findings (`docs/spec-diagnostics.md`).
  *
  * Until then a record resolves its keys against `core` plus its own class's
  * vocabulary, which is what JSON-LD 1.0 can express and what the thin slice
@@ -28,29 +31,64 @@
  * EMITTED AS A PARSED STRING, not as an object literal. #76 measured tsc
  * inferring 41,029 types for a 351K `as const` module; a single string literal
  * costs one, and `JSON.parse` of 138K is about a millisecond at load.
+ *
+ * WHAT IT REPORTS, besides writing the table. Every defect this script finds
+ * on the way — a term whose value is prose, a range it cannot classify, a key
+ * that conflicts across contexts, and the sweeps at the bottom — goes through
+ * `scripts/lib/diagnostics.mjs` as well as being printed. The detectors are
+ * `scripts/lib/detectors.mjs` functions over the graph and the term sightings,
+ * so a fixture can be handed to them; this script's job is to call them with
+ * the real data and attach the prose and the files to open. None of them is a
+ * refusal: the table is written whatever they say.
  */
 
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  CASCADE_NAMESPACE, RDFS_RANGE as RANGE, crossContextConflicts, propertiesWithNoRange,
+  rangesWithUnrecognizedTypedMembers, termsWithNoTypeInfo, undeclaredPredicates,
+} from './lib/detectors.mjs';
+import { openFindings } from './lib/diagnostics.mjs';
+import { localNameOf, namespaceOwners } from './lib/iri.mjs';
+import { readPredicatesModule } from './lib/predicates-module.mjs';
+import { specLocations } from './lib/spec-locations.mjs';
+import {
+  contextPrefixes, expandCurie, isPrefixDeclaration, mergedOntologyGraph, specDataLayout,
+} from './lib/spec-source.mjs';
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DATA = specDataDir(root);
-const CONTEXTS = join(DATA, 'contexts');
-const ONTOLOGIES = join(DATA, 'ontologies');
-const OUT = join(DATA, 'derived/terms.generated.ts');
+const { ontologies: ONTOLOGIES, contexts: CONTEXTS, derived: DERIVED, diagnostics: DIAGNOSTICS } = specDataLayout(root);
+const OUT = join(DERIVED, 'terms.generated.ts');
 
 const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
-const RANGE = 'http://www.w3.org/2000/01/rdf-schema#range';
 const DOMAIN = 'http://www.w3.org/2000/01/rdf-schema#domain';
 const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class';
 const OWL_NAMED_INDIVIDUAL = 'http://www.w3.org/2002/07/owl#NamedIndividual';
-const CASCADE_NAMESPACE = 'https://ns.cascadeprotocol.org/';
 
-import { localNameOf, namespaceOwners } from './lib/iri.mjs';
-import {
-  contextPrefixes, expandCurie, isPrefixDeclaration, mergedOntologyGraph, specDataDir,
-} from './lib/spec-source.mjs';
+/**
+ * The SDK's hand-kept predicate table, cross-referenced against the ontology
+ * for `declared-predicate-not-in-ontology`. `CASCADE_PREDICATES_FILE` points a
+ * test at a stand-in in the same shape; the default is the real file.
+ */
+const PREDICATES_FILE = process.env.CASCADE_PREDICATES_FILE
+  ? resolve(process.env.CASCADE_PREDICATES_FILE)
+  : join(root, 'src/vocabularies/namespaces.ts');
+
+/**
+ * The prefixes `src/jsonld/context.ts` excludes from the generated context
+ * (`DRAFT_CONTEXT_EXCLUDED_PREFIXES`): draft vocabularies this SDK registers
+ * so Turtle round-trips, deliberately absent from spec's ontologies. MIRRORED,
+ * not imported — `scripts/` cannot import a `src/` TypeScript module — so a
+ * prefix graduating there has to be removed here as well.
+ */
+const DRAFT_CONTEXT_EXCLUDED_PREFIXES = new Set(['evidence', 'workbench', 'oa', 'ical', 'skos']);
+
+// Opened first: a crash anywhere below leaves no findings file rather than
+// the previous run's, which is what lets the collector tell the two apart.
+const findings = openFindings({ source: 'build-terms', dir: DIAGNOSTICS });
+const manifest = JSON.parse(readFileSync(join(root, 'spec-sources.json'), 'utf-8'));
 
 const contextFiles = readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'));
 
@@ -65,6 +103,7 @@ const expand = (id) => expandCurie(prefixes, id);
 // ── the ontology graph, for ranges and for a range class's members ───────────
 
 const nodes = mergedOntologyGraph(ONTOLOGIES);
+const locations = specLocations(ONTOLOGIES, manifest);
 
 const rangeOf = (predicate) => nodes.get(predicate)?.[RANGE]?.[0]?.['@id'];
 
@@ -106,17 +145,15 @@ for (const node of nodes.values()) {
  * `cascade:consentScope` carrying `"SocialHistoryConsent"` resolved to
  * nothing.
  *
- * `health:WalkingSteadinessLevel` is NOT one of the six: its members
- * (`WalkingSteadinessLow/OK/Unknown/VeryLow`) carry only the range type, with
- * no `owl:NamedIndividual` in their `@type` array, so `isNamedIndividual`
- * evaluates false for all of them below. That is currently latent only
- * because the context's `walkingSteadiness` term resolves to an unrelated
- * `xsd:string` range rather than this enum range — a separate, pre-existing
- * naming mismatch that happens to keep this class from ever being looked up
- * here. If that mismatch is fixed independently, this class would wrongly
- * fall into `unclassifiableRanges` with a `specFix` message asking spec to
- * add members it has already published as plain-typed individuals, not
- * named individuals.
+ * A THIRD FORM EXISTS AND IS NOT RECOGNISED HERE: `health:WalkingSteadinessLevel`'s
+ * members carry only the range type, with no `owl:NamedIndividual`, so
+ * `isNamedIndividual` is false for all of them. It is latent only because the
+ * context's `walkingSteadiness` term resolves to an unrelated `xsd:string`
+ * range, so this class is never looked up; the day that mismatch is fixed it
+ * would fall into `unclassifiableRanges` asking spec for members it has
+ * already published. `rangesWithUnrecognizedTypedMembers` sweeps EVERY range
+ * for that form — not this function, which only ever sees a reached range —
+ * and reports it as `range-has-unrecognized-typed-members`.
  */
 function membersOf(rangeIri) {
   // A PROV root is not a code list. `rdfs:range prov:Entity` says "the value is
@@ -170,9 +207,18 @@ function specFixFor(rangeIri) {
 const vocabularies = {};
 const valueSets = {};
 const unclassifiableRanges = {};
-const conflicts = [];
 const unresolvable = [];
-const seen = new Map();
+
+/**
+ * Every resolved context term, as the detectors see it: which file, which
+ * key, which predicate, and whether the context typed it. Kept for the
+ * sweeps below, which run after the loop because only then can a namespace
+ * be mapped to the file to open.
+ */
+const sightings = [];
+
+/** range IRI -> the terms (`vocabulary:term`) whose predicate has that range. */
+const rangeReachedBy = new Map();
 
 for (const file of contextFiles) {
   const vocabulary = file.replace(/\.jsonld$/, '');
@@ -193,18 +239,18 @@ for (const file of contextFiles) {
     // predicate is a sentence, which no shape can judge and no reader can
     // resolve.
     //
-    // Not hypothetical. At the revision `conformance/scripts/SPEC_PIN` names,
-    // eight terms across three contexts are section headers written as term
-    // definitions — `"__comment_core": "=== Core Vocabulary (cascade:) ==="` and
-    // seven more. That is `jayostis/spec#48`, fixed upstream in spec PR #49 and
-    // not yet pinned, so a build here still meets them.
+    // Not hypothetical. At spec `9b13ae4`, eight terms across three contexts
+    // were section headers written as term definitions —
+    // `"__comment_core": "=== Core Vocabulary (cascade:) ==="` and seven more.
+    // That is `jayostis/spec#48`, fixed upstream in spec PR #49 and gone at the
+    // current pin; the pin will move again, so the path stays.
     //
-    // SKIPPED AND COUNTED, not refused. The pinned data legitimately contains
-    // them and the fix is already upstream, so failing the build would break CI
-    // over something no longer wrong at spec's HEAD. The count is printed on
-    // every run instead, and reaches zero on its own when the pin moves.
+    // SKIPPED AND RECORDED, not refused. The pinned data may legitimately
+    // contain them, so failing the build would break CI over something spec
+    // has already fixed. Printed on every run, and a `term-value-not-iri`
+    // finding per term, which reaches zero on its own when the pin moves.
     if (!/^[A-Za-z][A-Za-z0-9+.-]*:\S*$/.test(predicate)) {
-      unresolvable.push(`${vocabulary}: ${JSON.stringify(term)} -> ${JSON.stringify(id)}`);
+      unresolvable.push({ file, vocabulary, term, id });
       continue;
     }
 
@@ -224,6 +270,9 @@ for (const file of contextFiles) {
     // class's subclasses ARE the permitted values, and without it
     // `"ClinicalGenerated"` has nowhere to resolve against.
     if (range) entry.range = range;
+    if (range) {
+      (rangeReachedBy.get(range) ?? rangeReachedBy.set(range, new Set()).get(range)).add(`${vocabulary}:${term}`);
+    }
     if (range && !valueSets[range]) {
       const members = membersOf(range);
       if (members) {
@@ -239,21 +288,158 @@ for (const file of contextFiles) {
     }
 
     terms[term] = entry;
-
-    // Compared against the MOST RECENT predicate seen for this term, not the
-    // first: `seen` used to be written only in the non-conflicting branch, so
-    // once a term had one conflict on record it was never compared again — a
-    // term redefined across three or more contexts (A, then B, then C) missed
-    // the B/C transition entirely, and a later repeat of B would be re-flagged
-    // against A as if it were new. Updating `seen` unconditionally makes each
-    // visit compare against what actually preceded it.
-    const previous = seen.get(term);
-    if (previous && previous !== predicate) conflicts.push({ term, a: previous, b: predicate });
-    seen.set(term, predicate);
+    sightings.push({ file, vocabulary, term, predicate, typed: Boolean(entry.type) });
   }
 
   vocabularies[vocabulary] = terms;
 }
+
+// ── the findings ─────────────────────────────────────────────────────────────
+//
+// After the loop, all of them, because a location is a file to open and the
+// map from an IRI to its ontology file is only worth consulting once every
+// context has been read. Each detector returns data; the prose, the owner and
+// the files are attached here.
+
+for (const { file, vocabulary, term, id } of unresolvable) {
+  findings.record({
+    code: 'term-value-not-iri',
+    severity: 'info',
+    owner: 'spec',
+    subject: `${vocabulary}:${term}`,
+    detail: `${JSON.stringify(term)} in ${file} resolves to ${JSON.stringify(id)}, which is not an IRI; `
+      + 'written into a pod it would be a triple whose predicate is a sentence. The build skips it.',
+    specFix: `Remove ${JSON.stringify(term)} from contexts/v1/${file}: a context term's value must be `
+      + 'an IRI or a term definition (jayostis/spec#48).',
+    location: [locations.context(file)],
+  });
+}
+
+// THE ONE CODE THAT BLOCKS CONVERSION: `src/converter/to-rdf.ts` refuses a
+// value for a property whose range is here, so `error`.
+for (const [range, { specFix }] of Object.entries(unclassifiableRanges)) {
+  const reachedBy = [...rangeReachedBy.get(range) ?? []].sort();
+  findings.record({
+    code: 'unclassifiable-range',
+    severity: 'error',
+    owner: 'spec',
+    subject: range,
+    detail: `${range} is the rdfs:range of the property behind ${reachedBy.join(', ')}, and is neither `
+      + 'a code list (no subclasses, no named individuals) nor a structured class (no rdfs:domain-linked '
+      + 'property), so a converter cannot express a value for it and refuses rather than guess.',
+    specFix,
+    reachedBy,
+    location: locations.ontologyOf(range),
+  });
+}
+
+// ONE ROW PER KEY, with every predicate it resolved to. Property terms only:
+// `SocialHistoryRecord` is `record-class-name-collision`'s row already.
+const conflicts = crossContextConflicts(nodes, sightings);
+for (const { term, predicates, files } of conflicts) {
+  findings.record({
+    code: 'term-cross-context-conflict',
+    severity: 'warning',
+    owner: 'spec',
+    subject: term,
+    detail: `"${term}" resolves to ${predicates.length} different predicates across ${files.length} contexts `
+      + `(${predicates.join(', ')}); a flat key-to-predicate map would pick one silently and write the `
+      + 'wrong predicate for every record of the other class.',
+    specFix: `Publish one meaning per key — JSON-LD 1.1 type-scoped terms (jayostis/spec#4) — or rename `
+      + `one side of "${term}".`,
+    predicates,
+    location: files.map((file) => locations.context(file)),
+  });
+}
+
+// `warning`, not `error`: `src/converter/to-rdf.ts` infers a datatype from the
+// runtime value for exactly this case and SUCCEEDS, with nothing in spec
+// behind the choice — a silent approximation, not a blocked conversion.
+for (const { predicate, reachedBy, files } of termsWithNoTypeInfo(nodes, sightings)) {
+  findings.record({
+    code: 'term-no-type-info',
+    severity: 'warning',
+    owner: 'spec',
+    subject: predicate,
+    detail: `${predicate} (reached by ${reachedBy.join(', ')}) has no @type in any context that publishes `
+      + 'it and no rdfs:range in the ontology, so nothing says what shape its value takes; a converter '
+      + 'infers a datatype from the runtime value.',
+    specFix: `Add rdfs:range to ${predicate} in the ontology, or an explicit @type to its term in `
+      + `${files.join(' and ')}.`,
+    reachedBy,
+    location: [...locations.ontologyOf(predicate), ...files.map((file) => locations.context(file))],
+  });
+}
+
+// Spec debt worth surfacing, not a blocker. `reachedBy` is rendered empty or
+// not: neither "nothing uses it yet" nor "used by X" is a safe sentence.
+for (const { iri, types, reachedBy } of propertiesWithNoRange(nodes, sightings)) {
+  findings.record({
+    code: 'property-no-range',
+    severity: 'info',
+    owner: 'spec',
+    subject: iri,
+    detail: `${iri} is declared ${types.map(localNameOf).join(' and ')} with no rdfs:range, so no writer `
+      + `can type its values and no shape can judge them; ${reachedBy.length === 0
+        ? 'no context term reaches it'
+        : `reached by ${reachedBy.join(', ')}`}.`,
+    specFix: `Add rdfs:range to ${iri}.`,
+    reachedBy,
+    location: locations.ontologyOf(iri),
+  });
+}
+
+// A tooling regression-guard through the same channel as everything else.
+for (const { range, members } of rangesWithUnrecognizedTypedMembers(nodes)) {
+  findings.record({
+    code: 'range-has-unrecognized-typed-members',
+    severity: 'info',
+    owner: 'reconcile',
+    subject: range,
+    detail: `${members.length} node(s) are typed directly to ${range} without owl:NamedIndividual and `
+      + 'without rdfs:subClassOf — a third way of publishing a code list that membersOf() in '
+      + 'scripts/build-terms.mjs does not recognise, so the range reads as having no members.',
+    specFix: 'Not owed to spec outright: confirm whether these members were meant to carry '
+      + 'owl:NamedIndividual the way cascade:ConsentScope\'s do. If so, add it in the ontology; if not, '
+      + 'membersOf() should learn this form and this check be updated to match.',
+    members,
+    location: [...locations.ontologyOf(range), 'sdk:scripts/build-terms.mjs'],
+  });
+}
+
+// The SDK's claim about spec, checked against spec. `sdk` when no context
+// carries the IRI either (every hit at this pin); `reconcile` when one does,
+// since then spec disagrees with itself.
+const predicatesModule = readPredicatesModule(PREDICATES_FILE);
+const predicatesPath = `sdk:${relative(root, PREDICATES_FILE).split('\\').join('/')}`;
+const undeclared = undeclaredPredicates(nodes, predicatesModule.expanded, DRAFT_CONTEXT_EXCLUDED_PREFIXES, sightings);
+for (const { iri, keys, inContexts } of undeclared) {
+  const inContext = inContexts.length > 0;
+  findings.record({
+    code: 'declared-predicate-not-in-ontology',
+    severity: 'warning',
+    owner: inContext ? 'reconcile' : 'sdk',
+    subject: iri,
+    detail: `${predicatesPath.slice(4)} registers ${keys.join(', ')}, and no spec ontology declares ${iri} as `
+      + `a property${inContext
+        ? `, although ${inContexts.join(' and ')} carr${inContexts.length === 1 ? 'ies' : 'y'} it — spec disagrees with itself`
+        : ', and no spec context carries it either — spec has never heard of it'}.`,
+    specFix: inContext
+      ? `Settle which half of spec is right: declare ${iri} in the ontology, or drop it from `
+        + `${inContexts.join(' and ')}.`
+      : `Stop registering ${iri} in this SDK (and remove the model field that writes it), or take the `
+        + 'property to spec.',
+    location: [
+      predicatesPath,
+      ...locations.ontologyOf(iri),
+      ...inContexts.map((file) => locations.context(file)),
+    ],
+  });
+}
+
+const recorded = findings.close();
+
+// ── the generated module ─────────────────────────────────────────────────────
 
 const payload = JSON.stringify({
   vocabularies,
@@ -274,14 +460,11 @@ const payload = JSON.stringify({
   prefixes: Object.fromEntries([...prefixes].sort()),
 });
 
-// Distinct KEYS, not conflict transitions: a term redefined across three or
-// more contexts now records one entry per transition (see the fix above), so
-// `conflicts.length` can exceed the number of JSON keys actually affected.
-// The docblock below states a key count and names examples, so it is built
-// from the deduplicated set — and the "and N others" clause is only appended
-// when there IS an "others", so a corpus with two or fewer conflicting keys
-// renders a plain list instead of a negative count.
-const conflictedKeys = [...new Set(conflicts.map((c) => c.term))].sort();
+// Distinct KEYS, from the detector — one entry per conflicted property key,
+// so this count is the count the docblock states. The "and N others" clause
+// is only appended when there IS an "others", so a corpus with two or fewer
+// conflicting keys renders a plain list instead of a negative count.
+const conflictedKeys = conflicts.map((c) => c.term);
 const exampleKeys = conflictedKeys.slice(0, 3);
 const remainingKeys = conflictedKeys.length - exampleKeys.length;
 const conflictedKeysPhrase = exampleKeys.length === 0
@@ -366,13 +549,16 @@ export const SPEC_TERMS: SpecTerms = JSON.parse(
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, source, 'utf-8');
 
+// ── what a person watching the build sees ────────────────────────────────────
+//
+// Printing stays: every finding above is also in the findings file, but a
+// build that went quiet would be one nobody reads.
+
 if (unresolvable.length > 0) {
   console.log(
-    `  NOTE: ${unresolvable.length} term(s) skipped, whose value is not an IRI — jayostis/spec#48,`
-    + ` fixed upstream and not yet pinned:
-`
-    + unresolvable.map((line) => `    ${line}`).join(`
-`),
+    `  NOTE: ${unresolvable.length} term(s) skipped, whose value is not an IRI — jayostis/spec#48 `
+    + '(term-value-not-iri):\n'
+    + unresolvable.map(({ vocabulary, term, id }) => `    ${vocabulary}: ${JSON.stringify(term)} -> ${JSON.stringify(id)}`).join('\n'),
   );
 }
 
@@ -385,9 +571,17 @@ const unclassifiableEntries = Object.entries(unclassifiableRanges);
 if (unclassifiableEntries.length > 0) {
   console.warn(
     `\n  NOTE: ${unclassifiableEntries.length} range(s) are neither a code list nor a structured `
-    + 'class with any field spec has declared:\n'
+    + 'class with any field spec has declared (unclassifiable-range):\n'
     + unclassifiableEntries.map(([range, { specFix }]) => `    ${range}\n      ${specFix}`).join('\n')
     + '\n',
+  );
+}
+
+if (undeclared.length > 0) {
+  console.warn(
+    `  NOTE: ${undeclared.length} predicate(s) registered in ${predicatesPath.slice(4)} that no spec `
+    + 'ontology declares (declared-predicate-not-in-ontology):\n'
+    + undeclared.map(({ iri, inContexts }) => `    ${iri}${inContexts.length > 0 ? ` (in ${inContexts.join(', ')})` : ''}`).join('\n'),
   );
 }
 
@@ -395,6 +589,7 @@ console.log(
   `build-terms: ${Object.keys(vocabularies).length} vocabularies, `
   + `${Object.values(vocabularies).reduce((n, t) => n + Object.keys(t).length, 0)} terms, `
   + `${Object.keys(valueSets).length} value sets, ${unclassifiableEntries.length} unclassifiable `
-  + `ranges, ${conflicts.length} cross-context conflicts, `
-  + `${Math.round(payload.length / 1024)}K -> src/spec/derived/terms.generated.ts`,
+  + `ranges, ${conflictedKeys.length} cross-context conflicts, `
+  + `${Math.round(payload.length / 1024)}K -> src/spec/derived/terms.generated.ts; `
+  + `${recorded} finding(s) -> src/spec/diagnostics/build-terms.json`,
 );

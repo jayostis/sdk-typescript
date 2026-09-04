@@ -32,9 +32,18 @@
  *
  * THE NAME IS THE PUBLISHED CONTEXT TERM, falling back to the local name. A
  * context is a name→IRI mapping and that is the whole of its job, so where spec
- * publishes a name for a class, that name wins. Nine record classes are named
- * by no context (spec#50 gap 3a); their local name is used, and for all nine it
- * is the name this SDK already used.
+ * publishes a name for a class, that name wins. A class no context names gets
+ * its local name — and a `record-class-no-published-name` finding (spec#50 gap
+ * 3a), because a fallback nobody reports becomes permanent. At the previous
+ * pin nine classes fell back; at this one none do, and a comment could not
+ * have noticed the change, which is why it is a finding rather than a count
+ * written here.
+ *
+ * WHAT ELSE IS REPORTED, through `scripts/lib/diagnostics.mjs`: the name
+ * collision below, and a deprecated record class whose `rdfs:seeAlso` names
+ * no live record class (`deprecated-class-unresolved-successor`) — the loop
+ * that builds `supersedes` used to do nothing on a miss. All three are
+ * findings, not refusals: the table is written whatever they say.
  *
  * A NAME TWO CLASSES CLAIM IS WRITTEN OUT, NOT REFUSED. Spec publishes
  * `SocialHistoryRecord` for a `clinical:` class and a `health:` one, and a
@@ -52,19 +61,22 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { OWL_DEPRECATED as DEPRECATED, RDFS_SEE_ALSO as SEE_ALSO, unresolvedSuccessors } from './lib/detectors.mjs';
+import { openFindings } from './lib/diagnostics.mjs';
 import { duplicateNamesAmong } from './lib/duplicate-names.mjs';
 import { localNameOf } from './lib/iri.mjs';
 import { recordPopulation } from './lib/record-population.mjs';
-import { contextPrefixes, expandCurie, mergedOntologyGraph, specDataDir } from './lib/spec-source.mjs';
+import { specLocations } from './lib/spec-locations.mjs';
+import { contextPrefixes, expandCurie, mergedOntologyGraph, specDataLayout } from './lib/spec-source.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DATA = specDataDir(root);
-const ONTOLOGIES = join(DATA, 'ontologies');
-const CONTEXTS = join(DATA, 'contexts');
-const OUT = join(DATA, 'derived/record-types.generated.ts');
+const { ontologies: ONTOLOGIES, contexts: CONTEXTS, derived: DERIVED, diagnostics: DIAGNOSTICS } = specDataLayout(root);
+const OUT = join(DERIVED, 'record-types.generated.ts');
 
-const SEE_ALSO = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
-const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
+// Opened first: a crash anywhere below leaves no findings file rather than
+// the previous run's, which is what lets the collector tell the two apart.
+const findings = openFindings({ source: 'build-record-types', dir: DIAGNOSTICS });
+const manifest = JSON.parse(readFileSync(join(root, 'spec-sources.json'), 'utf-8'));
 
 // Prefix -> namespace, read out of the contexts rather than written here, and
 // shared with `scripts/build-terms.mjs` via `scripts/lib/spec-source.mjs` —
@@ -79,11 +91,15 @@ if (NAMESPACES.size === 0) {
   );
 }
 
-/** `class IRI -> the JSON names the contexts publish for it`. */
+/**
+ * `class IRI -> the JSON names the contexts publish for it`, each with the
+ * context file it came from — the file is what a finding's `location` points
+ * a spec maintainer at.
+ */
 function publishedNames() {
   const names = new Map();
 
-  for (const file of readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'))) {
+  for (const file of readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld')).sort()) {
     const document = JSON.parse(readFileSync(join(CONTEXTS, file), 'utf-8'));
 
     for (const [term, value] of Object.entries(document['@context'] ?? document)) {
@@ -92,7 +108,7 @@ function publishedNames() {
 
       const iri = expandCurie(NAMESPACES, id);
 
-      names.set(iri, [...(names.get(iri) ?? []), term]);
+      names.set(iri, [...(names.get(iri) ?? []), { term, file }]);
     }
   }
 
@@ -100,8 +116,10 @@ function publishedNames() {
 }
 
 const contextNames = publishedNames();
+const contextFiles = new Set(readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld')));
 
 const nodes = mergedOntologyGraph(ONTOLOGIES);
+const locations = specLocations(ONTOLOGIES, manifest);
 
 const derived = [];
 
@@ -113,7 +131,29 @@ for (const [iri, node] of nodes) {
   if (!population.classes.has(iri) || deprecated) continue;
 
   const localName = localNameOf(iri);
-  const published = contextNames.get(iri) ?? [];
+  const published = (contextNames.get(iri) ?? []).map(({ term }) => term);
+
+  // THE FALLBACK IS RIGHT AND THE SILENCE IS NOT. The local name is the
+  // correct stand-in; what must not happen is nobody hearing that it is one.
+  if (published.length === 0) {
+    // The context that should carry the name is the class's own vocabulary's,
+    // where that vocabulary has one.
+    const ownContexts = locations.vocabulariesOf(iri)
+      .filter((vocabulary) => contextFiles.has(`${vocabulary}.jsonld`))
+      .map((vocabulary) => locations.context(vocabulary));
+
+    findings.record({
+      code: 'record-class-no-published-name',
+      severity: 'warning',
+      owner: 'spec',
+      subject: iri,
+      detail: `No context publishes a JSON name for ${iri}; the record-type table uses the local `
+        + `name "${localName}" as a stand-in, which is a name spec never agreed to.`,
+      specFix: `Add a context entry naming ${iri} (spec#50 gap 3a), or confirm that "${localName}" `
+        + 'is the intended published name.',
+      location: [...locations.ontologyOf(iri), ...ownContexts],
+    });
+  }
 
   derived.push({
     iri,
@@ -142,6 +182,28 @@ for (const [iri, node] of nodes) {
     const superseding = target && byIri.get(target);
     if (superseding) superseding.supersedes.push(iri);
   }
+}
+
+// A MISS USED TO DO NOTHING. A deprecated record class none of whose targets
+// is a live record class — or with no `rdfs:seeAlso` at all — simply failed
+// to appear in any `supersedes` array, and a reader of old records had no
+// forwarding address and no report that one was missing. Per class, not per
+// target, and record population only: see `unresolvedSuccessors`. Nothing at
+// this pin; a tripwire for the next spec change.
+for (const { iri, targets } of unresolvedSuccessors(nodes, population.classes, new Set(byIri.keys()))) {
+  findings.record({
+    code: 'deprecated-class-unresolved-successor',
+    severity: 'warning',
+    owner: 'spec',
+    subject: iri,
+    detail: targets.length === 0
+      ? `${iri} is deprecated and has no rdfs:seeAlso, so nothing says which class superseded it.`
+      : `${iri} is deprecated and its rdfs:seeAlso targets ${targets.join(', ')}, none of which is `
+        + 'a live record class, so its succession is lost.',
+    specFix: `Point rdfs:seeAlso on ${iri} at the live record class that supersedes it, or state `
+      + 'that the class is retired with no successor.',
+    location: locations.ontologyOf(iri),
+  });
 }
 
 derived.sort((a, b) => a.name.localeCompare(b.name));
@@ -236,6 +298,28 @@ const banner = [
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, banner, 'utf-8');
 
+// Recorded as well as printed: the print is for a person watching the build,
+// the finding is for the worklist. `claimants` is carried as the array the
+// table has, not flattened into prose.
+for (const { name, claimants } of collisions) {
+  findings.record({
+    code: 'record-class-name-collision',
+    severity: 'warning',
+    owner: 'spec',
+    subject: name,
+    detail: `spec publishes "${name}" for ${claimants.length} record classes — ${claimants.join(' and ')} — `
+      + 'and a context key can only mean one IRI, so one of them has no usable published name.',
+    specFix: `Publish a distinct context key for each class that claims "${name}" (spec#50 gap 3c).`,
+    claimants,
+    location: claimants.flatMap((claimant) => [
+      ...locations.ontologyOf(claimant),
+      ...(contextNames.get(claimant) ?? []).filter(({ term }) => term === name).map(({ file }) => locations.context(file)),
+    ]),
+  });
+}
+
+const recorded = findings.close();
+
 // WRITTEN ANYWAY, AND SAID OUT LOUD. A refusal here would stop every
 // uncontested class over one ambiguous name — the same cost as throwing at
 // import, paid one stage earlier — so the table ships with the collision in it
@@ -256,5 +340,6 @@ if (collisions.length > 0) {
 
 console.log(
   `build-record-types: ${live.length} record classes by ${population.rule}, `
-  + `${collisions.length} contested name(s) -> src/spec/derived/record-types.generated.ts`,
+  + `${collisions.length} contested name(s) -> src/spec/derived/record-types.generated.ts; `
+  + `${recorded} finding(s) -> src/spec/diagnostics/build-record-types.json`,
 );

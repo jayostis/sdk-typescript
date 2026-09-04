@@ -21,6 +21,12 @@
  * uncompiled `.ts` next to its own output in the published package — a second,
  * stale copy of a module consumers can import.
  *
+ * NOT THE DIAGNOSTICS. `src/spec/diagnostics/*.json`, `src/spec/diagnostics.json`
+ * and `src/spec/diagnostics.md` are the build's report on spec — a worklist
+ * for the people fixing spec and this SDK, not data a consumer reads — and
+ * `package.json` ships `dist` whole, so without this exclusion they would go
+ * out in the tarball. `tests/scripts/copy-spec-data.test.ts` says so.
+ *
  * REFUSES ON NO DATA. `src/spec/` is gitignored and generated, so the state
  * this has to guard against is a build where `build-spec-data` did not run: the
  * package would ship with no ontologies, and everything reading them would
@@ -28,7 +34,7 @@
  * reads as an answer is the failure mode this repository keeps finding.
  */
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import { dirname, extname, join, relative } from 'node:path';
+import { dirname, extname, join, relative, sep } from 'node:path';
 
 import { walk } from './lib/walk.mjs';
 
@@ -38,7 +44,10 @@ const OUT = 'dist/spec';
 /** A file tsc will not carry, and therefore one this has to. */
 const isData = (file) => ['.jsonld', '.json'].includes(extname(file));
 
-const data = existsSync(SRC) ? walk(SRC).filter(isData) : [];
+/** The build's findings about spec: `src/spec/diagnostics*`, never shipped. */
+const isDiagnostics = (file) => relative(SRC, file).split(sep)[0]?.startsWith('diagnostics');
+
+const data = existsSync(SRC) ? walk(SRC).filter((file) => isData(file) && !isDiagnostics(file)) : [];
 
 if (data.length === 0) {
   console.error(
