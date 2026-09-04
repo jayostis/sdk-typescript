@@ -247,6 +247,14 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
       canonicalIdentityString: string;
       expectedUri: string;
     }>;
+    keyOrderVectors?: Array<{
+      label: string;
+      proves: string[];
+      resourceType: string;
+      contentFields: Record<string, string | string[]>;
+      canonicalIdentityString: string;
+      expectedUri: string;
+    }>;
   };
 
   // Without this the loop below generates zero `it()` blocks against a fixture
@@ -256,6 +264,28 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
   it('the multi-valued vectors are actually loaded', () => {
     expect(fixtures.multiValuedFieldVectors, 'conformance test-vectors.json must carry multiValuedFieldVectors (added with core v3.6)').toBeDefined();
     expect(fixtures.multiValuedFieldVectors!.length).toBeGreaterThan(0);
+  });
+
+  it('the key-order vectors are actually loaded', () => {
+    expect(fixtures.keyOrderVectors, 'conformance test-vectors.json must carry keyOrderVectors').toBeDefined();
+    expect(fixtures.keyOrderVectors!.length).toBeGreaterThan(0);
+  });
+
+  // The astral vectors are the ones that discriminate code POINT order from
+  // UTF-16 code UNIT order, and they are the only reason this file iterates
+  // keyOrderVectors at all. A fixture checkout that had lost them would leave
+  // every remaining vector passing, which is exactly the shape of a green run
+  // that proves nothing — so their presence is asserted by label.
+  it('both astral-plane vectors are present, at the key sort and at the member sort', () => {
+    const keyLabels = (fixtures.keyOrderVectors ?? []).map((v) => v.label);
+    expect(keyLabels, 'keyOrderVectors must carry the astral/BMP key vector').toContain(
+      'key-order-astral-vs-bmp',
+    );
+    const memberLabels = (fixtures.multiValuedFieldVectors ?? []).map((v) => v.label);
+    expect(
+      memberLabels,
+      'multiValuedFieldVectors must carry the astral/BMP member vector',
+    ).toContain('condition-member-order-astral-vs-bmp');
   });
 
   for (const vector of fixtures.primitiveVectors) {
@@ -283,6 +313,21 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
   // other implementation.
   for (const vector of fixtures.multiValuedFieldVectors ?? []) {
     it(`multiValuedFieldVector: ${vector.label} [${vector.proves.join(', ')}]`, () => {
+      expect(contentHashedUri(vector.resourceType, vector.contentFields)).toBe(vector.expectedUri);
+    });
+  }
+
+  // Key-order vectors, fed as fields for the same reason: the vector is only
+  // satisfied if this SDK sorts the keys itself and lands on the shared answer.
+  // Measured against what this branch shipped, a `localeCompare` key sort:
+  // `key-order-underscore-after-uppercase` and `key-order-bmp-non-ascii-control`
+  // both failed, because a collator reweights punctuation and folds accents.
+  // `key-order-astral-vs-bmp` PASSED there — this ICU build happened to agree
+  // with code point on that one pair — which is why the collator has to go
+  // rather than be spot-fixed: it was right by accident, and another ICU build
+  // is free to be wrong.
+  for (const vector of fixtures.keyOrderVectors ?? []) {
+    it(`keyOrderVector: ${vector.label} [${vector.proves.join(', ')}]`, () => {
       expect(contentHashedUri(vector.resourceType, vector.contentFields)).toBe(vector.expectedUri);
     });
   }
