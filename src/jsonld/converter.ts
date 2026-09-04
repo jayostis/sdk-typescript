@@ -7,7 +7,7 @@
  * @module jsonld
  */
 
-import { NAMESPACES, PROPERTY_PREDICATES, buildReversePredicateMap } from '../vocabularies/namespaces.js';
+import { NAMESPACES, PROPERTY_PREDICATES, buildReversePredicateMap, legacyRdfTypeUriFor } from '../vocabularies/namespaces.js';
 import { recordTypeFor, recordTypeForClass } from '../record-types/index.js';
 import { termFor } from '../terms/index.js';
 import { CONTEXT_URI } from './context.js';
@@ -85,15 +85,21 @@ export function curieOf(iri: string): string {
  * ```
  */
 export function toJsonLd(record: CascadeEntity): object {
-  const recordType = recordTypeFor(record.type);
-  if (!recordType) {
+  // FALLS BACK TO THE LEGACY TABLE for a name spec's derived table has never
+  // heard of, on the same terms `acceptedClassUris` in
+  // `src/deserializer/turtle-parser.ts` does (#89, `SocialHistoryConsent`):
+  // `serializeRecord` already writes this class from `TYPE_MAPPING` when
+  // `recordTypeFor` answers `undefined`, so refusing to write it here would
+  // make Turtle and JSON-LD disagree on which records this SDK can produce.
+  const rdfTypeUri = recordTypeFor(record.type)?.rdfTypeUri ?? legacyRdfTypeUriFor(record.type);
+  if (!rdfTypeUri) {
     throw new Error(`Unknown record type: ${record.type}. No TYPE_MAPPING found.`);
   }
 
   const doc: Record<string, unknown> = {
     '@context': CONTEXT_URI,
     '@id': record.id,
-    '@type': curieOf(recordType.rdfTypeUri),
+    '@type': curieOf(rdfTypeUri),
   };
 
   // Widened once, as `serializeRecord` does at turtle-serializer.ts:642. A term

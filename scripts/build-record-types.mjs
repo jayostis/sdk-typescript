@@ -55,6 +55,7 @@ import { fileURLToPath } from 'node:url';
 import { duplicateNamesAmong } from './lib/duplicate-names.mjs';
 import { localNameOf } from './lib/iri.mjs';
 import { recordPopulation } from './lib/record-population.mjs';
+import { contextPrefixes, mergedOntologyGraph } from './lib/spec-source.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ONTOLOGIES = join(root, 'src/spec/ontologies');
@@ -64,58 +65,17 @@ const OUT = join(root, 'src/spec/derived/record-types.generated.ts');
 const SEE_ALSO = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
 
-/**
- * Prefix → namespace, read out of the contexts rather than written here.
- *
- * A JSON-LD context declares its own prefixes as ordinary terms whose value is
- * an IRI — `"clinical": "https://ns.cascadeprotocol.org/clinical/v1#"` — so the
- * map a context's CURIEs need is published in the same file that uses them. A
- * hand-written copy would be one more transcription of a spec fact, in the
- * script whose whole purpose is to stop transcribing them.
- */
-function prefixes() {
-  const map = new Map();
+// Prefix -> namespace, read out of the contexts rather than written here, and
+// shared with `scripts/build-terms.mjs` via `scripts/lib/spec-source.mjs` —
+// the two scripts used to carry independent copies of this scan.
+const NAMESPACES = contextPrefixes(CONTEXTS);
 
-  for (const file of readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'))) {
-    const document = JSON.parse(readFileSync(join(CONTEXTS, file), 'utf-8'));
-
-    for (const [term, value] of Object.entries(document['@context'] ?? document)) {
-      // A prefix declaration is a term whose value is an absolute IRI ending in
-      // a delimiter. A term mapping to a full IRI that does NOT end in one is
-      // naming a single thing, not a namespace.
-      if (typeof value === 'string' && /^https?:\/\/.*[#/]$/.test(value)) map.set(term, value);
-    }
-  }
-
-  if (map.size === 0) {
-    throw new Error(
-      `no prefix declarations in ${CONTEXTS}. Every CURIE in every context would then resolve `
-      + 'to itself, and a record type whose class IRI is the string "clinical:Medication" '
-      + 'matches no rdf:type in any pod — an absence that reads as an answer.',
-    );
-  }
-
-  return map;
-}
-
-const NAMESPACES = prefixes();
-
-/** The whole shipped graph, as `iri -> node`. */
-function graph() {
-  const nodes = new Map();
-
-  for (const file of readdirSync(ONTOLOGIES).filter((f) => f.endsWith('.jsonld'))) {
-    for (const node of JSON.parse(readFileSync(join(ONTOLOGIES, file), 'utf-8'))) {
-      // Merged across files rather than kept per-vocabulary: a subclass chain
-      // crosses vocabularies — clinical:SocialHistoryRecord's parent is in core
-      // — so a per-file walk would report a class as unreachable purely because
-      // its parent was declared elsewhere.
-      const existing = nodes.get(node['@id']);
-      nodes.set(node['@id'], existing ? { ...existing, ...node } : node);
-    }
-  }
-
-  return nodes;
+if (NAMESPACES.size === 0) {
+  throw new Error(
+    `no prefix declarations in ${CONTEXTS}. Every CURIE in every context would then resolve `
+    + 'to itself, and a record type whose class IRI is the string "clinical:Medication" '
+    + 'matches no rdf:type in any pod — an absence that reads as an answer.',
+  );
 }
 
 /** `class IRI -> the JSON names the contexts publish for it`. */
@@ -142,7 +102,7 @@ function publishedNames() {
 
 const contextNames = publishedNames();
 
-const nodes = graph();
+const nodes = mergedOntologyGraph(ONTOLOGIES);
 
 const derived = [];
 

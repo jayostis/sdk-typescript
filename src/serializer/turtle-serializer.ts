@@ -629,6 +629,14 @@ export function serialize(record: CascadeEntity): string {
   // document is a legal Turtle document, with IRIs written out rather than
   // abbreviated. Nothing downstream reads the prefix header; the conformance
   // suite compares graphs.
+  //
+  // NOT WRAPPED IN A TRY/CATCH, deliberately. `recordTypeFor` throws instead of
+  // answering `undefined` for a name two classes claim, and `src/record-types/
+  // index.ts` names this exact call as one of the four it was written against:
+  // catching the throw here and falling through to `serializeRecord` would be
+  // the same silent mis-route the throw exists to prevent, just reached through
+  // a catch block instead of an `undefined`. No registered name is contested
+  // today, so this is dormant — see #89's review thread on this line.
   const recordType = recordTypeFor(record.type);
 
   if (recordType && isMigrated(recordType.rdfTypeUri, 'serialize')) {

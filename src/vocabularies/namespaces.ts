@@ -424,6 +424,34 @@ export const TYPE_TO_MAPPING_KEY: Record<string, string> = {
   Attachment: 'attachments',
 };
 
+/**
+ * The class IRI a legacy-only type name still writes, for a name
+ * `src/record-types/` has never heard of.
+ *
+ * `SocialHistoryConsent` is the case this exists for (#89). Spec models
+ * `cascade:SocialHistoryConsent` as a NAMED INDIVIDUAL of `cascade:ConsentScope`
+ * — an enum value, not a class, and never marked `cascade:RecordClass` — so
+ * `src/spec/derived/record-types.generated.ts` correctly has no row for it,
+ * while this table still carries the class this SDK has written under that
+ * name since before the derived table existed. `serializeRecord`
+ * (`src/serializer/turtle-serializer.ts`) already falls back to this table
+ * whenever `recordTypeFor` answers `undefined`; `deserialize` and `toJsonLd`
+ * use this so a read accepts the class a write just produced, instead of
+ * refusing a name the writer still emits.
+ *
+ * Returns `null` for a name this table does not carry either — an unknown
+ * name stays unknown, on both sides of this fallback.
+ */
+export function legacyRdfTypeUriFor(type: string): string | null {
+  const mappingKey = TYPE_TO_MAPPING_KEY[type];
+  const mapping = mappingKey ? TYPE_MAPPING[mappingKey] : undefined;
+  if (!mapping) return null;
+
+  const colon = mapping.rdfType.indexOf(':');
+  const namespace = colon > 0 ? (NAMESPACES as Record<string, string>)[mapping.rdfType.slice(0, colon)] : undefined;
+  return namespace ? `${namespace}${mapping.rdfType.slice(colon + 1)}` : mapping.rdfType;
+}
+
 // ─── Deprecated Type Aliases (clinical v1.5, v1.13) ─────────────────────────
 
 /**

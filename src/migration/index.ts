@@ -160,6 +160,13 @@ export function isMigrated(rdfTypeUri: string, path: MigrationPath): boolean {
  *
  * An unregistered name is not routed. It is also not anything else: nothing in
  * this SDK can serialize it either.
+ *
+ * TYPED `boolean`, BUT NOT TOTAL. `recordTypeFor` throws rather than answering
+ * `undefined` for a name two classes claim (`src/record-types/index.ts`), and
+ * that throw is not caught here — this function is one of the four callers the
+ * module names as relying on the distinction between "unregistered" and
+ * "contested". No registered name is contested today, so this is dormant; see
+ * #89's review thread on this function.
  */
 export function isMigratedType(name: string, path: MigrationPath): boolean {
   const recordType = recordTypeFor(name);

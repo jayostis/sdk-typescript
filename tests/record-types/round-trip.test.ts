@@ -109,3 +109,33 @@ describe('the JSON-LD reader agrees with the Turtle one', () => {
       .toBe('NotAClass');
   });
 });
+
+describe('a legacy-only type still reads back what it wrote (#89)', () => {
+  // `cascade:SocialHistoryConsent` is a NAMED INDIVIDUAL of `cascade:ConsentScope`
+  // in spec — an enum value, never marked `cascade:RecordClass` — so
+  // `allRecordTypes()` correctly has no row for it and `recordTypeFor` answers
+  // `undefined`. `TYPE_TO_MAPPING_KEY`/`TYPE_MAPPING` still carry the class, and
+  // `serializeRecord` still writes it from that table on exactly this
+  // `undefined`. Before the fallback in `legacyRdfTypeUriFor` existed,
+  // `deserialize`/`toJsonLd` refused a class `serialize` had just produced:
+  // `deserialize(serialize(record), 'SocialHistoryConsent')` threw "Unknown
+  // record type", and so did `toJsonLd(record)`.
+  it('is absent from the derived table', () => {
+    expect(allRecordTypes().some((recordType) => recordType.name === 'SocialHistoryConsent'))
+      .toBe(false);
+  });
+
+  it('round-trips through Turtle', () => {
+    const record: CascadeRecord = { id: 'urn:uuid:shc-1', type: 'SocialHistoryConsent' };
+
+    const back = deserializeOne<CascadeRecord>(serialize(record), 'SocialHistoryConsent');
+
+    expect(back?.type).toBe('SocialHistoryConsent');
+  });
+
+  it('round-trips through JSON-LD', () => {
+    const record: CascadeRecord = { id: 'urn:uuid:shc-1', type: 'SocialHistoryConsent' };
+
+    expect(fromJsonLd<CascadeRecord>(toJsonLd(record)).type).toBe('SocialHistoryConsent');
+  });
+});

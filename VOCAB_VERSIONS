@@ -671,10 +671,15 @@ pots=1.4
 #   src/record-types/ reads a generated table built from the ontologies this
 #   package now ships, rather than 39 hand-written rows. No class and no
 #   predicate changed: the derived population is spec's own record-bearing rule
-#   — an rdfs:subClassOf chain reaching prov:Entity or prov:Activity, which
-#   spec/scripts/check-class-coverage.py enforces — and the twelve classes that
-#   rule does not yet reach are declared in pending-spec-50.json against
-#   jayostis/spec#50.
+#   — the cascade:RecordClass marker jayostis/spec#50 adds directly to the
+#   record-bearing classes, read by scripts/lib/record-population.mjs. It
+#   replaces a reading of rdfs:subClassOf prov:Entity that jayostis/spec#34
+#   (ASK-05) ruled out as PROV-O alignment conferring no membership — measured
+#   on spec's main, 110 classes were in that population and 96 of them were
+#   alignment axioms. The marker is pinned as of the revision
+#   conformance/scripts/SPEC_PIN names, so it is the only rule: the PROV bridge
+#   and the pending-spec-50.json list that patched its blind spots were deleted
+#   together once the pin moved (#89).
 #   The src/jsonld/ edit is a CONTRACTION, not a vocabulary change. RecordType
 #   held both a CURIE and an IRI; the CURIE cost a hand-kept prefix map, and
 #   expanded JSON-LD carries no prefixes by construction. toJsonLd now contracts

@@ -18,7 +18,7 @@
  * @module deserializer
  */
 
-import { NAMESPACES, buildReversePredicateMap } from '../vocabularies/namespaces.js';
+import { NAMESPACES, buildReversePredicateMap, legacyRdfTypeUriFor } from '../vocabularies/namespaces.js';
 import { recordTypeFor } from '../record-types/index.js';
 import type { ParsedTriple } from './parsed-triple.js';
 import { parseTurtleWithN3 } from './n3-adapter.js';
@@ -983,14 +983,26 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
  * Refusing to read those pods would be a data-loss bug dressed up as standards
  * compliance.
  *
- * THE FALLBACK IS GONE, and it was dead. `resolveTypeUri` ended with a scan of
- * `TYPE_MAPPING` for an entry whose RDF LOCAL NAME equalled the requested type,
- * reached only when the primary lookup missed. Every local name it could have
- * matched is already a registered type name, so the primary path returned
- * first in every case — measured across all 38 rows, none reachable.
+ * A NAME-KEYED FALLBACK TO THE LEGACY TABLE STAYS, and is not the fallback the
+ * paragraph above used to say was dead. That one scanned `TYPE_MAPPING` for an
+ * entry whose RDF LOCAL NAME equalled the requested type, reached only when
+ * the primary lookup missed by name — genuinely unreachable, since every local
+ * name it could hit was already a registered type name. This is a different
+ * question: `recordTypeFor(type)` asks spec's derived table, and a handful of
+ * names — `SocialHistoryConsent` among them (#89) — are in `TYPE_TO_MAPPING_KEY`
+ * but not there, because spec models `cascade:SocialHistoryConsent` as a NAMED
+ * INDIVIDUAL of `cascade:ConsentScope`, never marked `cascade:RecordClass`, so
+ * the derived table correctly has no row for it. `serializeRecord`
+ * (`src/serializer/turtle-serializer.ts`) already falls back to the legacy
+ * table when `recordTypeFor` answers `undefined`; refusing to read the class a
+ * write just produced was the asymmetry `legacyRdfTypeUriFor` closes.
  */
 function acceptedClassUris(type: string): readonly string[] | null {
-  return recordTypeFor(type)?.acceptedClassUris ?? null;
+  const derived = recordTypeFor(type)?.acceptedClassUris;
+  if (derived) return derived;
+
+  const legacy = legacyRdfTypeUriFor(type);
+  return legacy ? [legacy] : null;
 }
 
 /**
