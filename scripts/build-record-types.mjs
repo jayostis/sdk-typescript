@@ -55,12 +55,13 @@ import { fileURLToPath } from 'node:url';
 import { duplicateNamesAmong } from './lib/duplicate-names.mjs';
 import { localNameOf } from './lib/iri.mjs';
 import { recordPopulation } from './lib/record-population.mjs';
-import { contextPrefixes, expandCurie, mergedOntologyGraph } from './lib/spec-source.mjs';
+import { contextPrefixes, expandCurie, mergedOntologyGraph, specDataDir } from './lib/spec-source.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const ONTOLOGIES = join(root, 'src/spec/ontologies');
-const CONTEXTS = join(root, 'src/spec/contexts');
-const OUT = join(root, 'src/spec/derived/record-types.generated.ts');
+const DATA = specDataDir(root);
+const ONTOLOGIES = join(DATA, 'ontologies');
+const CONTEXTS = join(DATA, 'contexts');
+const OUT = join(DATA, 'derived/record-types.generated.ts');
 
 const SEE_ALSO = 'http://www.w3.org/2000/01/rdf-schema#seeAlso';
 const DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';

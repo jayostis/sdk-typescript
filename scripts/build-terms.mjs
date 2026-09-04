@@ -35,9 +35,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CONTEXTS = join(root, 'src/spec/contexts');
-const ONTOLOGIES = join(root, 'src/spec/ontologies');
-const OUT = join(root, 'src/spec/derived/terms.generated.ts');
+const DATA = specDataDir(root);
+const CONTEXTS = join(DATA, 'contexts');
+const ONTOLOGIES = join(DATA, 'ontologies');
+const OUT = join(DATA, 'derived/terms.generated.ts');
 
 const SUB_CLASS_OF = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 const RANGE = 'http://www.w3.org/2000/01/rdf-schema#range';
@@ -48,7 +49,7 @@ const CASCADE_NAMESPACE = 'https://ns.cascadeprotocol.org/';
 
 import { localNameOf, namespaceOwners } from './lib/iri.mjs';
 import {
-  contextPrefixes, expandCurie, isPrefixDeclaration, mergedOntologyGraph,
+  contextPrefixes, expandCurie, isPrefixDeclaration, mergedOntologyGraph, specDataDir,
 } from './lib/spec-source.mjs';
 
 const contextFiles = readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'));

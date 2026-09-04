@@ -43,14 +43,17 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { specDataDir } from './lib/spec-source.mjs';
+
 const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The vendored parser, the same one `deserialize` reads pods with. */
 const N3Parser = require(join(root, 'src/vendor/n3/N3Parser.js')).default;
 
-const OUT = join(root, 'src/spec/ontologies');
-const CONTEXTS = join(root, 'src/spec/contexts');
+const DATA = specDataDir(root);
+const OUT = join(DATA, 'ontologies');
+const CONTEXTS = join(DATA, 'contexts');
 
 /**
  * Where `spec` is.

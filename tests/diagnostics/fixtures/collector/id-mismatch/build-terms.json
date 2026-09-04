@@ -1,0 +1,11 @@
+[
+  {
+    "id": "unclassifiable-range:HRVReading",
+    "code": "unclassifiable-range",
+    "subject": "https://ns.cascadeprotocol.org/health/v1#HRVReading",
+    "severity": "info",
+    "owner": "spec",
+    "location": ["ontologies/health/v1/health.ttl"],
+    "source": "build-terms"
+  }
+]

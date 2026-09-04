@@ -1,0 +1,15 @@
+[
+  {
+    "id": "record-class-name-collision:SocialHistoryRecord",
+    "code": "record-class-name-collision",
+    "subject": "SocialHistoryRecord",
+    "severity": "error",
+    "owner": "spec",
+    "location": ["contexts/v1/clinical.jsonld", "contexts/v1/health.jsonld"],
+    "source": "build-record-types",
+    "claimants": [
+      "https://ns.cascadeprotocol.org/clinical/v1#SocialHistoryRecord",
+      "https://ns.cascadeprotocol.org/health/v1#SocialHistoryRecord"
+    ]
+  }
+]

@@ -19,7 +19,7 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 /** A term whose value is a namespace IRI is a prefix declaration, not a term. */
 export function isPrefixDeclaration(value) {
@@ -125,4 +125,24 @@ export function mergedOntologyGraph(ontologiesDir) {
   }
 
   return nodes;
+}
+
+/**
+ * Where the generated spec data lives: `src/spec/` under `root`, or the
+ * directory `CASCADE_SPEC_DATA_DIR` names when it is set.
+ *
+ * THE OVERRIDE EXISTS FOR TESTS, and for nothing else. A generator that can
+ * only read and write the real tree cannot be handed a fixture — and a
+ * detector is proven by making it speak (`tests/README.md`), which the pinned
+ * spec mostly cannot be made to do. `build-spec-data.mjs` also EMPTIES its
+ * output directories before writing, so a generator pointed at the tree from a
+ * vitest worker would race every sibling test reading it. Every test that runs
+ * a generator therefore sets this, and none of them ever leaves it unset.
+ *
+ * @param {string} root - The repository root.
+ * @returns {string}
+ */
+export function specDataDir(root) {
+  const override = process.env.CASCADE_SPEC_DATA_DIR;
+  return override ? resolve(override) : join(root, 'src/spec');
 }
