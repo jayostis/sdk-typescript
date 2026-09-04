@@ -691,3 +691,14 @@ pots=1.4
 #   is #34 — so no emitted graph changes; deserialize() no longer throws
 #   "Unknown record type" for them, which is the population being spec's rather
 #   than ours.
+
+# 2026-09-03 — NO BUMP. Review followup on #89; no vocabulary changed.
+#   src/vocabularies/namespaces.ts: legacyRdfTypeUriFor and
+#   buildReversePredicateMap each sliced a CURIE's prefix out with a slightly
+#   different empty-prefix guard (colon > 0 vs colonIdx >= 0) — no real trigger,
+#   since NAMESPACES carries no '' key either way, but two copies of one rule
+#   free to drift further apart. Both now call one expandCurie helper. No
+#   predicate resolves differently: expandCurie's guard (colon <= 0 -> return
+#   the CURIE unchanged) matches what each call site already did once
+#   NAMESPACES[''] is considered, and tests/record-types/round-trip.test.ts and
+#   tests/namespaces.test.ts pass unchanged.

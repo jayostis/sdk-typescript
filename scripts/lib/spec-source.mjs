@@ -2,12 +2,14 @@
  * Two reads every generator over `src/spec/` needs, written once.
  *
  * `scripts/build-terms.mjs` and `scripts/build-record-types.mjs` each carried
- * their own prefix-map scan over `src/spec/contexts` and their own shallow-merge
- * ontology-graph loader over `src/spec/ontologies` — same rule, same strategy,
- * two independent implementations. `scripts/lib/walk.mjs` and
- * `scripts/lib/iri.mjs` already exist to stop exactly this: a fix to the
- * prefix-detection rule or the node-merge strategy had to be found and applied
- * in two places to stay in sync, and nothing forced the second edit.
+ * their own prefix-map scan over `src/spec/contexts`, their own shallow-merge
+ * ontology-graph loader over `src/spec/ontologies`, and their own CURIE-to-IRI
+ * expansion over the map the first of those two produces — same rule, same
+ * strategy, two (three, counting `expand`) independent implementations.
+ * `scripts/lib/walk.mjs` and `scripts/lib/iri.mjs` already exist to stop
+ * exactly this: a fix to the prefix-detection rule or the node-merge strategy
+ * had to be found and applied in two places to stay in sync, and nothing
+ * forced the second edit.
  *
  * NOT SHARED WITH `src/`, for the reason `scripts/lib/iri.mjs` gives: nothing
  * under `scripts/` ships, so a runtime import of this would put build tooling
@@ -52,6 +54,23 @@ export function contextPrefixes(contextsDir) {
   }
 
   return prefixes;
+}
+
+/**
+ * A CURIE resolved against `prefixes`, or itself unchanged if it has no
+ * resolvable prefix — no colon at all, a leading colon (an empty prefix
+ * nothing declares), or a prefix `prefixes` does not carry.
+ *
+ * @param {Map<string, string>} prefixes - `prefix -> namespace`, as from
+ *   {@link contextPrefixes}.
+ * @param {string} id - A CURIE (`clinical:Medication`) or an already-full IRI.
+ * @returns {string}
+ */
+export function expandCurie(prefixes, id) {
+  const colon = id.indexOf(':');
+  if (colon <= 0) return id;
+  const namespace = prefixes.get(id.slice(0, colon));
+  return namespace ? `${namespace}${id.slice(colon + 1)}` : id;
 }
 
 /**

@@ -55,7 +55,7 @@ import { fileURLToPath } from 'node:url';
 import { duplicateNamesAmong } from './lib/duplicate-names.mjs';
 import { localNameOf } from './lib/iri.mjs';
 import { recordPopulation } from './lib/record-population.mjs';
-import { contextPrefixes, mergedOntologyGraph } from './lib/spec-source.mjs';
+import { contextPrefixes, expandCurie, mergedOntologyGraph } from './lib/spec-source.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ONTOLOGIES = join(root, 'src/spec/ontologies');
@@ -89,9 +89,7 @@ function publishedNames() {
       const id = typeof value === 'string' ? value : value?.['@id'];
       if (typeof id !== 'string') continue;
 
-      const colon = id.indexOf(':');
-      const namespace = colon > 0 ? NAMESPACES.get(id.slice(0, colon)) : undefined;
-      const iri = namespace ? `${namespace}${id.slice(colon + 1)}` : id;
+      const iri = expandCurie(NAMESPACES, id);
 
       names.set(iri, [...(names.get(iri) ?? []), term]);
     }

@@ -447,9 +447,25 @@ export function legacyRdfTypeUriFor(type: string): string | null {
   const mapping = mappingKey ? TYPE_MAPPING[mappingKey] : undefined;
   if (!mapping) return null;
 
-  const colon = mapping.rdfType.indexOf(':');
-  const namespace = colon > 0 ? (NAMESPACES as Record<string, string>)[mapping.rdfType.slice(0, colon)] : undefined;
-  return namespace ? `${namespace}${mapping.rdfType.slice(colon + 1)}` : mapping.rdfType;
+  return expandCurie(mapping.rdfType);
+}
+
+/**
+ * A CURIE resolved against {@link NAMESPACES}, or itself unchanged if it has
+ * no resolvable prefix — no colon at all, a leading colon (an empty prefix
+ * `NAMESPACES` does not carry), or a prefix `NAMESPACES` has never heard of.
+ *
+ * The one CURIE-to-IRI rule this file has, shared by {@link legacyRdfTypeUriFor}
+ * and {@link buildReversePredicateMap} — which used to each slice a colon out
+ * with a slightly different empty-prefix guard (`colon > 0` here, `colonIdx >=
+ * 0` there), a divergence with no real trigger today but nothing to keep it
+ * from drifting further apart.
+ */
+function expandCurie(curie: string): string {
+  const colon = curie.indexOf(':');
+  if (colon <= 0) return curie;
+  const namespace = (NAMESPACES as Record<string, string>)[curie.slice(0, colon)];
+  return namespace ? `${namespace}${curie.slice(colon + 1)}` : curie;
 }
 
 // ─── Deprecated Type Aliases (clinical v1.5, v1.13) ─────────────────────────
@@ -1046,15 +1062,12 @@ export function buildReversePredicateMap(
 ): Map<string, string> {
   const reverseMap = new Map<string, string>();
   for (const [jsonKey, predShorthand] of Object.entries(PROPERTY_PREDICATES)) {
-    const colonIdx = predShorthand.indexOf(':');
-    if (colonIdx >= 0) {
-      const nsPrefix = predShorthand.slice(0, colonIdx);
-      const localName = predShorthand.slice(colonIdx + 1);
-      const nsUri = NAMESPACES[nsPrefix as keyof typeof NAMESPACES];
-      if (nsUri) {
-        reverseMap.set(`${nsUri}${localName}`, jsonKey);
-      }
-    }
+    const expanded = expandCurie(predShorthand);
+    // `expandCurie` answers an unresolved CURIE with itself, unchanged — the
+    // right fallback for a writer that still wants SOME string back, and the
+    // signal this reader uses to tell "expanded" apart from "could not be":
+    // a full IRI is never equal to a bare `prefix:localName` shorthand.
+    if (expanded !== predShorthand) reverseMap.set(expanded, jsonKey);
   }
   if (additionalMappings) {
     for (const [fullUri, jsonKey] of Object.entries(additionalMappings)) {

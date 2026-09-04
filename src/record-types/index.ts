@@ -135,7 +135,13 @@ export interface RecordTypeTable {
  * contested name alone.
  */
 /**
- * Every name split into the ones that resolve and the ones that cannot.
+ * Every key one direction hands out, split into the ones that resolve and the
+ * ones that cannot — the shape behind BOTH `RecordTypeTable` indexes: the name
+ * direction (`recordType.name` and its aliases, reported by `rdfTypeUri` when
+ * contested) and the class direction (`acceptedClassUris`, reported by `name`
+ * when contested). Same claimant-collection, same split on `length > 1`,
+ * parameterised by which keys a record type claims and what a contested key
+ * reports about its claimants.
  *
  * PARTITIONS, IT DOES NOT FILTER — and that is why this is not
  * `duplicateNamesAmong` from `scripts/lib/duplicate-names.mjs`, which a reader
@@ -150,37 +156,41 @@ export interface RecordTypeTable {
  * tooling into `src/` would put an unpublished file on the runtime path —
  * exactly what `tests/no-runtime-deps.test.ts` exists to prevent.
  *
- * A CONTESTED NAME LANDS IN NEITHER MAP, deliberately. Putting one claimant in
- * `byName` and recording the collision beside it would leave a lookup that
+ * A CONTESTED KEY LANDS IN NEITHER MAP, deliberately. Putting one claimant in
+ * `byKey` and recording the collision beside it would leave a lookup that
  * ANSWERS — with whichever row the iteration reached first, which is the
  * accident this module was built to remove.
  */
-function partitionNamesByClaimant(assembled: readonly RecordType[]): {
-  byName: Map<string, RecordType>;
-  contestedNames: Map<string, readonly string[]>;
+function partitionByClaim(
+  assembled: readonly RecordType[],
+  keysClaimedBy: (recordType: RecordType) => readonly string[],
+  reportClaimantAs: (recordType: RecordType) => string,
+): {
+  byKey: Map<string, RecordType>;
+  contested: Map<string, readonly string[]>;
 } {
   const claimants = new Map<string, RecordType[]>();
 
   for (const recordType of assembled) {
-    for (const name of [recordType.name, ...recordType.aliases]) {
-      claimants.set(name, [...(claimants.get(name) ?? []), recordType]);
+    for (const key of keysClaimedBy(recordType)) {
+      claimants.set(key, [...(claimants.get(key) ?? []), recordType]);
     }
   }
 
-  const byName = new Map<string, RecordType>();
-  const contestedNames = new Map<string, readonly string[]>();
+  const byKey = new Map<string, RecordType>();
+  const contested = new Map<string, readonly string[]>();
 
-  for (const [name, claiming] of claimants) {
+  for (const [key, claiming] of claimants) {
     const [first] = claiming;
 
     if (claiming.length > 1) {
-      contestedNames.set(name, Object.freeze(claiming.map((recordType) => recordType.rdfTypeUri)));
+      contested.set(key, Object.freeze(claiming.map(reportClaimantAs)));
     } else if (first) {
-      byName.set(name, first);
+      byKey.set(key, first);
     }
   }
 
-  return { byName, contestedNames };
+  return { byKey, contested };
 }
 
 export function assembleRecordTypes(classes: readonly DerivedClass[]): RecordTypeTable {
@@ -237,32 +247,21 @@ export function assembleRecordTypes(classes: readonly DerivedClass[]): RecordTyp
   // skipped by forgetting to build it — the argument `src/terms/index.ts` makes
   // for building its map with an explicit loop, and the reason a collision
   // found here is still found here now that it is deferred rather than thrown.
-  const { byName, contestedNames } = partitionNamesByClaimant(assembled);
+  const { byKey: byName, contested: contestedNames } = partitionByClaim(
+    assembled,
+    (recordType) => [recordType.name, ...recordType.aliases],
+    (recordType) => recordType.rdfTypeUri,
+  );
 
   // The class direction, indexed the same way and for the same reason. A
   // `new Map(...)` over pairs keeps the last of two claimants and reports
   // nothing, so which one won would depend on order and the loser would be
   // unreachable with no way to notice.
-  const claimed = new Map<string, RecordType[]>();
-
-  for (const recordType of assembled) {
-    for (const classUri of recordType.acceptedClassUris) {
-      claimed.set(classUri, [...(claimed.get(classUri) ?? []), recordType]);
-    }
-  }
-
-  const byClass = new Map<string, RecordType>();
-  const contestedClasses = new Map<string, readonly string[]>();
-
-  for (const [classUri, claiming] of claimed) {
-    const [first] = claiming;
-
-    if (claiming.length > 1) {
-      contestedClasses.set(classUri, Object.freeze(claiming.map((recordType) => recordType.name)));
-    } else if (first) {
-      byClass.set(classUri, first);
-    }
-  }
+  const { byKey: byClass, contested: contestedClasses } = partitionByClaim(
+    assembled,
+    (recordType) => recordType.acceptedClassUris,
+    (recordType) => recordType.name,
+  );
 
   return Object.freeze({
     recordTypes: Object.freeze(assembled),

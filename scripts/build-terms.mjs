@@ -47,7 +47,9 @@ const OWL_NAMED_INDIVIDUAL = 'http://www.w3.org/2002/07/owl#NamedIndividual';
 const CASCADE_NAMESPACE = 'https://ns.cascadeprotocol.org/';
 
 import { localNameOf, namespaceOwners } from './lib/iri.mjs';
-import { contextPrefixes, isPrefixDeclaration, mergedOntologyGraph } from './lib/spec-source.mjs';
+import {
+  contextPrefixes, expandCurie, isPrefixDeclaration, mergedOntologyGraph,
+} from './lib/spec-source.mjs';
 
 const contextFiles = readdirSync(CONTEXTS).filter((f) => f.endsWith('.jsonld'));
 
@@ -57,12 +59,7 @@ if (prefixes.size === 0) {
   throw new Error(`no prefix declarations in ${CONTEXTS}; every CURIE would resolve to itself.`);
 }
 
-function expand(id) {
-  const colon = id.indexOf(':');
-  if (colon < 0) return id;
-  const namespace = prefixes.get(id.slice(0, colon));
-  return namespace ? `${namespace}${id.slice(colon + 1)}` : id;
-}
+const expand = (id) => expandCurie(prefixes, id);
 
 // ── the ontology graph, for ranges and for a range class's members ───────────
 

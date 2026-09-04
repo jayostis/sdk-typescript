@@ -109,13 +109,24 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
   chainNodes: Set<string>;
 } {
   const first = new Map<string, string>();
+  // A NamedNode `rdf:nil` as an `rdf:first` object, apart from `first` itself.
+  // `termValue` throws away `termType`, so `first.get(node) === RDF_NIL` cannot
+  // tell a genuine nested empty list `( () "a" )` apart from a Literal whose
+  // lexical value happens to be the string "…#nil" — `( "…#nil" "a" )` is legal
+  // Turtle whose first member IS that string, not `[]`.
+  const firstIsNil = new Set<string>();
   const rest = new Map<string, string>();
 
   for (const quad of quads) {
     if (quad.subject.termType !== 'BlankNode') continue;
 
     const node = label(quad.subject.value);
-    if (quad.predicate.value === RDF_FIRST) first.set(node, termValue(quad.object, label));
+    if (quad.predicate.value === RDF_FIRST) {
+      first.set(node, termValue(quad.object, label));
+      if (quad.object.termType === 'NamedNode' && quad.object.value === RDF_NIL) {
+        firstIsNil.add(node);
+      }
+    }
     if (quad.predicate.value === RDF_REST) {
       rest.set(node, quad.object.termType === 'BlankNode'
         ? label(quad.object.value)
@@ -153,9 +164,26 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
     for (let node: string | undefined = head; node && !seen.has(node); node = rest.get(node)) {
       seen.add(node);
       const member = first.get(node);
-      if (member === undefined) break;
+      if (member === undefined) {
+        // The chain ran out at `node` with no `rdf:first` there — the ONLY way
+        // this loop stops short of exhausting `seen` (a cycle exits through the
+        // `for` condition above, never here, so this branch never fires for
+        // one). A well-formed rdf:List ends this way exactly once, at
+        // `rdf:nil`. Anything else — `rdf:rest` pointing at a resource with no
+        // `rdf:first`, or nowhere at all — is a chain that does not terminate
+        // as a list, and returning the members collected so far would report a
+        // shorter list with no sign anything was wrong: the exact silent
+        // truncation this module's own "drops nothing" promise forbids.
+        if (node !== RDF_NIL) {
+          throw new Error(
+            `Malformed rdf:List: the chain from ${head} does not terminate at rdf:nil — `
+            + `rdf:rest leads to ${node}, which has no rdf:first.`,
+          );
+        }
+        break;
+      }
       members.push(
-        member === RDF_NIL ? [] : chainNodes.has(member) ? resolve(member, resolving) : member,
+        firstIsNil.has(node) ? [] : chainNodes.has(member) ? resolve(member, resolving) : member,
       );
     }
 
@@ -174,7 +202,11 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
  * FAITHFUL, LIKE EVERY OTHER READER HERE. It drops nothing on validity grounds
  * and refuses nothing a parser accepts. The one thing it does drop is a
  * language tag, which `ParsedTriple` has nowhere to put — the same as before,
- * and the same for both parsers, so the differential does not hide it.
+ * and the same for both parsers, so the differential does not hide it. The one
+ * thing it REFUSES is an `rdf:first`/`rdf:rest` chain that never reaches
+ * `rdf:nil` — `collapseLists` throws rather than reporting a silently
+ * truncated list, because a shorter list with no sign anything was wrong is
+ * exactly the loss this promise forbids.
  */
 export function parseTurtleWithN3(content: string): ParsedTriple[] {
   const quads = new N3Parser().parse(content);
