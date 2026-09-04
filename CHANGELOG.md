@@ -4,6 +4,29 @@
 
 ### Added
 
+- **The package loads and runs in a browser, and CI proves it** (#95,
+  D-BROWSER-1). `serialize()` and `deserialize()` reached the vendored n3
+  through `createRequire` and a CommonJS `require()`, which no bundler can
+  follow and no browser can resolve, and `deterministic-uri.ts` imported
+  `node:crypto`; a Vite or webpack build of any page importing this package
+  failed on `node:module`. The vendored parser is now `src/vendor/n3/n3.js`,
+  one ES module bundled from n3's own source by `scripts/vendor-n3.mjs` —
+  relative imports resolved, `buffer` answered by a declared shim on a
+  streaming path nothing here takes — and both call sites import it statically.
+  `tests/vendor-drift.test.ts` now holds the committed bundle byte-for-byte to
+  what the script builds from the installed n3, so "unmodified" means
+  "reproducible" and esbuild is an exact devDependency. `deterministicUuid`
+  hashes with `src/utils/sha1.ts`, a synchronous pure-JS SHA-1 pinned to
+  `node:crypto`'s output in `tests/sha1.test.ts` (D-BROWSER-1 as amended
+  2026-09-04: identity stays synchronous), and the random fallback uses
+  `crypto.randomUUID()` where the platform has it. The gate:
+  `scripts/check-browser-bundle.mjs` (`npm run check:browser`, a CI step)
+  bundles `src/index.ts` for a browser and fails on any `node:` builtin,
+  `createRequire` or `require()` left on the way — red against the epic head
+  on three sites, green after — and `tests/browser-bundle.test.ts` runs the
+  bundle in a bare vm context with no `process`, `Buffer` or `require`
+  through `serialize`, `deserialize`, `toJsonLd`, `fromJsonLd` and
+  `validate` on imm-001.
 - **The build writes down what it found.** `npm run generate` has always found
   real spec defects — a name two record classes claim, a range that is neither
   a code list nor a structured class, a JSON key that means a different

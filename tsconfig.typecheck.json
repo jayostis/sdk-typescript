@@ -28,6 +28,7 @@
     "tests/public-surface.test.ts",
     "tests/no-runtime-deps.ts",
     "tests/no-runtime-deps.test.ts",
+    "tests/sha1.test.ts",
     "tests/spec-single-source.ts",
     "tests/spec-single-source.test.ts",
     "tests/support/spec-sources.ts",

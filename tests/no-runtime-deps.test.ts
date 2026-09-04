@@ -56,10 +56,11 @@ describe('thirdPartyImports', () => {
   });
 
   it('is silent for a node: builtin', () => {
-    // `src/utils/deterministic-uri.ts` imports `node:crypto`, and a builtin
-    // ships with the runtime: it costs a consumer no install and appears in no
-    // dependency list. It is a different question from whether this package
-    // should run outside Node, which nothing here asks.
+    // A builtin ships with the runtime: it costs a consumer no install and
+    // appears in no dependency list, which is all this check asks. Whether the
+    // package runs OUTSIDE Node — where `node:crypto` does not exist — is a
+    // different question, and `tests/browser-bundle.test.ts` asks it; `src/`
+    // imports no `node:` builtin today for that reason.
     const root = scratchSrc({
       'utils/deterministic-uri.ts': "import { createHash } from 'node:crypto';\n",
     });

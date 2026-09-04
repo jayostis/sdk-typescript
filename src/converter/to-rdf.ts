@@ -31,22 +31,15 @@
  * @module converter
  */
 
-import { createRequire } from 'node:module';
-
 import { recordTypeFor } from '../record-types/index.js';
 import { quoteTurtleString } from '../serializer/turtle-builder.js';
 import { SPEC_TERMS } from '../spec/derived/terms.generated.js';
 import type { TermDefinition, UnclassifiableRange } from '../spec/derived/terms.generated.js';
-
-const require = createRequire(import.meta.url);
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const N3Parser = require('../vendor/n3/N3Parser.js').default as new () => {
-  parse(input: string): any[];
-};
-const N3Writer = require('../vendor/n3/N3Writer.js').default as new (options: {
-  prefixes: Record<string, string>;
-}) => { addQuad(quad: unknown): void; end(callback: (error: unknown, result: string) => void): void };
+// A STATIC import of the vendored bundle, so a bundler can follow it. This was
+// a `createRequire` of n3's CommonJS build, which no browser bundle could
+// resolve (D-BROWSER-1, #95); `src/vendor/n3/VENDOR.md` says what the bundle is.
+import { Parser as N3Parser, Writer as N3Writer } from '../vendor/n3/n3.js';
+import type { Quad } from '../vendor/n3/n3.js';
 
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
@@ -521,13 +514,13 @@ export function convertToRdf(record: Record<string, unknown>): string {
 }
 
 /** These quads as a Turtle document, with exactly these prefixes offered. */
-function turtleOf(quads: unknown[], prefixes: Record<string, string>): string {
+function turtleOf(quads: Quad[], prefixes: Record<string, string>): string {
   const writer = new N3Writer({ prefixes });
   for (const quad of quads) writer.addQuad(quad);
 
   let turtle = '';
   // n3's `end` is callback-shaped and synchronous when the sink is a string.
-  writer.end((error: unknown, result: string) => {
+  writer.end((error, result) => {
     if (error) throw error;
     turtle = result;
   });

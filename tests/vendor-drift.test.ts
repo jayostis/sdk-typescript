@@ -1,16 +1,22 @@
 /**
- * `src/vendor/n3/` is a verbatim copy, and this is what says so.
+ * `src/vendor/n3/n3.js` is what `scripts/vendor-n3.mjs` builds from the
+ * installed n3, byte for byte, and this is what says so.
  *
- * Vendoring buys three things, and all three rest on the copy being unmodified:
- * upstream's own test suite still validates it, so nothing here re-tests a Turtle
- * parser; a divergence is reported rather than discovered; and re-vendoring a
- * security fix is a copy rather than a merge. Edit one line and all three end
- * quietly — the files still work, and nothing says they are no longer the thing
- * upstream tests.
+ * Vendoring buys three things, and all three rest on the vendored code being
+ * upstream's: upstream's own test suite still validates it, so nothing here
+ * re-tests a Turtle parser; a divergence is reported rather than discovered;
+ * and re-vendoring a security fix is a re-run rather than a merge. The copy
+ * this replaced could be compared byte-for-byte against `node_modules/n3/lib`
+ * (#89). A bundle cannot be — esbuild resolved the extensionless imports,
+ * inlined the modules and answered `buffer` with a shim — so the comparison
+ * moves one step earlier: the transform is declared in ONE script, this test
+ * runs that script against the installed n3, and the committed file must equal
+ * its output exactly. Edit `n3.js` and this fails. Bump the pin and this fails.
+ * Change esbuild and this fails, which is why esbuild is an exact devDependency.
  *
  * That is also why `n3` stays a devDependency after being vendored. It is the
- * comparison target here, the oracle for the parser's behaviour, and the only
- * way `npm audit` and Dependabot can see the code at all: they read
+ * input here, the oracle for the parser's behaviour, and the only way
+ * `npm audit` and Dependabot can see the code at all: they read
  * `package.json`, not `src/vendor/`, so a CVE in `N3Lexer` is invisible to them
  * the moment the dependency is dropped.
  *
@@ -23,43 +29,54 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
+import { buildVendoredN3, installedN3Version } from '../scripts/vendor-n3.mjs';
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDORED = join(root, 'src/vendor/n3');
-const UPSTREAM = join(root, 'node_modules/n3/lib');
 
-/** The eight files copied from upstream. `package.json` here is ours, not theirs. */
-const COPIED = [
-  'N3Parser.js', 'N3Lexer.js', 'N3Writer.js', 'N3DataFactory.js',
-  'N3Util.js', 'BaseIRI.js', 'IRIs.js', 'Util.js',
-];
+/** The one generated file. Everything else in the directory is ours. */
+const BUNDLE = 'n3.js';
 
 describe('vendored n3 has not drifted', () => {
-  it('is byte-identical to node_modules/n3/lib', () => {
-    const drifted: string[] = [];
-    for (const f of COPIED) {
-      const mine = readFileSync(join(VENDORED, f));
-      const theirs = readFileSync(join(UPSTREAM, f));
-      if (!mine.equals(theirs)) drifted.push(`${f} (${mine.length}B vs ${theirs.length}B)`);
-    }
+  it('is byte-identical to what scripts/vendor-n3.mjs builds from the installed n3', async () => {
+    // `.gitattributes` marks `src/vendor/**` `-text`, so the bytes on disk are
+    // the bytes committed on every platform; a Windows checkout with CRLF here
+    // would be a real finding, not noise.
+    const mine = readFileSync(join(VENDORED, BUNDLE), 'utf-8');
+    const theirs = await buildVendoredN3();
 
     expect(
-      drifted,
-      'src/vendor/n3 has diverged from the installed n3. Either someone edited the '
-      + 'copy — do not; see VENDOR.md — or the pinned version moved and the copy '
-      + 'needs re-taking. Re-copy, do not merge.',
-    ).toEqual([]);
+      mine === theirs,
+      'src/vendor/n3/n3.js is not what scripts/vendor-n3.mjs builds from node_modules/n3. '
+      + 'Either someone edited the bundle — do not; see VENDOR.md — or the pinned n3 or '
+      + 'esbuild moved and the bundle needs rebuilding: node scripts/vendor-n3.mjs. '
+      + `Committed ${mine.length} chars, built ${theirs.length}.`,
+    ).toBe(true);
+  }, 20_000);
+
+  it('names the version it was built from', () => {
+    // The banner is the bundle's own provenance line. If the script wrote a
+    // different version than the one installed, the previous test already
+    // failed; this pins that the version is STATED, so a reader of the shipped
+    // file learns it without a checkout.
+    const head = readFileSync(join(VENDORED, BUNDLE), 'utf-8').slice(0, 200);
+    expect(head).toContain(`n3@${installedN3Version()}`);
   });
 
-  it('copied every file it claims to, and nothing else', () => {
-    // A file appearing here that upstream does not have is the same defect as an
-    // edit: it is code nobody reviewed, under a licence header that does not
-    // cover it. `package.json` is the one deliberate exception — a `"type":
-    // "commonjs"` marker this repository wrote, because this package is
-    // `"type": "module"` and the copy is Babel's CommonJS build.
-    const OURS = new Set(['package.json', 'VENDOR.md', 'LICENSE.md']);
-    const present = readdirSync(VENDORED).filter((f) => !OURS.has(f)).sort();
+  it('holds the bundle, its types, its licence and its manifest, and nothing else', () => {
+    // A file appearing here that nothing declares is the same defect as an
+    // edit: code nobody reviewed, under a licence header that does not cover
+    // it. `n3.d.ts` is ours — n3@2 ships no types — and says so at its top.
+    expect(readdirSync(VENDORED).sort()).toEqual(['LICENSE.md', 'VENDOR.md', 'n3.d.ts', 'n3.js']);
+  });
 
-    expect(present).toEqual([...COPIED].sort());
+  it('carries no import or require for a runtime to resolve', () => {
+    // The reason the bundle exists. A surviving specifier is a module the
+    // browser is expected to supply, and `buffer` is the one n3 would leave.
+    const code = readFileSync(join(VENDORED, BUNDLE), 'utf-8');
+    expect(code).not.toMatch(/^\s*import\b/m);
+    expect(code).not.toMatch(/^\s*export\b[^;]*\bfrom\b/m);
+    expect(code).not.toMatch(/\brequire\(/);
   });
 
   it('carries upstream\'s licence, unaltered', () => {
@@ -76,15 +93,12 @@ describe('vendored n3 has not drifted', () => {
   it('records the version that is actually installed', () => {
     // VENDOR.md is a claim about provenance. A claim nothing checks is how a
     // manifest ends up describing a copy two versions old.
-    const installed = JSON.parse(
-      readFileSync(join(root, 'node_modules/n3/package.json'), 'utf-8'),
-    ).version as string;
     const manifest = readFileSync(join(VENDORED, 'VENDOR.md'), 'utf-8');
 
     expect(
       manifest,
-      `VENDOR.md must name the installed version (${installed}).`,
-    ).toContain(`\`${installed}\``);
+      `VENDOR.md must name the installed version (${installedN3Version()}).`,
+    ).toContain(`\`${installedN3Version()}\``);
   });
 
   it('is named in the NOTICE that ships', () => {
@@ -93,12 +107,9 @@ describe('vendored n3 has not drifted', () => {
     // naming the vendored version the published package is the thing MIT
     // actually forbids.
     const notice = readFileSync(join(root, 'NOTICE'), 'utf-8');
-    const installed = JSON.parse(
-      readFileSync(join(root, 'node_modules/n3/package.json'), 'utf-8'),
-    ).version as string;
 
     expect(notice).toContain('N3.js');
-    expect(notice).toContain(installed);
+    expect(notice).toContain(installedN3Version());
     expect(notice).toContain('MIT');
 
     const files = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')).files as string[];
@@ -116,10 +127,9 @@ describe('vendored n3 has not drifted', () => {
       return;
     }
 
-    for (const f of [...COPIED, 'LICENSE.md']) {
+    for (const f of [BUNDLE, 'n3.d.ts', 'LICENSE.md']) {
       expect(existsSync(join(dist, f)), `${f} did not reach dist/vendor/n3`).toBe(true);
     }
-    expect(readFileSync(join(dist, 'N3Parser.js')))
-      .toEqual(readFileSync(join(VENDORED, 'N3Parser.js')));
+    expect(readFileSync(join(dist, BUNDLE))).toEqual(readFileSync(join(VENDORED, BUNDLE)));
   });
 });

@@ -10,14 +10,15 @@
  * data file into `dist/`, which is how `src/data/cascade-terminology.json` gets
  * there — but tsc REPRINTS it rather than copying (3,580 bytes in, 3,730 out,
  * differing from byte 2 on line endings and indent). A verbatim copy is the whole
- * point here: the drift test compares this directory byte-for-byte against
- * `node_modules/n3/lib/`, and upstream's own test suite is what validates it.
+ * point here: the drift test compares the bundle byte-for-byte against what
+ * `scripts/vendor-n3.mjs` builds, and upstream's own test suite is what
+ * validates the code inside it.
  *
  * The licence travels with the code. MIT requires its notice in "all copies or
  * substantial portions", and `package.json` `files` ships only `dist`, so
  * `LICENSE.md` has to arrive here as well as in the root `NOTICE`.
  */
-import { cpSync, existsSync, statSync } from 'node:fs';
+import { cpSync, existsSync, rmSync, statSync } from 'node:fs';
 
 import { walk } from './lib/walk.mjs';
 
@@ -26,11 +27,11 @@ const OUT = 'dist/vendor';
 
 // REFUSES ON NO VENDOR, the same way `copy-spec-data.mjs` refuses on no
 // `src/spec`. `src/converter/to-rdf.ts` and `src/deserializer/n3-adapter.ts`
-// `require('../vendor/n3/...')` at RUNTIME, not at compile time — tsc never
-// checks that the file exists, so exiting 0 here let `npm run build` succeed
-// and ship a package that throws `MODULE_NOT_FOUND` the first time a consumer
-// called `serialize`/`deserialize` on a routed type. An absent build input
-// exiting 0 is the failure mode this repository keeps finding.
+// import `../vendor/n3/n3.js`, and tsc resolves that against `n3.d.ts` — it
+// never checks that the JavaScript beside it exists — so exiting 0 here let
+// `npm run build` succeed and ship a package that throws `ERR_MODULE_NOT_FOUND`
+// the first time a consumer imported it. An absent build input exiting 0 is the
+// failure mode this repository keeps finding.
 if (!existsSync(SRC)) {
   console.error(
     `copy-vendor: FAILED — ${SRC} is missing. It is generated rather than committed, so run `
@@ -41,6 +42,15 @@ if (!existsSync(SRC)) {
   process.exit(1);
 }
 
+// REPLACED, NOT MERGED. `cpSync` writes over what is there and leaves the rest,
+// so a file the vendor directory no longer holds survived in `dist/` from the
+// build before. That is not hypothetical: when the eight-file CommonJS copy of
+// n3 became one ES module (#95), the old `{"type": "commonjs"}` marker stayed
+// behind in `dist/vendor/n3/`, Node read the new `n3.js` beside it as
+// CommonJS, and `import` of the built package failed with "does not provide an
+// export named 'Parser'" — on a tree where `npm run build` had just exited 0.
+// `dist/` is a product of `src/`; nothing in it is worth keeping.
+rmSync(OUT, { recursive: true, force: true });
 cpSync(SRC, OUT, { recursive: true });
 
 const copied = walk(OUT);

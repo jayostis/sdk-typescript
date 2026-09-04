@@ -14,8 +14,8 @@
  * @see https://cascadeprotocol.org/docs/cascade-protocol-schemas
  */
 
-import { createHash, randomUUID } from 'node:crypto';
 import type { MultiValue } from '../models/common.js';
+import { sha1Hex } from './sha1.js';
 
 // ─── Internal Helpers ────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ import type { MultiValue } from '../models/common.js';
  * @internal
  */
 export function deterministicUuid(input: string): string {
-  const hash = createHash('sha1').update(input).digest('hex');
+  const hash = sha1Hex(input);
   const v = ((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80)
     .toString(16)
     .padStart(2, '0');
@@ -145,7 +145,35 @@ export function contentHashedUri(
   if (fallbackId) {
     return `urn:uuid:${deterministicUuid(`${resourceType}:${fallbackId}`)}`;
   }
-  return `urn:uuid:${randomUUID()}`;
+  return `urn:uuid:${randomUuid()}`;
+}
+
+/**
+ * A random version-4 UUID, from whatever randomness the platform offers.
+ *
+ * `crypto.randomUUID()` is the shared API — every browser, and Node since 19
+ * (Node 18 only behind `--experimental-global-webcrypto`). The last branch is
+ * for a Node 18 without the flag, where no synchronous source of entropy exists
+ * that a browser bundle could also resolve: `Math.random` is not
+ * cryptographic, and this is not a secret — it is the identifier of a record
+ * with no content to hash, which is already the case the algorithm cannot make
+ * stable. Reached only when `contentHashedUri` has neither a content field nor
+ * a `fallbackId`.
+ */
+function randomUuid(): string {
+  const webCrypto = globalThis.crypto;
+  if (webCrypto?.randomUUID) return webCrypto.randomUUID();
+
+  const bytes = new Uint8Array(16);
+  if (webCrypto?.getRandomValues) {
+    webCrypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 // ─── Typed Convenience Helpers ───────────────────────────────────────────────
