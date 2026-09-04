@@ -160,16 +160,26 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
 
     // `seen` is not defensiveness about our own writer, it is about documents
     // from anywhere else: `_:a rdf:rest _:a` is a cycle a graph can express and
-    // a list cannot, and walking it without this never returns.
-    for (let node: string | undefined = head; node && !seen.has(node); node = rest.get(node)) {
+    // a list cannot, and walking it without this never returns. A cycle WITHIN
+    // one list — `_:a rdf:rest _:b . _:b rdf:rest _:a .` — revisits a node
+    // already in `seen` without ever reaching `rdf:nil`; that is thrown below,
+    // explicitly, rather than left to fall out of the loop with the members
+    // collected so far, which would report a shorter list with no sign
+    // anything was wrong.
+    let node: string | undefined = head;
+    while (node !== undefined) {
+      if (seen.has(node)) {
+        throw new Error(
+          `Malformed rdf:List: the chain from ${head} cycles back to ${node} `
+          + 'without ever reaching rdf:nil.',
+        );
+      }
       seen.add(node);
       const member = first.get(node);
       if (member === undefined) {
-        // The chain ran out at `node` with no `rdf:first` there — the ONLY way
-        // this loop stops short of exhausting `seen` (a cycle exits through the
-        // `for` condition above, never here, so this branch never fires for
-        // one). A well-formed rdf:List ends this way exactly once, at
-        // `rdf:nil`. Anything else — `rdf:rest` pointing at a resource with no
+        // The chain ran out at `node` with no `rdf:first` there. A
+        // well-formed rdf:List ends this way exactly once, at `rdf:nil`.
+        // Anything else — `rdf:rest` pointing at a resource with no
         // `rdf:first`, or nowhere at all — is a chain that does not terminate
         // as a list, and returning the members collected so far would report a
         // shorter list with no sign anything was wrong: the exact silent
@@ -185,6 +195,7 @@ function collapseLists(quads: readonly any[], label: (id: string) => string): {
       members.push(
         firstIsNil.has(node) ? [] : chainNodes.has(member) ? resolve(member, resolving) : member,
       );
+      node = rest.get(node);
     }
 
     membersOf.set(head, members);
