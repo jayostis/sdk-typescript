@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import {
   deterministicUuid,
+  compareCodePoints,
   contentHashedUri,
   randomUuid,
   patientUri,
@@ -412,5 +413,123 @@ describe('canonical form of a set-valued identity input (core v3.6)', () => {
     // its docstring records that the other SDKs did not implement it yet. This
     // is that gap closing: same input, same canonical string.
     expect(canonicalFieldValue(['73211009', '44054006', '44054006'])).toBe('44054006,73211009');
+  });
+});
+
+// ─── The comparator itself (core v3.6, "sort ascending by Unicode code point")─
+//
+// The conformance vectors above measure the comparator through the URIs it
+// feeds, which is the cross-implementation contract. These test it directly, so
+// a failure says WHICH property broke rather than only that a hash moved.
+
+describe('compareCodePoints', () => {
+  const ASTRAL = '\u{1D51E}'; // MATHEMATICAL FRAKTUR SMALL A, surrogate pair D835 DD1E
+  const FULLWIDTH_BANG = '\uFF01'; // FULLWIDTH EXCLAMATION MARK
+
+  it('THE DIVERGENCE: an astral character sorts AFTER a BMP character above U+E000', () => {
+    // This is the one comparison where code-point order and JavaScript's native
+    // UTF-16 code-unit order disagree, and half the reason this function exists.
+    expect(compareCodePoints(FULLWIDTH_BANG, ASTRAL)).toBeLessThan(0);
+    expect(compareCodePoints(ASTRAL, FULLWIDTH_BANG)).toBeGreaterThan(0);
+
+    // Pinned as an inequality against the built-in so the test states what is
+    // being corrected, and fails loudly if a future engine changes either one.
+    expect(FULLWIDTH_BANG < ASTRAL).toBe(false);
+    expect([ASTRAL, FULLWIDTH_BANG].sort()).toEqual([ASTRAL, FULLWIDTH_BANG]);
+    expect([ASTRAL, FULLWIDTH_BANG].sort(compareCodePoints)).toEqual([FULLWIDTH_BANG, ASTRAL]);
+  });
+
+  it('agrees with the built-in comparator across the Basic Multilingual Plane', () => {
+    // The migration claim for the MEMBER sort, executable: everything a real
+    // terminology code contains is BMP, and there code-point order and the
+    // built-in code-unit order are identical, so no member-sorted identifier
+    // already minted moves.
+    const sample = [
+      'Alpha', '_under', 'alpha', 'Zeta', 'z', '\u00E9', 'loincCode', 'date',
+      'patient', '2339-0', 'E11.65', 'E11.9', 'urn:uuid:patient-smith', '',
+      'a', 'ab', 'abc', '\uE000', '\uFFFD', '0', '9', '~',
+    ];
+    for (const a of sample) {
+      for (const b of sample) {
+        const builtin = a < b ? -1 : a > b ? 1 : 0;
+        expect(Math.sign(compareCodePoints(a, b)), `${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBe(builtin);
+      }
+    }
+  });
+
+  it('is not locale collation, which is what the key sort used to call', () => {
+    // A collator puts 'alpha' before 'Zeta' and '_under' before 'Alpha'.
+    // Code point puts both the other way round, which is the property that
+    // keeps an identifier independent of the machine that minted it. The second
+    // pair is conformance's `key-order-underscore-after-uppercase`, reduced to
+    // the single comparison it turns on.
+    expect(compareCodePoints('Zeta', 'alpha')).toBeLessThan(0);
+    expect(compareCodePoints('Alpha', '_under')).toBeLessThan(0);
+    expect('Alpha'.localeCompare('_under')).toBeGreaterThan(0);
+  });
+
+  it('is a total order: antisymmetric, reflexive, and transitive on a mixed sample', () => {
+    const sample = [ASTRAL, FULLWIDTH_BANG, 'a', 'A', '_', '\uE000', '', 'ab', '\uD800'];
+    for (const a of sample) {
+      expect(compareCodePoints(a, a)).toBe(0);
+      for (const b of sample) {
+        // `|| 0` because `-Math.sign(0)` is `-0`, and vitest's `toBe` is
+        // Object.is, which distinguishes the two zeros. The sign is the claim.
+        const forward = Math.sign(compareCodePoints(a, b)) || 0;
+        const reverse = -Math.sign(compareCodePoints(b, a)) || 0;
+        expect(forward, `${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBe(reverse);
+      }
+    }
+    const sorted = [...sample].sort(compareCodePoints);
+    for (let i = 1; i < sorted.length; i++) {
+      expect(compareCodePoints(sorted[i - 1], sorted[i])).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('orders a prefix before the string that extends it', () => {
+    expect(compareCodePoints('E11', 'E11.9')).toBeLessThan(0);
+    expect(compareCodePoints('', 'a')).toBeLessThan(0);
+    expect(compareCodePoints(ASTRAL, ASTRAL + 'a')).toBeLessThan(0);
+  });
+
+  it('BOTH sort sites use it, not just the key sort', () => {
+    // The member sort and the key sort are separate lines of code, and a fix
+    // that reached only one would still pass every key-order vector. Fed as
+    // MEMBERS of one field, the same astral pair must canonicalize fullwidth
+    // first — this is the conformance member vector's expected URI.
+    expect(
+      contentHashedUri('Condition', {
+        patient: 'urn:uuid:patient-smith',
+        snomedCode: [ASTRAL, FULLWIDTH_BANG],
+      }),
+    ).toBe('urn:uuid:f2d72e66-e623-592b-adf3-e2dd98e7534c');
+
+    // And as KEYS, where the same pair must order fullwidth first.
+    expect(
+      contentHashedUri('Observation', { [ASTRAL]: 'fraktur', [FULLWIDTH_BANG]: 'fullwidth' }),
+    ).toBe('urn:uuid:94048491-e370-5d1e-9372-25a5dfd23966');
+  });
+});
+
+// ─── The comparator may not regress to a collator ────────────────────────────
+
+describe('identity module hygiene', () => {
+  it('the identity module never calls localeCompare outside prose', () => {
+    // `localeCompare` makes an identifier a function of the importing machine's
+    // locale. This module's key sort called it until 2026-09; the ban is here so
+    // the next writer cannot reintroduce it by reflex. Only occurrences in
+    // comments survive, and they are the ones explaining why it is absent.
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../src/utils/deterministic-uri.ts'),
+      'utf-8',
+    );
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    expect(code).not.toContain('localeCompare');
+    // And neither sort site may fall back to the default comparator.
+    expect(code).not.toMatch(/\.sort\(\s*\)/);
   });
 });

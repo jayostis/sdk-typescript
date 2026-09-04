@@ -12,7 +12,12 @@
  * moves one step earlier: the transform is declared in ONE script, this test
  * runs that script against the installed n3, and the committed file must equal
  * its output exactly. Edit `n3.js` and this fails. Bump the pin and this fails.
- * Change esbuild and this fails, which is why esbuild is an exact devDependency.
+ * Change esbuild and this fails, which is why BOTH inputs to the build are
+ * exact devDependencies: `esbuild` and `n3` itself. A caret range on either
+ * turns this test's meaning inside out — it would then be measuring the
+ * committed bundle against whatever version the last `npm install` happened to
+ * resolve, so a green run would mean "someone's lockfile agrees", not
+ * "reproducible from the pin".
  *
  * That is also why `n3` stays a devDependency after being vendored. It is the
  * input here, the oracle for the parser's behaviour, and the only way

@@ -202,6 +202,11 @@ export { validate, validateAll, type ValidationError, type ValidationResult, typ
 
 export {
   deterministicUuid,
+  // The identity comparator. Exported because a consumer that assembles its own
+  // identity string has to sort it the same way this SDK does, and JavaScript's
+  // two obvious choices — `localeCompare` and a bare `.sort()` — are each wrong
+  // for identity in a different way.
+  compareCodePoints,
   contentHashedUri,
   patientUri,
   immunizationUri,

@@ -4,6 +4,31 @@
 
 ### Changed
 
+- **Identity keys and set members are ordered by Unicode code point** (#96).
+  core v3.6 states it normatively on `cascade:cascadeUri`: "Sort ascending by
+  Unicode code point. (Code point, not locale collation: a locale-dependent
+  order would make identity depend on the machine.)" `contentHashedUri` sorted
+  identity keys with `localeCompare` and `canonicalFieldValue` sorted the members
+  of a set-valued field with a bare `.sort()`; the first is locale collation and
+  the second is UTF-16 code-unit order, and neither is the rule. Both now call
+  `compareCodePoints`, exported from the package barrel so a consumer assembling
+  its own identity string sorts the way this SDK does. Conformance's
+  `keyOrderVectors` and `multiValuedFieldVectors/condition-member-order-astral-vs-bmp`
+  (test-vectors.json 1.3, conformance#21) are wired into the suite and were
+  observed red on three of them before the change.
+
+  **This re-mints identifiers, so it is breaking.** Which ones was measured
+  rather than asserted: `scripts/dump-identity-uris.mjs` mints every
+  deterministic URI this SDK can produce over the shared fixture corpus — each
+  object's full field set, that set reversed, every single field and every
+  unordered pair, since a two-key identity string turns on exactly one
+  comparison — and diffing a run before against a run after gives **60,305
+  URIs, 10 moved**. All ten are inside
+  `conformance/fixtures/deterministic-ids/test-vectors.json` and all ten are the
+  vectors written to move: the astral key pair, the astral member, and the
+  two pairs a collator gets wrong (`_under` against `Alpha`, `é` against `z`).
+  Across the other 162 fixture files, **59,613 URIs, zero differences** — no
+  identifier over terminology codes, dates, names or URIs moves.
 - **The Node floor is 20.** `engines.node` is `>=20.0.0`, from `>=18.0.0`,
   and CI runs 20.x and 22.x. Node 18 has no `globalThis.crypto` without
   `--experimental-global-webcrypto`, so once `node:crypto` left the identity
