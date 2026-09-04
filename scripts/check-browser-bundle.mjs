@@ -10,11 +10,17 @@
  * on a `node:` builtin with no browser resolution, on a `createRequire`, on a
  * CommonJS `require()` a bundler cannot follow.
  *
- * WARNINGS FAIL TOO. esbuild reports a dynamic `require()` in ESM as a warning
- * and leaves a shim that throws "Dynamic require of ... is not supported" at
- * runtime — a bundle that builds and then breaks the first time `serialize` is
- * called. That is the exact failure this check exists to catch, so a warning
- * is a failure here, whatever esbuild calls it.
+ * WARNINGS FAIL TOO, AND SO DOES THE ONE THING ESBUILD DOES NOT WARN ABOUT.
+ * A string-literal `require('x')` that cannot resolve is an error. A
+ * NON-LITERAL `require(name)` is neither an error nor a warning against the
+ * pinned esbuild: it builds, the metafile lists nothing external, and the
+ * output carries a `__require` shim whose body throws "Dynamic require of ...
+ * is not supported" — a bundle that builds and then breaks the first time the
+ * path runs. That is the exact failure this check exists to catch, and the
+ * only other thing that would catch it is the vm smoke test, if the path
+ * happens to execute. So the output is searched for the shim esbuild injects
+ * for exactly that case: a marker derived from what esbuild parsed, not a
+ * quoted string, and one it emits only when a non-literal `require` survived.
  *
  * WHAT COMES OUT IS INSPECTED, NOT JUST WHETHER SOMETHING CAME OUT. A bundle
  * that still carries an import for the runtime to resolve is a bundle that
@@ -29,13 +35,13 @@
  * that MUST fail before pointing it at ours — as text, resolved from the
  * repository root, because a scratch file under the system temp directory
  * costs esbuild a 25-second walk of that directory on Windows; run as a script
- * it bundles `src/index.ts` and exits non-zero on any finding. Nothing is written unless
- * `--out` names a file; the artefact is the verdict, not the bundle.
+ * it bundles `src/index.ts` and exits non-zero on any finding. Nothing is
+ * written: the artefact is the verdict, not the bundle, and `bundleForBrowser`
+ * returns the bytes to anyone who wants them.
  *
  * @module scripts/check-browser-bundle
  */
 
-import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -95,8 +101,27 @@ export async function bundleForBrowser(entry, options = {}) {
     findings.push(`runtime resolution left in bundle: ${survivor}`);
   }
 
+  // The one case the metafile cannot show. See DYNAMIC_REQUIRE_SHIM.
+  if (DYNAMIC_REQUIRE_SHIM.test(code)) {
+    findings.push(
+      'dynamic require() left in bundle: esbuild injected its __require shim, which throws '
+      + '"Dynamic require of ... is not supported" the first time the path runs in a browser',
+    );
+  }
+
   return { findings, code };
 }
+
+/**
+ * The helper esbuild emits when a non-literal `require(expr)` survives into
+ * an ESM or IIFE bundle: `var __require = /* @__PURE__ *\/ ((x) => typeof
+ * require !== "undefined" ? require : ...`. Its body throws in a browser. A
+ * string-literal `require('x')` never produces it — esbuild inlines that or
+ * errors — so its presence is exactly one fact: something in the bundle
+ * still calls `require` with a value esbuild could not read. Anchored to the
+ * line start and the declaration, so a mention inside a string does not match.
+ */
+const DYNAMIC_REQUIRE_SHIM = /^\s*var __require = /m;
 
 function describe(message) {
   const where = message.location
@@ -107,8 +132,6 @@ function describe(message) {
 
 if (isMainModule(import.meta.url)) {
   const entry = resolve(ROOT, 'src/index.ts');
-  const outIndex = process.argv.indexOf('--out');
-  const out = outIndex === -1 ? undefined : process.argv[outIndex + 1];
 
   const { findings, code } = await bundleForBrowser(entry);
 
@@ -123,11 +146,8 @@ if (isMainModule(import.meta.url)) {
     process.exit(1);
   }
 
-  if (out) {
-    writeFileSync(resolve(ROOT, out), code, 'utf-8');
-  }
   console.log(
     `check-browser-bundle: OK — src/index.ts bundles for a browser `
-    + `(${(code.length / 1024).toFixed(0)}K esm${out ? `, written to ${out}` : ''})`,
+    + `(${(code.length / 1024).toFixed(0)}K esm)`,
   );
 }

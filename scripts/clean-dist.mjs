@@ -17,13 +17,26 @@
  * fresh clone has no `dist/`, and the first build must not fail on the absence
  * of the thing it is about to create.
  *
+ * ANCHORED TO THE REPOSITORY, NOT TO THE SHELL. This is the one script under
+ * `scripts/` that deletes, and a forced recursive `rmSync` has no accidental
+ * guard: resolved against `process.cwd()`, `node sdk-typescript/scripts/clean-dist.mjs`
+ * from a parent directory or a workspace root removed THAT directory's
+ * `dist/`, printed "removed", exited 0, and left the stale one this exists to
+ * remove. The target is the tree this file lives in. A test hands it a scratch
+ * tree as the one positional argument, so the test never points it at the real
+ * one and the default never points it at the caller's.
+ *
  * @module scripts/clean-dist
  */
 
 import { existsSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const OUT = 'dist';
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const tree = process.argv[2] ? resolve(process.argv[2]) : ROOT;
+const OUT = resolve(tree, 'dist');
 
 const existed = existsSync(OUT);
 rmSync(OUT, { recursive: true, force: true });
-console.log(existed ? `clean-dist: removed ${OUT}/` : `clean-dist: no ${OUT}/ to remove`);
+console.log(existed ? `clean-dist: removed ${OUT}` : `clean-dist: no ${OUT} to remove`);

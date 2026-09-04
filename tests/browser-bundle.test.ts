@@ -70,6 +70,20 @@ describe('bundleForBrowser', () => {
     expect(code).toContain('TextEncoder');
   });
 
+  it('names a non-literal require(), which esbuild builds without a word', async () => {
+    // Against the pinned esbuild this is neither an error nor a warning, and
+    // the metafile lists nothing external: the bundle builds, and carries a
+    // `__require` shim that throws the first time the path runs in a browser.
+    // The only other thing that would catch it is the vm smoke test, and only
+    // if the path executes. So the check reads the shim esbuild injects.
+    const { findings } = await bundleForBrowser(entrySaying(
+      'export const load = (name: string) => require(name);\n',
+    ));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('dynamic require()');
+  });
+
   it('is silent for an import spelled inside a string', async () => {
     // A usage hint or an error message quoting the statement is text, not a
     // module the browser must supply. The check asks esbuild what it left
@@ -104,8 +118,13 @@ describe('src/index.ts for a browser', () => {
     const { findings, code } = await bundleForBrowser(ENTRY, { format: 'iife', globalName: 'CascadeSdk' });
     expect(findings).toEqual([]);
 
+    // `crypto` is on the page because every real browser has it, and the
+    // identity module's random fallback takes the `randomUUID` branch there;
+    // a page without it would run a branch no browser runs. Node's is the
+    // same Web Crypto object a browser exposes.
     const page: Record<string, unknown> = {
       TextEncoder, TextDecoder, URL, console, queueMicrotask, setTimeout, clearTimeout,
+      crypto: globalThis.crypto,
     };
     runInNewContext(code, page, { filename: 'sdk.browser.js' });
 
@@ -115,6 +134,7 @@ describe('src/index.ts for a browser', () => {
       toJsonLd(record: object): object;
       fromJsonLd(doc: object): Record<string, unknown>;
       validate(record: object): { valid: boolean };
+      contentHashedUri(resourceType: string, fields: Record<string, string>): string;
     };
     expect(sdk, 'the IIFE did not define CascadeSdk on the page').toBeDefined();
 
@@ -136,5 +156,10 @@ describe('src/index.ts for a browser', () => {
     const doc = sdk.toJsonLd(fixture.input);
     expect(sdk.fromJsonLd(doc).id).toBe(fixture.input.id);
     expect(sdk.validate(fixture.input)).toHaveProperty('valid');
+
+    // The random fallback, on the page's own Web Crypto: a record with nothing
+    // to hash still gets a well-formed identifier where a browser would mint it.
+    expect(sdk.contentHashedUri('Condition', {}))
+      .toMatch(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });

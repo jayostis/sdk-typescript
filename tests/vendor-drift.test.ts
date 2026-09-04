@@ -156,7 +156,9 @@ describe('vendored n3 has not drifted', () => {
       return;
     }
 
-    for (const f of [BUNDLE, 'n3.d.ts', 'LICENSE.md']) {
+    // All four, as VENDOR.md claims — the manifest ships too, via cpSync, and
+    // a reader of the published package is the one who needs it most.
+    for (const f of [BUNDLE, 'n3.d.ts', 'LICENSE.md', 'VENDOR.md']) {
       expect(existsSync(join(dist, f)), `${f} did not reach dist/vendor/n3`).toBe(true);
     }
     expect(readFileSync(join(dist, BUNDLE))).toEqual(readFileSync(join(VENDORED, BUNDLE)));

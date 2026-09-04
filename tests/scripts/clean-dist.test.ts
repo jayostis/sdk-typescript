@@ -12,8 +12,10 @@
  * each on a build that exited 0. One removal at the front of the build covers
  * all three, rather than one inside the copier that happened to bite.
  *
- * Run as a child process, from a scratch tree: the script removes a directory
- * and this must never point it at the real one.
+ * Run as a child process, handed a scratch tree as its one argument: the
+ * script removes a directory and this must never point it at the real one.
+ * The argument exists for this test; without one the script resolves `dist/`
+ * against the tree it lives in, never against the shell's directory.
  *
  * @module tests/scripts
  */
@@ -47,9 +49,28 @@ describe('clean-dist.mjs', () => {
     writeFileSync(join(dist, 'vendor/n3/package.json'), '{"type":"commonjs"}\n');
     writeFileSync(join(dist, 'spec/dropped.jsonld'), '{}\n');
 
-    execFileSync(process.execPath, [SCRIPT], { cwd: workdir, stdio: 'pipe' });
+    execFileSync(process.execPath, [SCRIPT, workdir], { cwd: workdir, stdio: 'pipe' });
 
     expect(existsSync(dist), 'dist/ survived the clean').toBe(false);
+  });
+
+  it('removes the tree it is given, not the one the shell is in', () => {
+    // A forced recursive rmSync resolved against process.cwd() ran from a
+    // parent directory or a workspace root and removed THAT directory's
+    // dist/, reporting success. Two scratch trees: the shell stands in one,
+    // the script is told the other, and only the other's dist/ may go.
+    workdir = mkdtempSync(join(tmpdir(), 'clean-dist-test-'));
+    const shell = join(workdir, 'elsewhere');
+    const target = join(workdir, 'repo');
+    mkdirSync(join(shell, 'dist'), { recursive: true });
+    mkdirSync(join(target, 'dist'), { recursive: true });
+    writeFileSync(join(shell, 'dist/theirs.js'), 'export const theirs = 1;\n');
+    writeFileSync(join(target, 'dist/stale.js'), 'export const stale = 1;\n');
+
+    execFileSync(process.execPath, [SCRIPT, target], { cwd: shell, stdio: 'pipe' });
+
+    expect(existsSync(join(target, 'dist')), 'the named tree kept its dist/').toBe(false);
+    expect(existsSync(join(shell, 'dist/theirs.js')), "the shell's own dist/ was removed").toBe(true);
   });
 
   it('exits 0 on a tree that has never been built', () => {
@@ -57,7 +78,7 @@ describe('clean-dist.mjs', () => {
     // absence of the thing it is about to create.
     workdir = mkdtempSync(join(tmpdir(), 'clean-dist-test-'));
 
-    expect(() => execFileSync(process.execPath, [SCRIPT], { cwd: workdir, stdio: 'pipe' })).not.toThrow();
+    expect(() => execFileSync(process.execPath, [SCRIPT, workdir], { cwd: workdir, stdio: 'pipe' })).not.toThrow();
   });
 });
 
