@@ -76,15 +76,6 @@ const PREDICATES_FILE = process.env.CASCADE_PREDICATES_FILE
   ? resolve(process.env.CASCADE_PREDICATES_FILE)
   : join(root, 'src/vocabularies/namespaces.ts');
 
-/**
- * The prefixes `src/jsonld/context.ts` excludes from the generated context
- * (`DRAFT_CONTEXT_EXCLUDED_PREFIXES`): draft vocabularies this SDK registers
- * so Turtle round-trips, deliberately absent from spec's ontologies. MIRRORED,
- * not imported — `scripts/` cannot import a `src/` TypeScript module — so a
- * prefix graduating there has to be removed here as well.
- */
-const DRAFT_CONTEXT_EXCLUDED_PREFIXES = new Set(['evidence', 'workbench', 'oa', 'ical', 'skos']);
-
 // Opened first: a crash anywhere below leaves no findings file rather than
 // the previous run's, which is what lets the collector tell the two apart.
 const findings = openFindings({ source: 'build-terms', dir: DIAGNOSTICS });
@@ -219,6 +210,8 @@ const sightings = [];
 
 /** range IRI -> the terms (`vocabulary:term`) whose predicate has that range. */
 const rangeReachedBy = new Map();
+/** range IRI -> the context files those terms were read from. */
+const rangeReachedFrom = new Map();
 
 for (const file of contextFiles) {
   const vocabulary = file.replace(/\.jsonld$/, '');
@@ -272,6 +265,7 @@ for (const file of contextFiles) {
     if (range) entry.range = range;
     if (range) {
       (rangeReachedBy.get(range) ?? rangeReachedBy.set(range, new Set()).get(range)).add(`${vocabulary}:${term}`);
+      (rangeReachedFrom.get(range) ?? rangeReachedFrom.set(range, new Set()).get(range)).add(file);
     }
     if (range && !valueSets[range]) {
       const members = membersOf(range);
@@ -317,8 +311,17 @@ for (const { file, vocabulary, term, id } of unresolvable) {
 
 // THE ONE CODE THAT BLOCKS CONVERSION: `src/converter/to-rdf.ts` refuses a
 // value for a property whose range is here, so `error`.
+//
+// LOCATED BY THE ONTOLOGY WHERE THERE IS ONE, BY THE CONTEXT OTHERWISE. A
+// range with no node is placed by its namespace, and that has an answer only
+// where spec ships an `owl:Ontology` for it — a range under `evidence:`,
+// `workbench:` or a vocabulary not yet pinned has none. The context that
+// reached it is always known and is a file to open; without the fallback the
+// row would carry no location, `record()` would refuse it, and a spec defect
+// would become a generator that exits 1 with neither file written.
 for (const [range, { specFix }] of Object.entries(unclassifiableRanges)) {
   const reachedBy = [...rangeReachedBy.get(range) ?? []].sort();
+  const ontologies = locations.ontologyOf(range);
   findings.record({
     code: 'unclassifiable-range',
     severity: 'error',
@@ -329,12 +332,15 @@ for (const [range, { specFix }] of Object.entries(unclassifiableRanges)) {
       + 'property), so a converter cannot express a value for it and refuses rather than guess.',
     specFix,
     reachedBy,
-    location: locations.ontologyOf(range),
+    location: ontologies.length > 0
+      ? ontologies
+      : [...rangeReachedFrom.get(range) ?? []].map((file) => locations.context(file)),
   });
 }
 
-// ONE ROW PER KEY, with every predicate it resolved to. Property terms only:
-// `SocialHistoryRecord` is `record-class-name-collision`'s row already.
+// ONE ROW PER KEY, with every predicate it resolved to. Everything but a key
+// whose every IRI is a live record class: `SocialHistoryRecord` is
+// `record-class-name-collision`'s row already, and nothing else is anyone's.
 const conflicts = crossContextConflicts(nodes, sightings);
 for (const { term, predicates, files } of conflicts) {
   findings.record({
@@ -409,10 +415,13 @@ for (const { range, members } of rangesWithUnrecognizedTypedMembers(nodes)) {
 
 // The SDK's claim about spec, checked against spec. `sdk` when no context
 // carries the IRI either (every hit at this pin); `reconcile` when one does,
-// since then spec disagrees with itself.
+// since then spec disagrees with itself. Scoped to the namespaces the graph
+// declares an `owl:Ontology` for — the draft vocabularies this SDK registers
+// so Turtle round-trips (`evidence:`, `workbench:`) have none and are out of
+// scope by that fact, not by a list kept here.
 const predicatesModule = readPredicatesModule(PREDICATES_FILE);
 const predicatesPath = `sdk:${relative(root, PREDICATES_FILE).split('\\').join('/')}`;
-const undeclared = undeclaredPredicates(nodes, predicatesModule.expanded, DRAFT_CONTEXT_EXCLUDED_PREFIXES, sightings);
+const undeclared = undeclaredPredicates(nodes, predicatesModule.expanded, sightings);
 for (const { iri, keys, inContexts } of undeclared) {
   const inContext = inContexts.length > 0;
   findings.record({

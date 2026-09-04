@@ -15,9 +15,13 @@
  * and one contested key with two predicates. Counting transitions is how "34
  * keys" and "35 conflicts" came to disagree.
  *
- * A CLASS TERM IS NOT A CONFLICT HERE. `SocialHistoryRecord` names two classes
- * in two contexts, and that is `record-class-name-collision`'s row already; a
- * second row under this code would be the same gap filed twice.
+ * A LIVE RECORD CLASS PAIR IS NOT A CONFLICT HERE. `SocialHistoryRecord` names
+ * two live record classes in two contexts, and that is
+ * `record-class-name-collision`'s row already; a second row under this code
+ * would be the same gap filed twice. That detector sees ONLY live record
+ * classes, so any other class-vs-class collision — two plain `owl:Class`es, or
+ * a deprecated record class against a live one — has no other row and is
+ * reported here.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -31,8 +35,8 @@ import {
 } from '../../scripts/lib/spec-source.mjs';
 
 import {
-  CASCADE, CLINICAL, HEALTH, OWL_CLASS, XSD_STRING, cleanupScratch, context, findingsOf, klass,
-  ontology, property, repoRoot, rowsFor, runGenerator, scratchData, type Finding,
+  CASCADE, CLINICAL, HEALTH, OWL_DEPRECATED, RECORD_CLASS, XSD_STRING, cleanupScratch, context,
+  findingsOf, klass, ontology, property, repoRoot, rowsFor, runGenerator, scratchData, type Finding,
 } from './scratch.js';
 
 const CODE = 'term-cross-context-conflict';
@@ -50,8 +54,15 @@ describe(CODE, () => {
             ontology(CLINICAL),
             property(`${CLINICAL}sourceBundleId`, { range: XSD_STRING }),
             klass(`${CLINICAL}SocialHistoryRecord`, { record: true }),
+            klass(`${CLINICAL}Pharmacy`),
+            klass(`${CLINICAL}Archive`, { record: true, deprecated: true }),
           ],
-          health: [ontology(HEALTH), klass(`${HEALTH}SocialHistoryRecord`, { record: true })],
+          health: [
+            ontology(HEALTH),
+            klass(`${HEALTH}SocialHistoryRecord`, { record: true }),
+            klass(`${HEALTH}Pharmacy`),
+            klass(`${HEALTH}Archive`, { record: true }),
+          ],
         },
         // Read in name order: alpha (A), beta (B), gamma (A again).
         contexts: {
@@ -63,11 +74,15 @@ describe(CODE, () => {
           beta: context({
             sourceBundleId: typed('clinical:sourceBundleId'),
             SocialHistoryRecord: 'clinical:SocialHistoryRecord',
+            Pharmacy: 'clinical:Pharmacy',
+            Archive: 'clinical:Archive',
             b1: typed('clinical:b1'),
           }),
           gamma: context({
             sourceBundleId: typed('cascade:sourceBundleId'),
             SocialHistoryRecord: 'health:SocialHistoryRecord',
+            Pharmacy: 'health:Pharmacy',
+            Archive: 'health:Archive',
             g1: typed('health:g1'),
             g2: typed('health:g2'),
           }),
@@ -81,15 +96,21 @@ describe(CODE, () => {
     afterAll(cleanupScratch);
 
     it('reports a key declared A, B, A once, with its two predicates', () => {
-      expect(rows.map((row) => row.subject)).toEqual(['sourceBundleId']);
-      expect([...(rows[0]?.predicates as string[])].sort()).toEqual([
+      const row = rows.find((r) => r.subject === 'sourceBundleId');
+
+      expect(row, 'no row for sourceBundleId').toBeDefined();
+      expect([...(row?.predicates as string[])].sort()).toEqual([
         `${CLINICAL}sourceBundleId`,
         `${CASCADE}sourceBundleId`,
       ]);
     });
 
-    it('reports no row for a class term two contexts name differently', () => {
+    it('reports no row for two live record classes, which record-class-name-collision owns', () => {
       expect(rows.some((row) => row.subject === 'SocialHistoryRecord')).toBe(false);
+    });
+
+    it('reports two plain classes, and a deprecated record class against a live one', () => {
+      expect(rows.map((row) => row.subject)).toEqual(['Archive', 'Pharmacy', 'sourceBundleId']);
     });
   });
 
@@ -97,13 +118,15 @@ describe(CODE, () => {
     /**
      * Re-derived here rather than read from the generator: every key whose
      * expanded values across the shipped contexts are more than one IRI, less
-     * the keys naming only classes. `scripts/lib/spec-source.mjs` is shared
-     * plumbing, not the detector.
+     * the keys naming only LIVE RECORD classes — the population
+     * `record-class-name-collision` covers, and no wider. `scripts/lib/spec-source.mjs`
+     * is shared plumbing, not the detector.
      */
     function conflictedPropertyKeys(): string[] {
       const contexts = join(repoRoot, 'src/spec/contexts');
       const prefixes = contextPrefixes(contexts) as Map<string, string>;
-      const nodes = mergedOntologyGraph(join(repoRoot, 'src/spec/ontologies')) as Map<string, { '@type'?: string[] }>;
+      const nodes = mergedOntologyGraph(join(repoRoot, 'src/spec/ontologies')) as
+        Map<string, { '@type'?: string[]; [predicate: string]: unknown }>;
       const byKey = new Map<string, Set<string>>();
 
       for (const file of readdirSync(contexts).filter((f) => f.endsWith('.jsonld'))) {
@@ -119,10 +142,13 @@ describe(CODE, () => {
         }
       }
 
-      const isClass = (iri: string) => (nodes.get(iri)?.['@type'] ?? []).includes(OWL_CLASS);
+      const isLiveRecordClass = (iri: string) => {
+        const node = nodes.get(iri);
+        return Boolean(node) && (node?.['@type'] ?? []).includes(RECORD_CLASS) && !node?.[OWL_DEPRECATED];
+      };
 
       return [...byKey]
-        .filter(([, iris]) => iris.size > 1 && ![...iris].every(isClass))
+        .filter(([, iris]) => iris.size > 1 && ![...iris].every(isLiveRecordClass))
         .map(([term]) => term)
         .sort();
     }

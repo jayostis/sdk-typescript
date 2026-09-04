@@ -1,9 +1,10 @@
 /**
- * `withFindings` (`scripts/lib/diagnostics.mjs`) is the one write cycle every
- * generator's findings go through: delete the previous file first, collect,
- * write at the end.
+ * `openFindings` (`scripts/lib/diagnostics.mjs`) is the write cycle every
+ * generator's findings go through: delete the previous file at open, collect
+ * through `record()`, write at `close()`. The three generators call exactly
+ * this pair, so this is the path the real build takes.
  *
- * THE DELETE-AT-START IS THE THING UNDER TEST. A file written only at the end
+ * THE DELETE-AT-OPEN IS THE THING UNDER TEST. A file written only at the end
  * trivially does not exist after a crash — what would survive is the PREVIOUS
  * run's file, which the collector then merges as though it were this run's.
  * Stale findings are the failure a diagnostics build is least able to notice
@@ -17,9 +18,16 @@ import { join } from 'node:path';
 import { describe, it, expect, afterEach } from 'vitest';
 
 // @ts-expect-error -- a build script, deliberately plain JavaScript and untyped.
-import { withFindings } from '../../scripts/lib/diagnostics.mjs';
+import { openFindings } from '../../scripts/lib/diagnostics.mjs';
 
 import type { Finding } from './scratch.js';
+
+interface Findings {
+  record(finding: object): Finding;
+  close(): number;
+}
+
+const open = (dir: string): Findings => openFindings({ source: 'build-terms', dir }) as Findings;
 
 /** The real `jayostis/spec#48` shape: a context "term" that is a section header. */
 const seeded = {
@@ -46,15 +54,15 @@ afterEach(() => {
 const written = (dir: string): Finding[] =>
   JSON.parse(readFileSync(join(dir, 'build-terms.json'), 'utf-8')) as Finding[];
 
-describe('withFindings', () => {
+describe('openFindings', () => {
   it('gives the same seeded finding the same id across two separate runs', () => {
     const first = scratch();
     const second = scratch();
 
     for (const dir of [first, second]) {
-      withFindings({ source: 'build-terms', dir }, (findings: { record(f: object): void }) => {
-        findings.record(seeded);
-      });
+      const findings = open(dir);
+      findings.record(seeded);
+      findings.close();
     }
 
     expect(existsSync(join(first, 'build-terms.json'))).toBe(true);
@@ -70,17 +78,18 @@ describe('withFindings', () => {
     expect(a.source).toBe('build-terms');
   });
 
-  it('leaves neither the previous file nor a new one when the run crashes after recording', () => {
+  it('leaves neither the previous file nor a new one when the run never reaches close()', () => {
     const dir = scratch();
     const file = join(dir, 'build-terms.json');
 
     writeFileSync(file, JSON.stringify([{ ...seeded, id: 'stale', source: 'build-terms' }]), 'utf-8');
 
-    expect(() => withFindings({ source: 'build-terms', dir }, (findings: { record(f: object): void }) => {
-      findings.record(seeded);
-      throw new Error('fixture crash');
-    })).toThrow('fixture crash');
+    const findings = open(dir);
+    expect(existsSync(file), 'the previous file survived open()').toBe(false);
 
-    expect(existsSync(file), 'a findings file survived the crash').toBe(false);
+    findings.record(seeded);
+    // No close(): the generator crashed after recording.
+
+    expect(existsSync(file), 'a findings file exists before close()').toBe(false);
   });
 });

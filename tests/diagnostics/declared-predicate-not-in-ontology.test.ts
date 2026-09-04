@@ -9,11 +9,15 @@
  * context publishes it, the ontology does not, and which of them is right is
  * a conversation rather than a fix).
  *
- * SCOPED TO THE NAMESPACES SPEC SHIPS AN ONTOLOGY FOR. `evidence:` and
- * `workbench:` are Cascade namespaces with no ontology in `spec-sources.json`,
- * and `foaf:` is not spec's at all; a predicate there is absent from the
- * ontology by construction, and reporting it would be twenty rows nobody can
- * close. An `owl:AnnotationProperty` is declared, whatever else it is not.
+ * SCOPED TO THE NAMESPACES SPEC SHIPS AN ONTOLOGY FOR, read off the graph:
+ * a namespace is in scope when some ontology declares it as `owl:Ontology`.
+ * `workbench:` is a Cascade namespace with no ontology, and `foaf:` is not
+ * spec's at all; a predicate there is absent from the ontology by construction,
+ * and reporting it would be twenty rows nobody can close. The fixture gives
+ * `evidence:` an ontology that declares nothing, which is the day a draft
+ * vocabulary graduates: its predicates come into scope by that fact alone,
+ * with no list anywhere to forget to edit. An `owl:AnnotationProperty` is
+ * declared, whatever else it is not.
  *
  * `CASCADE_PREDICATES_FILE` points the generator at
  * `tests/diagnostics/fixtures/predicates.ts`, a stand-in in the real file's
@@ -33,6 +37,9 @@ import {
 const CODE = 'declared-predicate-not-in-ontology';
 const PREDICATES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/predicates.ts');
 
+/** A draft namespace the fixture has just shipped an (empty) ontology for. */
+const EVIDENCE = 'https://ns.cascadeprotocol.org/evidence/v1#';
+
 let rows: Finding[];
 
 beforeAll(() => {
@@ -47,6 +54,7 @@ beforeAll(() => {
         ontology(CLINICAL),
         property(`${CLINICAL}declared`, { range: XSD_STRING }),
       ],
+      evidence: [ontology(EVIDENCE)],
     },
     contexts: {
       core: context({ present: { '@id': 'cascade:present', '@type': 'xsd:string' } }),
@@ -68,6 +76,17 @@ describe(CODE, () => {
     expect(Object.fromEntries(rows.map((row) => [row.subject, row.owner]))).toEqual({
       [`${CASCADE}ghost`]: 'sdk',
       [`${CLINICAL}contextOnly`]: 'reconcile',
+      [`${EVIDENCE}direction`]: 'sdk',
     });
+  });
+
+  it('places a predicate in a namespace whose ontology declares nothing at that ontology', () => {
+    const row = rows.find((r) => r.subject === `${EVIDENCE}direction`);
+
+    // `sdk:` because the fixture's `evidence` is not in `spec-sources.json`; the
+    // point is that the namespace is in scope and the row knows its file.
+    expect(row?.location).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^sdk:.*ontologies\/evidence\.jsonld$/)]),
+    );
   });
 });

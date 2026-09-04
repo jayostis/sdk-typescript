@@ -5,7 +5,7 @@
  * REFUSES, NEVER SKIPS. A missing per-generator file is not an empty one — a
  * generator that crashed before writing looks, from here, exactly like one
  * that found nothing — and a merged file that quietly carried on would be the
- * stale-findings failure `withFindings` deletes-at-start to prevent, arriving
+ * stale-findings failure `openFindings` deletes-at-start to prevent, arriving
  * by another door. So every malformed input exits non-zero naming its reason.
  *
  * THE ID CHECK IS AN EQUALITY, and the well-formed fixture is what forces it.
@@ -60,6 +60,9 @@ describe('collect-diagnostics', () => {
   describe('refuses, naming the reason, and writes nothing', () => {
     it.each([
       ['missing-file', /build-terms/],
+      // Interrupted mid-write: the refusal has to name the file and the
+      // generator, not just echo JSON.parse.
+      ['truncated', /build-terms\.json.*not valid JSON/],
       ['repeated-id', /unclassifiable-range:https:\/\/ns\.cascadeprotocol\.org\/health\/v1#HRVReading/],
       ['id-mismatch', /unclassifiable-range:HRVReading/],
       ['owner-none', /none/],

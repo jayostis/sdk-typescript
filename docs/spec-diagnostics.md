@@ -52,7 +52,7 @@ The document every code in `src/spec/diagnostics.md` links to. The rendered file
 
 **What it means.** One JSON key resolves to different predicates in different context files — `notes` is `clinical:notes` under `clinical.jsonld` and `health:notes` under `health.jsonld` (the `predicates`). A single flat key→predicate map would pick one silently and write the wrong predicate for every record of the other class; this SDK keeps per-vocabulary tables in `terms.generated.ts` for exactly this reason. One row per key, however many contexts redeclare it.
 
-**Where to look.** Every context file in the row's locations, at the key in the subject. Detector: `scripts/build-terms.mjs`, the `conflicts` list, property terms only.
+**Where to look.** Every context file in the row's locations, at the key in the subject. Detector: `scripts/build-terms.mjs`, the `conflicts` list. One exemption: a key whose every IRI is a live record class is `record-class-name-collision`'s row and is not repeated here; any other collision — two plain classes, a deprecated record class against a live one — has no other row and is reported.
 
 **Why it's a judgment call.** The reuse is deliberate — the same word means different things per vocabulary — and a JSON-LD 1.0 context cannot scope a key by the type of the record it appears in. It is not a mistake in either file; it is a limit of how spec publishes. `jayostis/spec#4` proposes JSON-LD 1.1 type-scoped terms, which would let one key mean one thing per class. The fix is upstream design, not a rename.
 
@@ -98,7 +98,7 @@ The document every code in `src/spec/diagnostics.md` links to. The rendered file
 
 ### `declared-predicate-not-in-ontology`
 
-**What it means.** `src/vocabularies/namespaces.ts` registers a predicate in a Cascade namespace that no spec ontology declares. Two forms, told apart by `owner`: **`sdk`** — no spec context carries it either, so spec has never heard of it and this SDK invented it; **`reconcile`** — a context does carry it but the ontology does not, so spec disagrees with itself. Draft namespaces (`evidence:`, `workbench:`, …) and borrowed vocabulary (`foaf:`, `dcterms:`, …) are excluded by design and never appear here.
+**What it means.** `src/vocabularies/namespaces.ts` registers a predicate in a Cascade namespace that no spec ontology declares. Two forms, told apart by `owner`: **`sdk`** — no spec context carries it either, so spec has never heard of it and this SDK invented it; **`reconcile`** — a context does carry it but the ontology does not, so spec disagrees with itself. Scoped to the namespaces some ontology file declares as its `owl:Ontology`: draft namespaces spec ships no ontology for (`evidence:`, `workbench:`, …) and borrowed vocabulary (`foaf:`, `dcterms:`, …) are out of scope by that fact and never appear here — and a draft vocabulary comes into scope the day its ontology lands, with no list to update.
 
 **Where to look.** `sdk:src/vocabularies/namespaces.ts` at the `PROPERTY_PREDICATES` entry for the subject, then `src/models/` for any interface field that writes that key; confirm absence in `spec:ontologies/<vocab>/v1/<vocab>.ttl` and `spec:contexts/v1/*.jsonld`. Detector: `scripts/build-terms.mjs`, cross-referencing `namespaces.ts` (expanded with its own prefix table) against the ontology graph.
 

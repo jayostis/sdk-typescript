@@ -19,21 +19,32 @@
  * namespace to its ontology file after it has read every context, which is
  * after the loop that spots most of these.
  *
- * "IS THIS TERM A PROPERTY?" — the one filter two detectors share. A context
- * term names a class (`"PatientProfile": "cascade:PatientProfile"`) as
- * readily as a property, and class terms have no `@type` and no `rdfs:range`
- * by nature and collide across contexts the way property terms do. A term is
- * a property term when its IRI's node is typed `rdf:Property` or one of the
- * three OWL property kinds — annotation properties INCLUDED, since every real
- * `term-no-type-info` hit is one — OR when the IRI has no node at all: a
- * context term the ontology never declares is written to `terms.generated.ts`
- * as a bare predicate and converted by guessing, the exact case the check
- * exists for, and "typed as a property" would skip it. Zero such terms exist
- * at the current pin; this is a tripwire, stated so nobody narrows the filter
- * later and calls it a cleanup.
+ * "IS THIS TERM A PROPERTY?" — `term-no-type-info`'s filter. A context term
+ * names a class (`"PatientProfile": "cascade:PatientProfile"`) as readily as
+ * a property, and class terms have no `@type` and no `rdfs:range` by nature.
+ * A term is a property term when its IRI's node is typed `rdf:Property` or
+ * one of the three OWL property kinds — annotation properties INCLUDED, since
+ * every real `term-no-type-info` hit is one — OR when the IRI has no node at
+ * all: a context term the ontology never declares is written to
+ * `terms.generated.ts` as a bare predicate and converted by guessing, the
+ * exact case the check exists for, and "typed as a property" would skip it.
+ * Zero such terms exist at the current pin; this is a tripwire, stated so
+ * nobody narrows the filter later and calls it a cleanup.
+ *
+ * "IS THIS A LIVE RECORD CLASS?" — `term-cross-context-conflict`'s one
+ * exemption, and it is exactly `record-class-name-collision`'s population and
+ * no wider. That detector (`build-record-types.mjs`) sees only live
+ * `cascade:RecordClass` members, so a key whose every IRI is one of those is
+ * its row; a key naming two plain `owl:Class`es, or a deprecated record class
+ * against a live one, is nobody else's and is reported here whatever kind of
+ * thing it names. "Not a property" was the earlier exemption, and it left
+ * those with no row at all.
  *
  * @module scripts/lib/detectors
  */
+
+import { namespaceOf } from './iri.mjs';
+import { RECORD_CLASS } from './record-population.mjs';
 
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
@@ -43,6 +54,7 @@ export const RDFS_RANGE = `${RDFS}range`;
 export const RDFS_SEE_ALSO = `${RDFS}seeAlso`;
 export const OWL_DEPRECATED = `${OWL}deprecated`;
 const OWL_NAMED_INDIVIDUAL = `${OWL}NamedIndividual`;
+const OWL_ONTOLOGY = `${OWL}Ontology`;
 
 export const CASCADE_NAMESPACE = 'https://ns.cascadeprotocol.org/';
 
@@ -64,6 +76,21 @@ export const isDeclaredProperty = (nodes, iri) =>
 export const isPropertyTerm = (nodes, iri) => !nodes.has(iri) || isDeclaredProperty(nodes, iri);
 
 const isDeprecated = (node) => Boolean(node[OWL_DEPRECATED]);
+
+/** Whether `iri` is a record class `build-record-types.mjs` ships as live. */
+const isLiveRecordClass = (nodes, iri) => {
+  const node = nodes.get(iri);
+  return Boolean(node) && typesOf(nodes, iri).includes(RECORD_CLASS) && !isDeprecated(node);
+};
+
+/** Every namespace some ontology file declares as its own `owl:Ontology`. */
+const ontologyNamespaces = (nodes) => {
+  const namespaces = new Set();
+  for (const [iri, node] of nodes) {
+    if ((node['@type'] ?? []).includes(OWL_ONTOLOGY)) namespaces.add(iri);
+  }
+  return namespaces;
+};
 
 /**
  * A context term as the generator saw it: which file, which key, which
@@ -89,9 +116,11 @@ const sortedUnique = (values) => [...new Set(values)].sort();
  *
  * PER KEY, NOT PER TRANSITION. `sourceBundleId` is declared in three contexts
  * — `core:`, then `clinical:`, then `core:` again — which is two transitions
- * in a loop and one contested key with two predicates. Restricted to property
- * terms: `SocialHistoryRecord` names two record classes in two contexts, and
- * that is `record-class-name-collision`'s row already.
+ * in a loop and one contested key with two predicates. One exemption: a key
+ * whose EVERY IRI is a live record class (`SocialHistoryRecord`) is
+ * `record-class-name-collision`'s row already. Any other collision — two plain
+ * classes, a deprecated record class against a live one, a class against a
+ * property — has no other row and is reported.
  *
  * @param {Map<string, object>} nodes
  * @param {TermSighting[]} sightings
@@ -103,7 +132,7 @@ export function crossContextConflicts(nodes, sightings) {
   for (const [term, seen] of groupBy(sightings, (s) => s.term)) {
     const predicates = sortedUnique(seen.map((s) => s.predicate));
     if (predicates.length < 2) continue;
-    if (!predicates.some((predicate) => isPropertyTerm(nodes, predicate))) continue;
+    if (predicates.every((predicate) => isLiveRecordClass(nodes, predicate))) continue;
 
     conflicts.push({ term, predicates, files: sortedUnique(seen.map((s) => s.file)) });
   }
@@ -112,26 +141,36 @@ export function crossContextConflicts(nodes, sightings) {
 }
 
 /**
- * Every property term the contexts leave untyped AND the ontology leaves
+ * Every property term EVERY context leaves untyped AND the ontology leaves
  * unranged — nothing anywhere says what shape its value takes — deduped by
  * predicate, since most are declared once in their own vocabulary's context
  * and again in `cascade.jsonld`.
+ *
+ * GROUPED BEFORE JUDGED. A predicate typed in one context and bare in another
+ * has a stated shape; filtering sightings one at a time would discard the
+ * typed one and report the bare one as "no `@type` in any context", which
+ * is false. The question is asked of the predicate, over all of its sightings.
  *
  * @param {Map<string, object>} nodes
  * @param {TermSighting[]} sightings
  * @returns {{ predicate: string, reachedBy: string[], files: string[] }[]}
  */
 export function termsWithNoTypeInfo(nodes, sightings) {
-  const untyped = sightings.filter((s) =>
-    !s.typed && !nodes.get(s.predicate)?.[RDFS_RANGE]?.[0]?.['@id'] && isPropertyTerm(nodes, s.predicate));
+  const found = [];
 
-  return [...groupBy(untyped, (s) => s.predicate)]
-    .map(([predicate, seen]) => ({
+  for (const [predicate, seen] of groupBy(sightings, (s) => s.predicate)) {
+    if (seen.some((s) => s.typed)) continue;
+    if (nodes.get(predicate)?.[RDFS_RANGE]?.[0]?.['@id']) continue;
+    if (!isPropertyTerm(nodes, predicate)) continue;
+
+    found.push({
       predicate,
       reachedBy: sortedUnique(seen.map((s) => `${s.vocabulary}:${s.term}`)),
       files: sortedUnique(seen.map((s) => s.file)),
-    }))
-    .sort((a, b) => a.predicate.localeCompare(b.predicate));
+    });
+  }
+
+  return found.sort((a, b) => a.predicate.localeCompare(b.predicate));
 }
 
 /**
@@ -206,28 +245,35 @@ export function rangesWithUnrecognizedTypedMembers(nodes) {
  * does not declare as a property, and whether any context carries it.
  *
  * NARROW ON PURPOSE. Naively (every prefix, spec's own prefix map) the
- * cross-reference returns ~35 and most are noise: draft vocabularies this SDK
- * itself excludes from its generated context, and borrowed vocabulary
+ * cross-reference returns ~35 and most are noise: draft vocabularies spec
+ * ships no ontology for (`evidence:`, `workbench:`), and borrowed vocabulary
  * (`foaf:`, `dcterms:`) Cascade's ontology was never going to declare. So:
- * expanded with the SDK's own prefix table, kept only under the Cascade
- * namespace root, minus the draft-excluded prefixes, and "present as a
- * property" rather than "present as a node" — `health:snomedCode` is present
- * only as `owl:AnnotationProperty`, and that counts as declared.
+ * expanded with the SDK's own prefix table, kept only in a namespace some
+ * ontology file declares as its `owl:Ontology`, and "present as a property"
+ * rather than "present as a node" — `health:snomedCode` is present only as
+ * `owl:AnnotationProperty`, and that counts as declared.
+ *
+ * THE SCOPE IS READ OFF THE GRAPH, NOT LISTED. It used to be "under the
+ * Cascade root, minus a hand-kept copy of `src/jsonld/context.ts`'s
+ * draft-prefix set", and the copy had no test tying it to its original: a
+ * draft vocabulary graduating — ontology added upstream, prefix removed there,
+ * forgotten here — would have left every predicate its new ontology failed to
+ * declare silently exempt. The `owl:Ontology` node each vocabulary declares
+ * for its own namespace is the same fact, and it arrives with the ontology.
  *
  * @param {Map<string, object>} nodes
  * @param {{ key: string, curie: string, prefix: string | null, iri: string }[]} registered -
  *   `readPredicatesModule().expanded`.
- * @param {Set<string>} excludedPrefixes - The draft prefixes to ignore.
  * @param {TermSighting[]} sightings - Every context term, for the `reconcile` test.
  * @returns {{ iri: string, keys: string[], inContexts: string[] }[]}
  */
-export function undeclaredPredicates(nodes, registered, excludedPrefixes, sightings) {
+export function undeclaredPredicates(nodes, registered, sightings) {
   const carriedBy = groupBy(sightings, (s) => s.predicate);
+  const inScope = ontologyNamespaces(nodes);
   const found = [];
 
   for (const [iri, entries] of groupBy(registered, (r) => r.iri)) {
-    if (!iri.startsWith(CASCADE_NAMESPACE)) continue;
-    if (entries.some((entry) => entry.prefix && excludedPrefixes.has(entry.prefix))) continue;
+    if (!inScope.has(namespaceOf(iri))) continue;
     if (isDeclaredProperty(nodes, iri)) continue;
 
     found.push({

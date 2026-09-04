@@ -28,8 +28,10 @@ export const PROPERTY_PREDICATES: Record<string, string> = {
   ghost: 'cascade:ghost',
   // Absent from the ontology, present in a context: both sides claim it.
   contextOnly: 'clinical:contextOnly',
-  // Out of scope: no ontology in spec-sources.json declares these namespaces.
+  // In scope only where the fixture ships an `owl:Ontology` for the namespace:
+  // the test gives `evidence` one that declares nothing, so this is reported.
   direction: 'evidence:direction',
+  // Out of scope: no ontology declares these namespaces.
   filingLabel: 'workbench:filingLabel',
   name: 'foaf:name',
   // Present in the ontology only as owl:AnnotationProperty: still present.

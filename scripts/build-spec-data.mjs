@@ -203,13 +203,15 @@ function provenanceOf(specDir) {
   }
 }
 
+// Opened before anything that can fail — `specRoot()` refuses a missing
+// checkout — and closed after everything is written: a crash between the two
+// leaves no findings file, which is what the collector needs to tell "did not
+// finish" from "found nothing". Opened AFTER it, a refused checkout would
+// leave the previous run's file for the collector to merge as this run's.
+const findings = openFindings({ source: 'build-spec-data', dir: DIAGNOSTICS });
+
 const { root: specDir, manifest } = specRoot();
 const vocabularies = Object.keys(manifest).sort();
-
-// Opened before anything is written and closed after everything is: a crash
-// between the two leaves no findings file, which is what the collector needs
-// to tell "did not finish" from "found nothing".
-const findings = openFindings({ source: 'build-spec-data', dir: DIAGNOSTICS });
 
 // Removed rather than overwritten: a vocabulary dropped from the manifest must
 // not leave its artifact behind, where every consumer would go on reading it.

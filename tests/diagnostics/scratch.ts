@@ -31,19 +31,26 @@ import { fileURLToPath } from 'node:url';
 
 import { expect } from 'vitest';
 
+// The vocabularies the channel is defined by, re-exported rather than copied:
+// a copy here would keep passing rows against a list the recorder had moved
+// on from, or fail a legitimate row the day a fourth owner is added.
+// @ts-expect-error -- a build script, deliberately plain JavaScript and untyped.
+import { OWNERS, SEVERITIES, findingsFile } from '../../scripts/lib/diagnostics.mjs';
+// @ts-expect-error -- a build script, deliberately plain JavaScript and untyped.
+import { OWL_DEPRECATED, RDFS_RANGE, RDFS_SEE_ALSO } from '../../scripts/lib/detectors.mjs';
+
+export { OWNERS, SEVERITIES, OWL_DEPRECATED, RDFS_RANGE, RDFS_SEE_ALSO };
+
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
 const OWL = 'http://www.w3.org/2002/07/owl#';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 
-export const RDFS_RANGE = `${RDFS}range`;
 export const RDFS_SUB_CLASS_OF = `${RDFS}subClassOf`;
-export const RDFS_SEE_ALSO = `${RDFS}seeAlso`;
 export const OWL_CLASS = `${OWL}Class`;
 export const OWL_ONTOLOGY = `${OWL}Ontology`;
 export const OWL_NAMED_INDIVIDUAL = `${OWL}NamedIndividual`;
-export const OWL_DEPRECATED = `${OWL}deprecated`;
 export const XSD_STRING = `${XSD}string`;
 
 export const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
@@ -72,9 +79,6 @@ export interface Finding {
   readonly source: string;
   readonly [detail: string]: unknown;
 }
-
-export const OWNERS = ['spec', 'sdk', 'reconcile'] as const;
-export const SEVERITIES = ['error', 'warning', 'info'] as const;
 
 export type Node = { '@id': string; '@type'?: string[]; [predicate: string]: unknown };
 
@@ -235,7 +239,7 @@ export function runGenerator(
  * nothing at all, which is the vacuous pass `tests/README.md` names first.
  */
 export function findingsOf(dataDir: string, source: string): Finding[] {
-  const file = join(dataDir, 'diagnostics', `${source}.json`);
+  const file = findingsFile(join(dataDir, 'diagnostics'), source) as string;
 
   expect(existsSync(file), `${source} recorded no findings file at ${file}`).toBe(true);
 

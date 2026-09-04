@@ -200,24 +200,6 @@ export function openFindings({ source, dir }) {
 }
 
 /**
- * One generator's whole write cycle: delete, run, write.
- *
- * A throw from `run` propagates and writes nothing — the previous file is
- * already gone, so a crash leaves no findings file at all.
- *
- * @template T
- * @param {{ source: string, dir: string }} cycle
- * @param {(findings: { record(finding: object): object }) => T} run
- * @returns {T}
- */
-export function withFindings(cycle, run) {
-  const findings = openFindings(cycle);
-  const result = run(findings);
-  findings.close();
-  return result;
-}
-
-/**
  * The findings a generator wrote, validated against the source it claims.
  *
  * Throws naming the reason on a missing file, a file that is not a JSON array,
@@ -242,7 +224,17 @@ export function readFindings(dir, source) {
     );
   }
 
-  const rows = JSON.parse(text);
+  let rows;
+  try {
+    rows = JSON.parse(text);
+  } catch (error) {
+    // Named like its siblings: a bare parser message says neither which file
+    // nor which generator, and the likely cause is a write that never finished.
+    throw new Error(
+      `${file} is not valid JSON (${error.message}); ${source} may have been interrupted mid-write. `
+      + 'Rerun `npm run generate`.',
+    );
+  }
   if (!Array.isArray(rows)) throw new Error(`${file} is not a JSON array of findings`);
 
   for (const row of rows) {

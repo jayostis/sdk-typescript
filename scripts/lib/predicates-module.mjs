@@ -7,10 +7,15 @@
  * (`tests/no-runtime-deps.test.ts`). A text scan of the two object literals
  * is the alternative to a shared manifest neither side has, and it is
  * deliberately narrow: an entry is one line of the form `key: 'value',`,
- * which is the only form either table has ever used (253 entries, measured).
- * A block that yields nothing is refused rather than read as empty, because
- * "the SDK registers no predicates" is the answer this must never give by
- * accident.
+ * which is the only form either table has ever used. A line in the literal
+ * that is not one of those is REFUSED, naming it, rather than skipped: a
+ * skipped entry is one `declared-predicate-not-in-ontology` never sees, so a
+ * registration written with double quotes or a template literal — the
+ * hand-added kind that check exists for — would read as clean. Nothing in
+ * the repository holds the file to one quoting style, so the scan has to say
+ * when it met a line it does not understand. An empty block is refused for
+ * the same reason: "the SDK registers no predicates" is the answer this must
+ * never give by accident.
  *
  * WHY THE SDK'S OWN PREFIX TABLE. `namespaces.ts` disagrees with spec's on at
  * least one prefix (`dcterms` here, `dc` there), so expanding its CURIEs with
@@ -34,15 +39,32 @@ function objectLiteral(source, name, path) {
   return source.slice(open + 1, close);
 }
 
+/** The one line shape an entry may take: `key: 'value',`, with an optional trailing comment. */
+const ENTRY = /^\s*'?([A-Za-z_$][\w$-]*)'?\s*:\s*'([^']*)'\s*,?\s*(?:\/\/.*)?$/;
+
 /** `key -> value` for every `key: 'value'` line in an object literal's body. */
 function entries(body, name, path) {
   // Block comments go; line comments only where they are the whole line, since
   // every namespace value contains `//`. A trailing comment after an entry is
   // admitted by the entry pattern itself.
   const stripped = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const found = [...stripped.matchAll(/^\s*'?([A-Za-z_$][\w$-]*)'?\s*:\s*'([^']*)'\s*,?\s*(?:\/\/.*)?$/gm)]
-    .map((match) => [match[1], match[2]]);
+  const found = [];
+  const unreadable = [];
 
+  for (const line of stripped.split('\n')) {
+    if (line.trim() === '') continue;
+    const match = ENTRY.exec(line);
+    if (match) found.push([match[1], match[2]]);
+    else unreadable.push(line.trim());
+  }
+
+  if (unreadable.length > 0) {
+    throw new Error(
+      `${path}: ${name} has ${unreadable.length} line(s) this reader cannot read as \`key: 'value',\`, `
+      + `and an entry it skipped is one no check would see. Rewrite in that form:\n`
+      + unreadable.map((line) => `  ${line}`).join('\n'),
+    );
+  }
   if (found.length === 0) throw new Error(`${path}: ${name} yielded no entries, which cannot be right`);
 
   return Object.fromEntries(found);
