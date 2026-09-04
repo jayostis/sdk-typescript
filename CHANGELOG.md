@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The Node floor is 20.** `engines.node` is `>=20.0.0`, from `>=18.0.0`,
+  and CI runs 20.x and 22.x. Node 18 has no `globalThis.crypto` without
+  `--experimental-global-webcrypto`, so once `node:crypto` left the identity
+  module (#95, below) the only synchronous, browser-safe randomness left on
+  that runtime was `Math.random` — a downgrade from the `randomUUID()` it had.
+  Node 18 reached end of life in April 2025; rather than ship a weaker path
+  for it, the package stops claiming it. Nothing else in the API changes.
+
 ### Added
 
 - **The package loads and runs in a browser, and CI proves it** (#95,
@@ -18,15 +28,11 @@
   "reproducible" and esbuild is an exact devDependency. `deterministicUuid`
   hashes with `src/utils/sha1.ts`, a synchronous pure-JS SHA-1 pinned to
   `node:crypto`'s output in `tests/sha1.test.ts` (D-BROWSER-1 as amended
-  2026-09-04: identity stays synchronous), and the random fallback uses
-  `crypto.randomUUID()` where the platform has it — every browser, and Node
-  from 19. On Node 18, the `engines` floor, `globalThis.crypto` exists only
-  behind `--experimental-global-webcrypto`, so the identifier of a record with
-  no content field and no `fallbackId` — a CSPRNG `randomUUID()` from
-  `node:crypto` before this change — is sixteen bytes of `Math.random` there.
-  It is not a secret, and it is already the one case the algorithm cannot make
-  stable, but it is a downgrade on that platform and this is where it is
-  stated. The gate:
+  2026-09-04: identity stays synchronous), and the random fallback for a
+  record with no content field and no `fallbackId` uses `crypto.randomUUID()`
+  — every browser since early 2022, Node since 19 — or assembles a v4 UUID
+  from `crypto.getRandomValues()` where only that exists; a platform with
+  neither gets an error naming what is missing. The gate:
   `scripts/check-browser-bundle.mjs` (`npm run check:browser`, a CI step)
   bundles `src/index.ts` for a browser and fails on any `node:` builtin,
   `createRequire` or `require()` left on the way — red against the epic head

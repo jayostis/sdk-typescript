@@ -8,13 +8,14 @@
  *   deterministicUuid("hello") === "aaf4c61d-dcc5-58a2-9abe-de0f3b482cd9"
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import {
   deterministicUuid,
   contentHashedUri,
+  randomUuid,
   patientUri,
   immunizationUri,
   observationUri,
@@ -131,6 +132,50 @@ describe('contentHashedUri — determinism and field handling', () => {
 });
 
 // ─── Typed Helper Functions ───────────────────────────────────────────────────
+
+describe('randomUuid — the fallback for a record with nothing to hash', () => {
+  // RFC 4122 v4: version nibble 4, variant nibble 8–b, 32 hex digits in 8-4-4-4-12.
+  const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is a v4 UUID from crypto.randomUUID where the platform has it', () => {
+    expect(globalThis.crypto.randomUUID, 'this Node has randomUUID; the test needs it').toBeDefined();
+    expect(randomUuid()).toMatch(V4);
+  });
+
+  it('is a v4 UUID assembled from getRandomValues where only that exists', () => {
+    // A 2014-era browser: Web Crypto, no randomUUID. This is the branch that
+    // assembles the layout by hand, so this is where a wrong slice or a lost
+    // version nibble would ship — a prefix check on the URN cannot see it.
+    const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    vi.stubGlobal('crypto', { getRandomValues: (b: Uint8Array) => real(b) });
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const id = randomUuid();
+      expect(id).toMatch(V4);
+      seen.add(id);
+    }
+    expect(seen.size).toBe(50);
+  });
+
+  it('fills every byte from the platform, not from a constant', () => {
+    // Bytes 6 and 8 are masked for version and variant; every other byte must
+    // reach the output as given. A fixed pattern proves the assembly reads
+    // what getRandomValues wrote rather than, say, a zeroed buffer.
+    vi.stubGlobal('crypto', {
+      getRandomValues: (b: Uint8Array) => { for (let i = 0; i < b.length; i++) b[i] = 0x10 + i; return b; },
+    });
+    expect(randomUuid()).toBe('10111213-1415-4617-9819-1a1b1c1d1e1f');
+  });
+
+  it('refuses, naming Web Crypto, on a platform with neither', () => {
+    // No Math.random branch. Node 18 without --experimental-global-webcrypto
+    // was the only runtime that landed here, and the engines floor is 20.
+    vi.stubGlobal('crypto', undefined);
+    expect(() => randomUuid()).toThrow(/Web Crypto/);
+  });
+});
 
 describe('typed helper functions', () => {
   it('observationUri produces stable URIs', () => {

@@ -21,8 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Floor of the declared engines range, plus current LTS.
-        node-version: ['18.x', '22.x']
+        # Floor of the declared engines range, plus current LTS. The floor
+        # rose from 18 to 20 with #95: Node 18 has no globalThis.crypto without
+        # a flag, and the only way to keep the identity module's random
+        # fallback synchronous and browser-safe there was Math.random.
+        node-version: ['20.x', '22.x']
 
     steps:
       - name: Check out sdk-typescript

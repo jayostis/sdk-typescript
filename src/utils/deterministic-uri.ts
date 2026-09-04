@@ -149,27 +149,32 @@ export function contentHashedUri(
 }
 
 /**
- * A random version-4 UUID, from whatever randomness the platform offers.
+ * A random version-4 UUID, from the platform's cryptographic randomness.
  *
- * `crypto.randomUUID()` is the shared API — every browser, and Node since 19
- * (Node 18 only behind `--experimental-global-webcrypto`). The last branch is
- * for a Node 18 without the flag, where no synchronous source of entropy exists
- * that a browser bundle could also resolve: `Math.random` is not
- * cryptographic, and this is not a secret — it is the identifier of a record
- * with no content to hash, which is already the case the algorithm cannot make
- * stable. Reached only when `contentHashedUri` has neither a content field nor
- * a `fallbackId`.
+ * `crypto.randomUUID()` is the shared API: every browser since early 2022,
+ * and Node since 19. `crypto.getRandomValues()` is the older one, in every
+ * browser since 2014, and the UUID is assembled from it by hand where only it
+ * exists. There is no third branch. Node 18 had neither on `globalThis`
+ * without `--experimental-global-webcrypto`, and the `Math.random` fallback
+ * that covered it was a downgrade from the `node:crypto` call this replaced;
+ * the `engines` floor is Node 20 now (#95), so that runtime is not one this
+ * package claims, and a platform with no Web Crypto at all gets an error
+ * naming what is missing rather than a weak identifier. Reached only when
+ * `contentHashedUri` has neither a content field nor a `fallbackId`.
  */
-function randomUuid(): string {
+export function randomUuid(): string {
   const webCrypto = globalThis.crypto;
   if (webCrypto?.randomUUID) return webCrypto.randomUUID();
+  if (!webCrypto?.getRandomValues) {
+    throw new Error(
+      'randomUuid: no Web Crypto on this platform (globalThis.crypto.getRandomValues is '
+      + 'absent). @the-cascade-protocol/sdk needs Node 20 or later, or any browser; a '
+      + 'record with no content field can pass a fallbackId instead.',
+    );
+  }
 
   const bytes = new Uint8Array(16);
-  if (webCrypto?.getRandomValues) {
-    webCrypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
+  webCrypto.getRandomValues(bytes);
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
