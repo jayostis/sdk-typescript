@@ -150,6 +150,27 @@ describe('thirdPartyImports', () => {
     ]);
   });
 
+  it('reads JavaScript, not only TypeScript', () => {
+    // `src/vendor/n3/n3.js` is some 3,300 lines of shipped JavaScript nobody
+    // here wrote, and since #95 it declares nothing: `VENDOR_BARE_SPECIFIERS`
+    // is empty, so the both-ways comparison at the end of this file is `[]`
+    // against `[]` and cannot tell "walked the vendor directory and found
+    // nothing" from "never opened a `.js` file". This is what says the walk
+    // reads JavaScript — narrow the extension match back to TypeScript and it
+    // fails, where the suite alone would stay green.
+    const root = scratchSrc({
+      'vendor/x.js': "import { Buffer } from 'buffer';\n",
+      'vendor/y.mjs': "import { Buffer } from 'buffer';\n",
+      'vendor/z.cjs': "const { Buffer } = require('buffer');\nmodule.exports = Buffer;\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual([
+      'vendor/x.js -> buffer',
+      'vendor/y.mjs -> buffer',
+      'vendor/z.cjs -> buffer',
+    ]);
+  });
+
   it('names a require() call', () => {
     // A `.cts` file is CommonJS and requires directly; an ESM `.ts` file gets
     // there through `createRequire`. Either way a package is loaded at runtime

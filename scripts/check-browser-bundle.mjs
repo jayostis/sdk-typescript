@@ -17,11 +17,13 @@
  * is a failure here, whatever esbuild calls it.
  *
  * WHAT COMES OUT IS INSPECTED, NOT JUST WHETHER SOMETHING CAME OUT. A bundle
- * that still carries an `import` with a specifier, or a `require(` call, is a
- * bundle that reaches for something at runtime the browser will not have.
- * esbuild leaves those only for things it was told were external, which
- * nothing here tells it — but the assertion costs nothing and the failure mode
- * it guards against is silent.
+ * that still carries an import for the runtime to resolve is a bundle that
+ * reaches for something the browser will not have. esbuild leaves those only
+ * for things it was told were external, which nothing here tells it — but the
+ * assertion costs nothing and the failure mode it guards against is silent.
+ * It is asked of esbuild's metafile, which lists exactly what was left
+ * external, rather than of the output text, where a statement quoted inside
+ * a string would match too (`scripts/lib/runtime-imports.mjs`).
  *
  * Exported as a function so `tests/browser-bundle.test.ts` can hand it source
  * that MUST fail before pointing it at ours — as text, resolved from the
@@ -39,6 +41,9 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
+import { isMainModule } from './lib/main-module.mjs';
+import { runtimeImports } from './lib/runtime-imports.mjs';
+
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 /**
@@ -53,12 +58,17 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 export async function bundleForBrowser(entry, options = {}) {
   const findings = [];
   let code = '';
+  let metafile;
 
   try {
     const result = await build({
       ...(typeof entry === 'string'
         ? { entryPoints: [entry] }
         : { stdin: { contents: entry.contents, resolveDir: ROOT, loader: 'ts', sourcefile: 'entry.ts' } }),
+      // Paths in findings and in the bundle's own comments are relative to
+      // here, whatever the current directory is.
+      absWorkingDir: ROOT,
+      metafile: true,
       bundle: true,
       write: false,
       platform: 'browser',
@@ -71,22 +81,18 @@ export async function bundleForBrowser(entry, options = {}) {
     });
     for (const w of result.warnings) findings.push(`warning: ${describe(w)}`);
     code = result.outputFiles?.[0]?.text ?? '';
+    metafile = result.metafile;
   } catch (err) {
     for (const e of err.errors ?? []) findings.push(`error: ${describe(e)}`);
     if (!err.errors) findings.push(`error: ${err.message}`);
     return { findings, code };
   }
 
-  // What esbuild left in the output for the runtime to resolve. A bundled
-  // ESM file has no `import ... from` and no `require(`; either one names a
-  // module the browser is expected to supply.
-  const survivors = [
-    ...code.matchAll(/^\s*(?:import|export)\b[^;'"]*['"]([^'"]+)['"]/gm),
-    ...code.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g),
-    ...code.matchAll(/\bcreateRequire\s*\(/g),
-  ];
-  for (const m of survivors) {
-    findings.push(`runtime resolution left in bundle: ${m[0].trim()}`);
+  // What esbuild left in the output for the runtime to resolve: each one
+  // names a module the browser is expected to supply. Read off the metafile,
+  // not the text — see scripts/lib/runtime-imports.mjs.
+  for (const survivor of runtimeImports(metafile)) {
+    findings.push(`runtime resolution left in bundle: ${survivor}`);
   }
 
   return { findings, code };
@@ -99,9 +105,7 @@ function describe(message) {
   return `${message.text}${where}`;
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const entry = resolve(ROOT, 'src/index.ts');
   const outIndex = process.argv.indexOf('--out');
   const out = outIndex === -1 ? undefined : process.argv[outIndex + 1];

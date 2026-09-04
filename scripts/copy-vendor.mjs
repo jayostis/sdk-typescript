@@ -18,7 +18,7 @@
  * substantial portions", and `package.json` `files` ships only `dist`, so
  * `LICENSE.md` has to arrive here as well as in the root `NOTICE`.
  */
-import { cpSync, existsSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, statSync } from 'node:fs';
 
 import { walk } from './lib/walk.mjs';
 
@@ -42,15 +42,13 @@ if (!existsSync(SRC)) {
   process.exit(1);
 }
 
-// REPLACED, NOT MERGED. `cpSync` writes over what is there and leaves the rest,
-// so a file the vendor directory no longer holds survived in `dist/` from the
-// build before. That is not hypothetical: when the eight-file CommonJS copy of
-// n3 became one ES module (#95), the old `{"type": "commonjs"}` marker stayed
-// behind in `dist/vendor/n3/`, Node read the new `n3.js` beside it as
-// CommonJS, and `import` of the built package failed with "does not provide an
-// export named 'Parser'" — on a tree where `npm run build` had just exited 0.
-// `dist/` is a product of `src/`; nothing in it is worth keeping.
-rmSync(OUT, { recursive: true, force: true });
+// MERGED INTO WHATEVER IS THERE. `cpSync` writes over what it finds and leaves
+// the rest, which once let the `{"type": "commonjs"}` marker of the eight-file
+// n3 outlive the one-file bundle that replaced it (#95). `dist/` is a product
+// of `src/` and nothing in it is worth keeping, so `scripts/clean-dist.mjs`
+// removes it whole at the front of `npm run build` — one rule for every
+// writer, tsc and `copy-spec-data.mjs` included, rather than a removal here
+// for the one copier that happened to bite.
 cpSync(SRC, OUT, { recursive: true });
 
 const copied = walk(OUT);

@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,31 +36,6 @@ let workdir: string | undefined;
 afterEach(() => {
   if (workdir) rmSync(workdir, { recursive: true, force: true });
   workdir = undefined;
-});
-
-describe('copy-vendor.mjs on a dist/vendor left by an earlier build', () => {
-  it('removes what src/vendor no longer holds, rather than writing over it', () => {
-    // `cpSync` merges. When the vendored n3 went from eight CommonJS files to
-    // one ES module (#95), the old `{"type": "commonjs"}` marker survived in
-    // `dist/vendor/n3/` and Node read the new bundle beside it as CommonJS:
-    // the built package failed to import on a tree where the build had just
-    // exited 0. The target is replaced, so a stale file cannot outlive its source.
-    workdir = mkdtempSync(join(tmpdir(), 'copy-vendor-test-'));
-    mkdirSync(join(workdir, 'src/vendor/n3'), { recursive: true });
-    writeFileSync(join(workdir, 'src/vendor/n3/n3.js'), 'export const Parser = 1;\n');
-    writeFileSync(join(workdir, 'src/vendor/n3/LICENSE.md'), 'MIT\n');
-    mkdirSync(join(workdir, 'dist/vendor/n3'), { recursive: true });
-    writeFileSync(join(workdir, 'dist/vendor/n3/package.json'), '{"type":"commonjs"}\n');
-
-    execFileSync('node', [SCRIPT], { cwd: workdir, stdio: 'pipe' });
-
-    expect(existsSync(join(workdir, 'dist/vendor/n3/n3.js'))).toBe(true);
-    expect(existsSync(join(workdir, 'dist/vendor/n3/LICENSE.md'))).toBe(true);
-    expect(
-      existsSync(join(workdir, 'dist/vendor/n3/package.json')),
-      'a file from the previous build survived in dist/vendor',
-    ).toBe(false);
-  });
 });
 
 describe('copy-vendor.mjs on a missing src/vendor', () => {

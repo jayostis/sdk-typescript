@@ -62,9 +62,11 @@ function sourcesUnder(dir: string): string[] {
  * specifier in it at all, and `tests/vendor-drift.test.ts` holds that.
  *
  * Kept, and compared with `toEqual` rather than deleted, so a NEW bare
- * specifier in vendored code is a failure with a named place to declare it —
- * not a filter that answers the same whether the list is empty or the walk
- * skipped the directory.
+ * specifier in vendored code is a failure with a named place to declare it.
+ * Empty, though, the comparison is `[]` against `[]` and cannot by itself tell
+ * "walked `src/vendor/` and found nothing" from "never opened a `.js` file";
+ * the scratch case `reads JavaScript, not only TypeScript` in the test file is
+ * what says the walk reads JavaScript.
  */
 export const VENDOR_BARE_SPECIFIERS: readonly string[] = [];
 

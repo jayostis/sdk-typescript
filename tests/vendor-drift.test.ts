@@ -23,12 +23,15 @@
  * @see src/vendor/n3/VENDOR.md
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
+// @ts-expect-error -- build scripts, deliberately plain JavaScript and untyped.
+import { runtimeImportsOf } from '../scripts/lib/runtime-imports.mjs';
 import { buildVendoredN3, installedN3Version } from '../scripts/vendor-n3.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,6 +57,31 @@ describe('vendored n3 has not drifted', () => {
     ).toBe(true);
   }, 20_000);
 
+  it('builds the same bytes from any working directory', { timeout: 30_000 }, () => {
+    // esbuild writes a `// node_modules/n3/src/IRIs.js` comment above each
+    // module it inlines, relative to `absWorkingDir` — which, unset, is
+    // `process.cwd()`. Then `node sdk-typescript/scripts/vendor-n3.mjs` from a
+    // parent directory commits `// sdk-typescript/node_modules/...` and the
+    // test above fails on CI, and vitest launched from a workspace root fails
+    // it on an untouched tree with "someone edited the bundle". A child
+    // process, because a vitest worker cannot chdir.
+    const mine = readFileSync(join(VENDORED, BUNDLE), 'utf-8');
+    const elsewhere = dirname(root);
+    const script = pathToFileURL(resolve(root, 'scripts/vendor-n3.mjs')).href;
+    const built = execFileSync(process.execPath, [
+      '--input-type=module',
+      '-e',
+      `const { buildVendoredN3 } = await import(${JSON.stringify(script)});`
+      + ' process.stdout.write(await buildVendoredN3());',
+    ], { cwd: elsewhere, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 });
+
+    expect(
+      built === mine,
+      `built from ${elsewhere}, the bundle differs from the committed one: `
+      + `${built.length} chars against ${mine.length}.`,
+    ).toBe(true);
+  });
+
   it('names the version it was built from', () => {
     // The banner is the bundle's own provenance line. If the script wrote a
     // different version than the one installed, the previous test already
@@ -70,13 +98,14 @@ describe('vendored n3 has not drifted', () => {
     expect(readdirSync(VENDORED).sort()).toEqual(['LICENSE.md', 'VENDOR.md', 'n3.d.ts', 'n3.js']);
   });
 
-  it('carries no import or require for a runtime to resolve', () => {
+  it('carries no import or require for a runtime to resolve', async () => {
     // The reason the bundle exists. A surviving specifier is a module the
     // browser is expected to supply, and `buffer` is the one n3 would leave.
+    // Asked of esbuild, which reads syntax — the same detector the script
+    // itself runs — rather than of the text, where a statement quoted inside
+    // a string would match too.
     const code = readFileSync(join(VENDORED, BUNDLE), 'utf-8');
-    expect(code).not.toMatch(/^\s*import\b/m);
-    expect(code).not.toMatch(/^\s*export\b[^;]*\bfrom\b/m);
-    expect(code).not.toMatch(/\brequire\(/);
+    expect(await runtimeImportsOf(code, { resolveDir: VENDORED })).toEqual([]);
   });
 
   it('carries upstream\'s licence, unaltered', () => {

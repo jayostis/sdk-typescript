@@ -9,6 +9,8 @@
  * declared here is a compile error, on purpose: it sends whoever adds the call
  * to the real v2 signature rather than to a v1 guess. The same reasoning as
  * `tests/support/n3.d.ts`, which declares the sliver the tests use.
+ * `tests/vendor-n3-surface.test.ts` holds this file to exactly that surface,
+ * so a declaration nobody calls cannot sit here as a guess already typed in.
  *
  * Term shapes are the RDF/JS ones, declared here rather than imported from
  * `@rdfjs/types` because that package is a devDependency and this file ships:
@@ -22,9 +24,6 @@ export interface Term {
   value: string;
   /** Literals only: the datatype IRI as a `NamedNode`. */
   datatype?: Term;
-  /** Literals only: the BCP 47 tag, or `''` when none. */
-  language?: string;
-  equals(other: Term | null | undefined): boolean;
 }
 
 /** An RDF/JS quad, as n3 parses and writes it. */
@@ -37,12 +36,8 @@ export interface Quad {
 }
 
 export class Parser {
-  constructor(options?: {
-    format?: string;
-    baseIRI?: string;
-    blankNodePrefix?: string;
-    factory?: unknown;
-  });
+  /** Both call sites construct it bare; the options are not declared. */
+  constructor();
 
   /**
    * Synchronous form. With no callback, `parse` reads the whole input and
@@ -52,10 +47,8 @@ export class Parser {
 }
 
 export class Writer {
-  constructor(options?: {
-    prefixes?: Record<string, string>;
-    format?: string;
-  });
+  /** `prefixes` is the one option reached; `format` and the rest are not declared. */
+  constructor(options?: { prefixes?: Record<string, string> });
 
   addQuad(quad: Quad): void;
 

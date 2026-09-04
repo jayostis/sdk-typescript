@@ -69,6 +69,19 @@ describe('bundleForBrowser', () => {
     expect(findings).toEqual([]);
     expect(code).toContain('TextEncoder');
   });
+
+  it('is silent for an import spelled inside a string', async () => {
+    // A usage hint or an error message quoting the statement is text, not a
+    // module the browser must supply. The check asks esbuild what it left
+    // external — its metafile — rather than reading the output's lines, so
+    // the first message under `src/` written this way does not turn the gate
+    // red with no defect behind it.
+    const { findings } = await bundleForBrowser(entrySaying(
+      'export const msg = `usage:\nimport { x } from "y";\n`;\n',
+    ));
+
+    expect(findings).toEqual([]);
+  });
 });
 
 describe('src/index.ts for a browser', () => {

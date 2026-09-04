@@ -41,6 +41,9 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
+import { isMainModule } from './lib/main-module.mjs';
+import { runtimeImports } from './lib/runtime-imports.mjs';
+
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const OUT_DIR = resolve(ROOT, 'src/vendor/n3');
 const OUT = resolve(OUT_DIR, 'n3.js');
@@ -84,8 +87,13 @@ export function installedN3Version() {
 /**
  * The vendored bundle, as text, built from the installed n3.
  *
- * Deterministic for a given n3 and esbuild: same input, same bytes. That
- * property is what the drift test rests on.
+ * Deterministic for a given n3 and esbuild: same input, same bytes, from any
+ * working directory. That property is what the drift test rests on, and the
+ * last clause is `absWorkingDir` below: esbuild writes a
+ * `// node_modules/n3/src/IRIs.js` comment above each module it inlines,
+ * relative to that directory — which, unset, is `process.cwd()`, so a run from
+ * a parent directory built `// sdk-typescript/node_modules/...` and a bundle
+ * the drift test refused.
  *
  * @returns {Promise<string>}
  */
@@ -101,6 +109,8 @@ export async function buildVendoredN3() {
       sourcefile: 'vendor-n3-entry.js',
       loader: 'js',
     },
+    absWorkingDir: ROOT,
+    metafile: true,
     bundle: true,
     write: false,
     format: 'esm',
@@ -130,22 +140,20 @@ export async function buildVendoredN3() {
 
   // Nothing may be left for the runtime to resolve: that is the entire reason
   // this bundle exists. A surviving import means a specifier esbuild treated
-  // as external, which nothing here asks for.
-  const survivors = [...code.matchAll(/^\s*(?:import|export)\b[^;'"]*['"]([^'"]+)['"]/gm)]
-    .concat([...code.matchAll(/\brequire\(/g)]);
+  // as external, which nothing here asks for. Asked of esbuild's metafile,
+  // not of the text — see scripts/lib/runtime-imports.mjs.
+  const survivors = runtimeImports(result.metafile);
   if (survivors.length > 0) {
     throw new Error(
       'vendor-n3: the bundle still reaches for something at runtime:\n'
-      + survivors.map((m) => `  - ${m[0].trim()}`).join('\n'),
+      + survivors.map((s) => `  - ${s}`).join('\n'),
     );
   }
 
   return code;
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const code = await buildVendoredN3();
   writeFileSync(OUT, code, 'utf-8');
   copyFileSync(resolve(ROOT, 'node_modules/n3/LICENSE.md'), resolve(OUT_DIR, 'LICENSE.md'));

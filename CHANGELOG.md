@@ -19,14 +19,25 @@
   hashes with `src/utils/sha1.ts`, a synchronous pure-JS SHA-1 pinned to
   `node:crypto`'s output in `tests/sha1.test.ts` (D-BROWSER-1 as amended
   2026-09-04: identity stays synchronous), and the random fallback uses
-  `crypto.randomUUID()` where the platform has it. The gate:
+  `crypto.randomUUID()` where the platform has it — every browser, and Node
+  from 19. On Node 18, the `engines` floor, `globalThis.crypto` exists only
+  behind `--experimental-global-webcrypto`, so the identifier of a record with
+  no content field and no `fallbackId` — a CSPRNG `randomUUID()` from
+  `node:crypto` before this change — is sixteen bytes of `Math.random` there.
+  It is not a secret, and it is already the one case the algorithm cannot make
+  stable, but it is a downgrade on that platform and this is where it is
+  stated. The gate:
   `scripts/check-browser-bundle.mjs` (`npm run check:browser`, a CI step)
   bundles `src/index.ts` for a browser and fails on any `node:` builtin,
   `createRequire` or `require()` left on the way — red against the epic head
   on three sites, green after — and `tests/browser-bundle.test.ts` runs the
   bundle in a bare vm context with no `process`, `Buffer` or `require`
   through `serialize`, `deserialize`, `toJsonLd`, `fromJsonLd` and
-  `validate` on imm-001.
+  `validate` on imm-001. `npm run build` now removes `dist/` whole before
+  anything writes there (`scripts/clean-dist.mjs`), so a renamed module, a
+  dropped ontology or a stale vendored file cannot survive from the build
+  before; and `npm run check:browser` generates `src/spec/` first, as `test`
+  and `typecheck` do.
 - **The build writes down what it found.** `npm run generate` has always found
   real spec defects — a name two record classes claim, a range that is neither
   a code list nor a structured class, a JSON key that means a different
