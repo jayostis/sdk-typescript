@@ -12,7 +12,12 @@
  *
  * `tests/no-runtime-deps.test.ts` asks whether `src/` needs anything installed.
  * This asks the question that one's comment used to say nothing asks: whether
- * the package runs outside Node.
+ * the package runs outside Node. Two halves, because a bundler answers only
+ * half of it: what esbuild cannot RESOLVE it refuses, but a bare Node global
+ * — `process`, `Buffer`, `__dirname` — is a free identifier it passes
+ * through in silence, and the vm run below sees only the paths imm-001
+ * walks. `nodeGlobalsIn` compiles with Node's types withheld
+ * (`tsconfig.browser.json`) and names such a reference on every path.
  *
  * @see https://github.com/the-cascade-protocol/spec/blob/main/decisions/2026-09-03-browser-safety.md
  */
@@ -24,6 +29,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
 
 import { bundleForBrowser } from '../scripts/check-browser-bundle.mjs';
+import { nodeGlobalsIn, nodeGlobalsInSrc } from '../scripts/lib/node-globals.mjs';
 import { loadFixture } from './support/fixtures.js';
 import { graphDifference, quadsFromTurtle } from './support/graph.js';
 
@@ -98,7 +104,49 @@ describe('bundleForBrowser', () => {
   });
 });
 
+describe('nodeGlobalsIn', () => {
+  it('names a bare Node global, with its line', () => {
+    // The probe bundles clean through bundleForBrowser — esbuild has nothing
+    // to resolve — which is the whole reason this second detector exists.
+    const source = 'export const home = process.cwd();\n'
+      + "export const bytes = Buffer.from('x');\n"
+      + 'export const here = __dirname;\n';
+
+    const findings = nodeGlobalsIn(source);
+
+    expect(findings).toHaveLength(3);
+    expect(findings[0]).toMatch(/^probe\.ts:1 .*'process'/);
+    expect(findings[1]).toMatch(/^probe\.ts:2 .*'Buffer'/);
+    expect(findings[2]).toMatch(/^probe\.ts:3 .*'__dirname'/);
+  });
+
+  it('bundles that same probe without a word, which is why it is needed', async () => {
+    const { findings } = await bundleForBrowser(entrySaying('export const home = process.cwd();\n'));
+
+    expect(findings).toEqual([]);
+  });
+
+  it('is silent for what both platforms have', () => {
+    // The two Web APIs src/ actually leans on, under the same options the
+    // gate compiles src/ with: withholding Node's types must not take these
+    // away, or the first honest use of them turns the gate red.
+    expect(nodeGlobalsIn(
+      'export const id = globalThis.crypto.randomUUID();\n'
+      + 'export const bytes = new TextEncoder().encode(id);\n'
+      + 'export const view = new DataView(bytes.buffer).getUint32(0);\n',
+    )).toEqual([]);
+  });
+});
+
 describe('src/index.ts for a browser', () => {
+  it('reaches no Node global on any path', { timeout: 60_000 }, () => {
+    expect(
+      nodeGlobalsInSrc(),
+      'a file under src/ names process, Buffer, __dirname or global. That compiles here '
+      + 'only because @types/node is installed; in a browser it is a ReferenceError.',
+    ).toEqual([]);
+  });
+
   it('bundles with nothing left for the browser to resolve', async () => {
     const { findings } = await bundleForBrowser(ENTRY);
 

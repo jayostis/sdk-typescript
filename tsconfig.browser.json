@@ -1,0 +1,26 @@
+{
+  // Compiles `src/` with Node's types WITHHELD, so a bare Node global is a
+  // compile error on every path — not only on the paths one fixture walks.
+  //
+  // `scripts/check-browser-bundle.mjs` fails on what esbuild cannot resolve: a
+  // `node:` builtin, a bare specifier, a dynamic `require()`. It cannot fail on
+  // `process.env.X`, `Buffer.from(...)`, `__dirname` or `global`, because those
+  // are free identifiers rather than imports — esbuild leaves them in the
+  // output untouched and reports nothing — and the vm smoke test in
+  // `tests/browser-bundle.test.ts` sees only the code imm-001 executes. The
+  // reason such a reference compiles at all is that `tsconfig.json` sets no
+  // `types`, so every installed `@types/*` including `@types/node` is visible.
+  // `types: []` is what does the work here; the DOM lib is what
+  // `globalThis.crypto` and `TextEncoder` compile against without it.
+  //
+  // Read by `scripts/lib/node-globals.mjs` through the TypeScript API, so the
+  // same options judge a scratch source in a test and `src/` in the gate.
+  // Never emits, never run by `npm run build`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [],
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/**/*.ts"]
+}

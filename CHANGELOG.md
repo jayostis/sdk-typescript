@@ -35,7 +35,11 @@
   neither gets an error naming what is missing. The gate:
   `scripts/check-browser-bundle.mjs` (`npm run check:browser`, a CI step)
   bundles `src/index.ts` for a browser and fails on any `node:` builtin,
-  `createRequire` or `require()` left on the way — red against the epic head
+  `createRequire` or `require()` left on the way, then compiles `src/` with
+  Node's types withheld (`tsconfig.browser.json`, through
+  `scripts/lib/node-globals.mjs`) and fails on a bare `process`, `Buffer`,
+  `__dirname` or `global` on any path, which a bundler passes through in
+  silence — red against the epic head
   on three sites, green after — and `tests/browser-bundle.test.ts` runs the
   bundle in a bare vm context with no `process`, `Buffer` or `require`
   through `serialize`, `deserialize`, `toJsonLd`, `fromJsonLd` and

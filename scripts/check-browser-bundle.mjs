@@ -31,6 +31,14 @@
  * external, rather than of the output text, where a statement quoted inside
  * a string would match too (`scripts/lib/runtime-imports.mjs`).
  *
+ * A BARE NODE GLOBAL IS NEITHER. `process.env.X`, `Buffer.from(...)`,
+ * `__dirname`, `global`: free identifiers, not imports, so esbuild leaves them
+ * in a browser bundle untouched and reports nothing, and the vm smoke test
+ * sees only the paths one fixture walks. The second half of the verdict is a
+ * compile of `src/` with Node's types withheld (`tsconfig.browser.json`,
+ * through `scripts/lib/node-globals.mjs`), which names such a reference on
+ * every path. One script, one exit code, both halves.
+ *
  * Exported as a function so `tests/browser-bundle.test.ts` can hand it source
  * that MUST fail before pointing it at ours — as text, resolved from the
  * repository root, because a scratch file under the system temp directory
@@ -48,6 +56,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 import { isMainModule } from './lib/main-module.mjs';
+import { nodeGlobalsInSrc } from './lib/node-globals.mjs';
 import { runtimeImports } from './lib/runtime-imports.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -134,20 +143,22 @@ if (isMainModule(import.meta.url)) {
   const entry = resolve(ROOT, 'src/index.ts');
 
   const { findings, code } = await bundleForBrowser(entry);
+  const globals = nodeGlobalsInSrc().map((g) => `Node global reached: ${g}`);
 
-  if (findings.length > 0) {
-    console.error('check-browser-bundle: FAILED — src/index.ts does not bundle for a browser:');
-    for (const f of findings) console.error(`  - ${f}`);
+  if (findings.length > 0 || globals.length > 0) {
+    console.error('check-browser-bundle: FAILED — src/index.ts does not bundle and run for a browser:');
+    for (const f of [...findings, ...globals]) console.error(`  - ${f}`);
     console.error(
       '\nD-BROWSER-1: the public entry point must bundle and run for a browser target. '
       + 'A node: builtin, createRequire, or a CommonJS require() on any path reachable '
-      + 'from src/index.ts is what this reports.',
+      + 'from src/index.ts is what the bundle half reports; a bare process, Buffer, '
+      + '__dirname or global anywhere in src/ is what the compile half reports.',
     );
     process.exit(1);
   }
 
   console.log(
     `check-browser-bundle: OK — src/index.ts bundles for a browser `
-    + `(${(code.length / 1024).toFixed(0)}K esm)`,
+    + `(${(code.length / 1024).toFixed(0)}K esm) and src/ reaches no Node global`,
   );
 }
