@@ -145,9 +145,12 @@ describe('randomUuid — the fallback for a record with nothing to hash', () => 
   });
 
   it('is a v4 UUID assembled from getRandomValues where only that exists', () => {
-    // A 2014-era browser: Web Crypto, no randomUUID. This is the branch that
-    // assembles the layout by hand, so this is where a wrong slice or a lost
-    // version nibble would ship — a prefix check on the URN cannot see it.
+    // A current browser on an INSECURE page — plain `http://` on a LAN
+    // address, where `randomUUID` is withheld and `getRandomValues` is not —
+    // and equally a 2014-era one: Web Crypto, no randomUUID. This is the
+    // branch that assembles the layout by hand, so this is where a wrong slice
+    // or a lost version nibble would ship — a prefix check on the URN cannot
+    // see it. Not a legacy path; pruning it breaks those pages.
     const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
     vi.stubGlobal('crypto', { getRandomValues: (b: Uint8Array) => real(b) });
     const seen = new Set<string>();

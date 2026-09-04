@@ -4,10 +4,11 @@
  * Its header promises that using anything beyond that surface is a compile
  * error, on purpose: it sends whoever adds the call to n3@2's real signature
  * rather than to a v1 guess. A declaration nobody calls — Parser options,
- * Writer `format`, `Term.language`, `Term.equals` — is that guess already typed
- * in, so a future `new Parser({ format: 'N-Quads' })` would compile without
- * anyone reading the v2 signature, which is the thing the header says the file
- * prevents.
+ * Writer `format`, `Term.equals` — is that guess already typed in, so a future
+ * `new Parser({ format: 'N-Quads' })` would compile without anyone reading the
+ * v2 signature, which is the thing the header says the file prevents. The
+ * callers are the two `src/` sites and `scripts/build-spec-data.mjs`, which
+ * imports the same bundle.
  *
  * The `@ts-expect-error` lines are real only under `npm run typecheck`
  * (`tsconfig.typecheck.json` includes this file); vitest transpiles without
@@ -45,9 +46,19 @@ describe('the vendored n3 declarations', () => {
     new N3Parser({ format: 'N-Quads' });
     // @ts-expect-error -- Writer takes `prefixes` and nothing else.
     new N3Writer({ format: 'N-Quads' });
-    // @ts-expect-error -- the adapter drops language tags, so no caller reads one.
-    void term?.language;
     // @ts-expect-error -- no caller compares terms.
     void term?.equals(term);
+  });
+
+  it('declare the language tag scripts/build-spec-data.mjs reads', () => {
+    // The adapter drops language tags, but `scripts/build-spec-data.mjs`
+    // imports this same bundle and reads `term.language` to emit `@language`.
+    // That script is untyped `.mjs` today; the property is declared so that
+    // typing `scripts/` meets no error whose natural fix is dropping the
+    // `@language` branch in silence.
+    const [quad] = new N3Parser().parse('<http://example.org/s> <http://example.org/p> "o"@en .');
+    const language: string | undefined = quad?.object.language;
+
+    expect(language).toBe('en');
   });
 });

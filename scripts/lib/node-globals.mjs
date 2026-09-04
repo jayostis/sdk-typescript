@@ -57,8 +57,15 @@ function describe(diagnostic) {
 }
 
 /**
- * Every diagnostic `files` produce under the browser options, as
- * `path:line message`. Empty means no Node global is reached.
+ * Every diagnostic the program rooted at `files` produces under the browser
+ * options, as `path:line message`. Empty means no Node global is reached.
+ *
+ * Every diagnostic, from every file the program reached. `tsconfig.json`
+ * sets `skipLibCheck`, so a lib or a declaration file produces none, and
+ * every other file in the program is one the caller asked about — `src/`
+ * itself, or a file a probe imports. A filter down to the root files once
+ * dropped a Node global reached through a relative import and reported the
+ * probe clean.
  *
  * @param {string[]} files - Absolute paths to compile.
  * @param {ts.CompilerHost} host
@@ -67,15 +74,7 @@ function describe(diagnostic) {
  */
 function findingsOf(files, host, options) {
   const program = ts.createProgram(files, options, host);
-  return ts.getPreEmitDiagnostics(program)
-    // Only what the asked-for files say. A lib or a declaration file cannot
-    // reach a Node global, and its diagnostics would be about something else.
-    .filter((d) => !d.file || files.some((f) => samePath(f, d.file.fileName)))
-    .map(describe);
-}
-
-function samePath(a, b) {
-  return resolve(a).replace(/\\/g, '/').toLowerCase() === resolve(b).replace(/\\/g, '/').toLowerCase();
+  return ts.getPreEmitDiagnostics(program).map(describe);
 }
 
 /**
@@ -93,21 +92,28 @@ export function nodeGlobalsInSrc() {
  * The Node globals one TypeScript `source` reaches, under the same options.
  *
  * In memory, resolved as if it sat at the repository root, so a relative
- * import in it would find `src/`. Nothing is written.
+ * import in it would find `src/` — or one of `siblings`, in-memory files
+ * beside it keyed by root-relative path, for a probe that needs a dependency
+ * of its own. Nothing is written.
  *
  * @param {string} source - TypeScript source text.
+ * @param {Record<string, string>} [siblings] - Further in-memory files, as
+ *   `{ 'probe-dep.ts': source }`, resolved from the repository root.
  * @returns {string[]} As {@link nodeGlobalsInSrc}; the path is `probe.ts`.
  */
-export function nodeGlobalsIn(source) {
+export function nodeGlobalsIn(source, siblings = {}) {
   const { options } = browserConfig();
-  const probe = resolve(ROOT, 'probe.ts');
   const host = ts.createCompilerHost(options);
+  // The host's own notion of "the same file": case-folded exactly where the
+  // platform folds case, with the slashes TypeScript hands back.
+  const key = (f) => host.getCanonicalFileName(resolve(ROOT, f).replace(/\\/g, '/'));
+  const virtual = new Map([['probe.ts', source], ...Object.entries(siblings)].map(([p, s]) => [key(p), s]));
   const real = { fileExists: host.fileExists, readFile: host.readFile, getSourceFile: host.getSourceFile };
-  host.fileExists = (f) => samePath(f, probe) || real.fileExists(f);
-  host.readFile = (f) => (samePath(f, probe) ? source : real.readFile(f));
+  host.fileExists = (f) => virtual.has(key(f)) || real.fileExists(f);
+  host.readFile = (f) => virtual.get(key(f)) ?? real.readFile(f);
   host.getSourceFile = (f, languageVersion, onError, shouldCreate) =>
-    (samePath(f, probe)
-      ? ts.createSourceFile(f, source, languageVersion)
+    (virtual.has(key(f))
+      ? ts.createSourceFile(f, virtual.get(key(f)), languageVersion)
       : real.getSourceFile(f, languageVersion, onError, shouldCreate));
-  return findingsOf([probe], host, options);
+  return findingsOf([resolve(ROOT, 'probe.ts')], host, options);
 }

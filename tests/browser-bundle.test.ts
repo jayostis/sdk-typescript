@@ -136,6 +136,33 @@ describe('nodeGlobalsIn', () => {
       + 'export const view = new DataView(bytes.buffer).getUint32(0);\n',
     )).toEqual([]);
   });
+
+  it('is silent for iterating a DOM collection, which every browser and tsconfig.json allow', () => {
+    // `tsconfig.json` names no `lib`, so for target ES2022 it gets the
+    // default set, which includes `DOM.Iterable`. `tsconfig.browser.json`
+    // names its `lib` explicitly and must name that one too, or spreading a
+    // `URLSearchParams` — which passes `npm run typecheck` and runs in every
+    // browser — is reported by the gate as if it were a Node global.
+    expect(nodeGlobalsIn(
+      'export const pairs = [...new URLSearchParams("a=1")];\n'
+      + 'export const names = [...new Headers({ a: "1" })].map(([k]) => k);\n',
+    )).toEqual([]);
+  });
+
+  it('follows a relative import, and names the Node global behind it', () => {
+    // The probe is compiled as a program, not as one file: a global reached
+    // through an import is reached. `skipLibCheck` keeps declaration files
+    // silent, so every diagnostic the program produces is about a source the
+    // caller handed in — there is nothing to filter, and a filter on the
+    // entry file alone is how this case returned [] once.
+    const findings = nodeGlobalsIn(
+      "import { home } from './probe-dep.js';\nexport const where = home;\n",
+      { 'probe-dep.ts': 'export const home = process.cwd();\n' },
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatch(/^probe-dep\.ts:1 .*'process'/);
+  });
 });
 
 describe('src/index.ts for a browser', () => {
@@ -166,10 +193,12 @@ describe('src/index.ts for a browser', () => {
     const { findings, code } = await bundleForBrowser(ENTRY, { format: 'iife', globalName: 'CascadeSdk' });
     expect(findings).toEqual([]);
 
-    // `crypto` is on the page because every real browser has it, and the
-    // identity module's random fallback takes the `randomUUID` branch there;
-    // a page without it would run a branch no browser runs. Node's is the
-    // same Web Crypto object a browser exposes.
+    // `crypto` is on the page because every real browser has it. Node's is
+    // the same Web Crypto object a browser exposes in a secure context, so
+    // the identity module's random fallback takes the `randomUUID` branch
+    // here; a page over plain `http://` has `crypto` without `randomUUID`
+    // and takes the `getRandomValues` branch, which
+    // `tests/deterministic-uri.test.ts` covers by stubbing exactly that.
     const page: Record<string, unknown> = {
       TextEncoder, TextDecoder, URL, console, queueMicrotask, setTimeout, clearTimeout,
       crypto: globalThis.crypto,

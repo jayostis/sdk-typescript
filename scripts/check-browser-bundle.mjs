@@ -143,7 +143,11 @@ if (isMainModule(import.meta.url)) {
   const entry = resolve(ROOT, 'src/index.ts');
 
   const { findings, code } = await bundleForBrowser(entry);
-  const globals = nodeGlobalsInSrc().map((g) => `Node global reached: ${g}`);
+  // Labelled as what it is. The compile reports every error src/ produces
+  // under the narrowed options — a bare Node global is the one it exists for,
+  // but a missing generated module on a fresh clone, or a DOM API outside the
+  // config's `lib`, arrives on the same channel and is not a Node global.
+  const globals = nodeGlobalsInSrc().map((g) => `compile under tsconfig.browser.json: ${g}`);
 
   if (findings.length > 0 || globals.length > 0) {
     console.error('check-browser-bundle: FAILED — src/index.ts does not bundle and run for a browser:');
@@ -151,8 +155,10 @@ if (isMainModule(import.meta.url)) {
     console.error(
       '\nD-BROWSER-1: the public entry point must bundle and run for a browser target. '
       + 'A node: builtin, createRequire, or a CommonJS require() on any path reachable '
-      + 'from src/index.ts is what the bundle half reports; a bare process, Buffer, '
-      + '__dirname or global anywhere in src/ is what the compile half reports.',
+      + 'from src/index.ts is what the bundle half reports. The compile half reports '
+      + 'what src/ cannot compile with Node\'s types withheld: a bare process, Buffer, '
+      + '__dirname or global anywhere in src/ — or any other error under that config, '
+      + 'which is a compile error to fix, not a Node global.',
     );
     process.exit(1);
   }

@@ -75,10 +75,13 @@ requires `n3.js` to equal the output **exactly**. So:
    message.
 3. **Re-vendoring a fix is a re-run**, not a merge.
 
-The test also holds that the bundle carries no `import` or `require(`, that this
-directory holds exactly the four files above, that `LICENSE.md` is upstream's
-unaltered, that the version named here and in `NOTICE` is the one installed,
-and that all of it reaches `dist/vendor/n3/` when the package is built.
+`buildVendoredN3` itself refuses a bundle with anything left for a runtime to
+resolve, so equality carries that guarantee too: the committed file has no
+`import` or `require(` in it because the only thing it can equal has none. The
+test also holds that this directory holds exactly the four files above, that
+`LICENSE.md` is upstream's unaltered, that the version named here and in
+`NOTICE` is the one installed, and that all of it reaches `dist/vendor/n3/`
+when the package is built.
 
 `.gitattributes` marks `src/vendor/**` `-text`, so the bytes committed are the
 bytes on disk on every platform.

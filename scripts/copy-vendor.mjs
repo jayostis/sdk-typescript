@@ -34,10 +34,11 @@ const OUT = 'dist/vendor';
 // failure mode this repository keeps finding.
 if (!existsSync(SRC)) {
   console.error(
-    `copy-vendor: FAILED — ${SRC} is missing. It is generated rather than committed, so run `
-    + 'the vendoring step first — a build that skips it ships with no Turtle parser and no '
+    `copy-vendor: FAILED — ${SRC} is missing. It is committed, so restore it: `
+    + 'git checkout -- src/vendor. (scripts/vendor-n3.mjs rebuilds n3.js INTO that directory '
+    + 'and does not create it.) A build that skips it ships with no Turtle parser and no '
     + 'LICENSE.md at ' + OUT + ', and nothing downstream would report it until a consumer '
-    + 'called serialize()/deserialize() and hit MODULE_NOT_FOUND.',
+    + 'imported the package and hit ERR_MODULE_NOT_FOUND.',
   );
   process.exit(1);
 }

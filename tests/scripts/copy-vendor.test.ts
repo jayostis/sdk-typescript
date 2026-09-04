@@ -49,6 +49,12 @@ describe('copy-vendor.mjs on a missing src/vendor', () => {
       threw = true;
       const stderr = (err as { stderr: Buffer }).stderr.toString();
       expect(stderr, 'must name the failure, the way copy-spec-data.mjs does').toContain('FAILED');
+      // `src/vendor` is committed — the drift test compares the committed
+      // bytes — so the way back is a checkout, and the message must say so.
+      // `scripts/vendor-n3.mjs` writes into the directory and does not create
+      // it, so "run the vendoring step" would send the reader to an ENOENT.
+      expect(stderr, 'must name the fix, which is restoring the committed directory')
+        .toContain('git checkout -- src/vendor');
       expect((err as { status: number }).status).toBe(1);
     }
 

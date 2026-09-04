@@ -152,9 +152,13 @@ export function contentHashedUri(
  * A random version-4 UUID, from the platform's cryptographic randomness.
  *
  * `crypto.randomUUID()` is the shared API: every browser since early 2022,
- * and Node since 19. `crypto.getRandomValues()` is the older one, in every
- * browser since 2014, and the UUID is assembled from it by hand where only it
- * exists. There is no third branch. Node 18 had neither on `globalThis`
+ * and Node since 19 — but a browser exposes it ONLY IN A SECURE CONTEXT. A
+ * page served over plain `http://` on a LAN address, a real deployment for a
+ * local-first app, has `crypto` without `randomUUID`. `crypto.getRandomValues()`
+ * is not gated that way, and has been in every browser since 2014, so the
+ * UUID is assembled from it by hand where only it exists. That second branch
+ * is what a current browser on an insecure page runs, not a legacy path;
+ * pruning it breaks those pages. There is no third branch. Node 18 had neither on `globalThis`
  * without `--experimental-global-webcrypto`, and the `Math.random` fallback
  * that covered it was a downgrade from the `node:crypto` call this replaced;
  * the `engines` floor is Node 20 now (#95), so that runtime is not one this

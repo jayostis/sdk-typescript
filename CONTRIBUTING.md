@@ -68,7 +68,7 @@ npm run typecheck
 npm test
 ```
 
-All four. CI runs them on Node 18.x and 22.x, so a change that relies on newer runtime behavior fails there even when it passes locally.
+All four. CI runs them on Node 20.x and 22.x, so a change that relies on newer runtime behavior fails there even when it passes locally. Node 18 is below the `engines` floor: the identity module's random fallback throws there by design, so a failure on 18 is the intended one.
 
 `npm run typecheck` is separate from `npm run build` on purpose, and vitest does not typecheck. A change that compiles under the build config can still be a type error, and the suite will not tell you.
 
@@ -85,7 +85,7 @@ fix(sdk): {description}
 ## Opening a pull request
 
 1. Branch from `main`.
-2. Build, typecheck and test, on Node 18 as well as 22 if you can.
+2. Build, typecheck and test, on Node 20 as well as 22 if you can.
 3. Update `CHANGELOG.md` and bump `package.json` (minor for new class support).
 4. Push and open a PR. `.github/PULL_REQUEST_TEMPLATE.md` fills in with the checklist; keep the items and tick them.
 5. Name in the PR body the conformance fixtures your change is proven against. "Tests pass" is not the same claim as "these fixtures pass", and only the second one is evidence.

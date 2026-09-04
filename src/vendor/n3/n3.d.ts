@@ -4,7 +4,8 @@
  * THIS FILE IS OURS, NOT UPSTREAM'S. `n3.js` beside it is generated from n3's
  * source by `scripts/vendor-n3.mjs`; n3@2 ships no types of its own, and
  * `@types/n3` tracks 1.x. The surface below is exactly what
- * `src/converter/to-rdf.ts` and `src/deserializer/n3-adapter.ts` reach, read
+ * `src/converter/to-rdf.ts`, `src/deserializer/n3-adapter.ts` and
+ * `scripts/build-spec-data.mjs` — which imports this same bundle — reach, read
  * off n3@2's `src/N3Parser.js` and `src/N3Writer.js`. Using anything not
  * declared here is a compile error, on purpose: it sends whoever adds the call
  * to the real v2 signature rather than to a v1 guess. The same reasoning as
@@ -24,6 +25,13 @@ export interface Term {
   value: string;
   /** Literals only: the datatype IRI as a `NamedNode`. */
   datatype?: Term;
+  /**
+   * Literals only: the tag of `"o"@en`, empty when there is none. The two
+   * `src/` sites drop it; `scripts/build-spec-data.mjs` reads it to emit
+   * `@language`, and is untyped `.mjs` today — declared so that typing
+   * `scripts/` meets no error whose natural fix drops that branch in silence.
+   */
+  language?: string;
 }
 
 /** An RDF/JS quad, as n3 parses and writes it. */
