@@ -305,6 +305,18 @@ describe('a term whose range names a closed value set', () => {
     })).toContain('<https://ns.cascadeprotocol.org/core/v1#ClinicalGenerated>');
   });
 
+  it('refuses a local name that collides with an inherited Object.prototype property', () => {
+    // `members[localName]` read the value set by computed key with no
+    // `hasOwnProperty` guard, unlike the prefix check two lines above that
+    // guards the exact same class of lookup. `cascade:constructor` is no
+    // member of `cascade:DataProvenance`, but `members.constructor` resolves
+    // to the inherited `Object` constructor function — truthy — so the
+    // unguarded lookup wrote that function's source into the graph instead of
+    // falling through to "no such member".
+    expect(() => convertToRdf({ ...immunization, dataProvenance: 'cascade:constructor' }))
+      .toThrow(/Cannot express "dataProvenance"/);
+  });
+
   it('leaves a range-less @id term taking any absolute IRI', () => {
     // `cascade:creatorWebID` has `rdfs:range rdfs:Resource` and therefore no
     // value set, so closing the enumerated terms must not close this one.

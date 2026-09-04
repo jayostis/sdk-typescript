@@ -303,7 +303,9 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
           ? text.slice(colon + 1)
           : text;
 
-      const resolved = members[localName];
+      const resolved = Object.prototype.hasOwnProperty.call(members, localName)
+        ? members[localName]
+        : undefined;
       if (resolved) return `<${resolved}>`;
 
       // The same member, written out in full. A record that spells a permitted
