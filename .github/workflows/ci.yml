@@ -101,6 +101,17 @@ jobs:
         working-directory: sdk-typescript
         run: npm run typecheck
 
+      # D-BROWSER-1: the public entry point MUST bundle and run for a browser
+      # target. This does what a consumer's Vite or webpack build does — start
+      # at src/index.ts, follow every static import, resolve for a browser — and
+      # fails on any `node:` builtin, `createRequire` or CommonJS `require()` on
+      # the way. `tests/browser-bundle.test.ts` then executes the bundle where
+      # no Node global exists; this step is the same verdict, one line, named in
+      # the job log so a red run says "browser" before anyone opens the test.
+      - name: Browser bundle
+        working-directory: sdk-typescript
+        run: npm run check:browser
+
       - name: Test
         working-directory: sdk-typescript
         run: npm test
