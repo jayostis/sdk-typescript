@@ -83,8 +83,8 @@ describe(CODE, () => {
     it('reports a key declared A, B, A once, with its two predicates', () => {
       expect(rows.map((row) => row.subject)).toEqual(['sourceBundleId']);
       expect([...(rows[0]?.predicates as string[])].sort()).toEqual([
-        `${CASCADE}sourceBundleId`,
         `${CLINICAL}sourceBundleId`,
+        `${CASCADE}sourceBundleId`,
       ]);
     });
 
