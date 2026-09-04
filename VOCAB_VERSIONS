@@ -16,6 +16,38 @@
 #   non-ratified ones. The two SDKs disagree about vitals in opposite directions
 #   and should be fixed together.
 #
+# 2026-09-03 — CURIE CONTRACTION ONLY. The versions below are deliberately NOT
+#   bumped. `src/jsonld/converter.ts` gained a longest-namespace-first tie-break
+#   in `curieOf`, because NAMESPACES.fhir (`http://hl7.org/fhir/`) is a
+#   string-prefix of NAMESPACES.icd10 (`http://hl7.org/fhir/sid/icd-10-cm/`) and
+#   iterates first, so an ICD-10 IRI contracted to `fhir:sid/icd-10-cm/...` — a
+#   local part that is not a PN_LOCAL. That is a bug in how an IRI is shortened,
+#   not a term this package newly registers: no predicate, class or value was
+#   added, and every row below would be claiming support that did not change.
+#   The pre-commit hook asks for this file whenever `src/jsonld/` moves, and this
+#   note is the answer rather than a bump.
+#
+#   Same day, same file, the reading half of the same ambiguity: `fromJsonLd`'s
+#   full-IRI fallback now reuses that same longest-match `CONTRACTIONS` table
+#   instead of scanning `Object.values(NAMESPACES)` in declaration order, so it
+#   no longer mis-derives the local name of an unregistered class the same way.
+#   Also review fixes to `src/converter/to-rdf.ts` (a value-set prefix check, the
+#   XSD lexical forms for Infinity/-Infinity, C0 control characters in
+#   ABSOLUTE_IRI, and `@list` containers written as rdf:List) — that file is
+#   under `src/converter/`, outside what the hook watches, but named here for
+#   the same reason: none of the four register a term, class or value this SDK
+#   did not already claim.
+#
+#   Same day, review followup: the CONTRACTIONS comment above the tie-break was
+#   itself wrong — it named `cascade` and `core` as two prefixes for one
+#   namespace, but NAMESPACES has no `core` key, only `cascade`. Reworded to
+#   say what's actually true (no two NAMESPACES entries share an IRI today; the
+#   tie-break guards a future one). Comment-only, no code or predicate changed.
+#   `scripts/lib/spec-source.mjs`'s `mergedOntologyGraph` also stopped letting a
+#   second ontology file's `@type` array silently replace the first file's
+#   instead of merging with it — a build-tooling fix under `scripts/`, outside
+#   both what ships and what the hook watches, named here for the same reason.
+#
 core=3.8
 health=2.8
 clinical=1.16
@@ -623,3 +655,60 @@ pots=1.4
 #   since v2.2; what moved is that both of fromJsonLd's key spellings now go
 #   through the same term. Bumping a row would claim new support for something
 #   one of the two spellings already had.
+
+# 2026-09-02 — NO BUMP. The record-type table moved, not the vocabulary (#42).
+#   src/record-types/ now answers which class a record type is written as, and
+#   src/jsonld/converter.ts reads through it instead of scanning
+#   TYPE_TO_MAPPING_KEY for the first entry whose mapping had a matching local
+#   name. Every class and every predicate involved is unchanged: 33 of the 39
+#   rows are what exact local-name lookup against the six stable ontologies
+#   produces, 6 are declared overrides, and the result agrees with TYPE_MAPPING
+#   on every row. Nothing this SDK writes changes.
+#   What changes is a READ. clinical:Procedure came back as 'ProcedureRecord',
+#   because that spelling is typed one line earlier in TYPE_TO_MAPPING_KEY and
+#   both readers took the first entry reaching each mapping key.
+#   src/models/procedure.ts declares `type: 'Procedure'` as a single string
+#   literal and nothing is exported under the other name, so the old answer was
+#   a value this package's own published type says is impossible — a contract
+#   the runtime was violating, not one this honours the breaking of.
+#   fromJsonLd additionally compared LOCAL NAMES, so clinical:SocialHistoryRecord
+#   and health:SocialHistoryRecord were the same string to it. They are
+#   different classes with different consent scopes and different pod paths.
+#   Bumping a row would claim new support for classes that have been registered
+#   all along and were merely being named back wrongly.
+
+# 2026-09-02 — NO BUMP. The record-type table is now derived from spec (#42, #90).
+#   src/record-types/ reads a generated table built from the ontologies this
+#   package now ships, rather than 39 hand-written rows. No class and no
+#   predicate changed: the derived population is spec's own record-bearing rule
+#   — the cascade:RecordClass marker jayostis/spec#50 adds directly to the
+#   record-bearing classes, read by scripts/lib/record-population.mjs. It
+#   replaces a reading of rdfs:subClassOf prov:Entity that jayostis/spec#34
+#   (ASK-05) ruled out as PROV-O alignment conferring no membership — measured
+#   on spec's main, 110 classes were in that population and 96 of them were
+#   alignment axioms. The marker is pinned as of the revision
+#   conformance/scripts/SPEC_PIN names, so it is the only rule: the PROV bridge
+#   and the pending-spec-50.json list that patched its blind spots were deleted
+#   together once the pin moved (#89).
+#   The src/jsonld/ edit is a CONTRACTION, not a vocabulary change. RecordType
+#   held both a CURIE and an IRI; the CURIE cost a hand-kept prefix map, and
+#   expanded JSON-LD carries no prefixes by construction. toJsonLd now contracts
+#   the IRI at the write site, which is the one place a compact document wants
+#   the short form. Every @type it emits is byte-identical to before — asserted
+#   by the whole conformance suite, which did not move.
+#   What is newly registered is 43 further record classes spec declares and this
+#   SDK had no row for. Nothing serializes them — that needs predicates, which
+#   is #34 — so no emitted graph changes; deserialize() no longer throws
+#   "Unknown record type" for them, which is the population being spec's rather
+#   than ours.
+
+# 2026-09-03 — NO BUMP. Review followup on #89; no vocabulary changed.
+#   src/vocabularies/namespaces.ts: legacyRdfTypeUriFor and
+#   buildReversePredicateMap each sliced a CURIE's prefix out with a slightly
+#   different empty-prefix guard (colon > 0 vs colonIdx >= 0) — no real trigger,
+#   since NAMESPACES carries no '' key either way, but two copies of one rule
+#   free to drift further apart. Both now call one expandCurie helper. No
+#   predicate resolves differently: expandCurie's guard (colon <= 0 -> return
+#   the CURIE unchanged) matches what each call site already did once
+#   NAMESPACES[''] is considered, and tests/record-types/round-trip.test.ts and
+#   tests/namespaces.test.ts pass unchanged.

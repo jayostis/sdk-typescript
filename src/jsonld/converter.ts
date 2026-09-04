@@ -7,7 +7,8 @@
  * @module jsonld
  */
 
-import { NAMESPACES, PROPERTY_PREDICATES, TYPE_MAPPING, TYPE_TO_MAPPING_KEY, buildReversePredicateMap } from '../vocabularies/namespaces.js';
+import { NAMESPACES, PROPERTY_PREDICATES, buildReversePredicateMap, legacyRdfTypeUriFor } from '../vocabularies/namespaces.js';
+import { recordTypeFor, recordTypeForClass } from '../record-types/index.js';
 import { termFor } from '../terms/index.js';
 import { CONTEXT_URI } from './context.js';
 import type { CascadeEntity } from '../models/common.js';
@@ -16,7 +17,52 @@ import type { CascadeEntity } from '../models/common.js';
 
 const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
 
+/**
+ * `prefix -> namespace`, longest namespace first.
+ *
+ * LONGEST WINS, because one namespace can be a string-prefix of another and the
+ * shorter one then answers for both. `NAMESPACES.fhir`
+ * (`http://hl7.org/fhir/`) contains `NAMESPACES.icd10`
+ * (`http://hl7.org/fhir/sid/icd-10-cm/`) and is declared first, so a first-match
+ * loop contracted every ICD-10 IRI to `fhir:sid/icd-10-cm/E11.9` — a CURIE
+ * whose local part holds `/` and `.` and is not a PN_LOCAL, so it is not the
+ * term that went in and no reader resolves it back to one.
+ *
+ * The rule, not the pair: the next vocabulary spec publishes under a path of an
+ * existing one reintroduces this, and a re-ordering by hand would fix one case
+ * and leave the rule wrong.
+ *
+ * TIES KEEP DECLARATION ORDER. No two entries in `NAMESPACES` currently share
+ * an IRI — every value here is distinct — so nothing is settled by this today;
+ * it guards the day two prefixes do name the same namespace. `Array.prototype.sort`
+ * is stable, so that day the prefix declared first in `NAMESPACES` wins, rather
+ * than the winner depending on the sort implementation's own tie-breaking.
+ */
+const CONTRACTIONS: readonly (readonly [string, string])[] = Object.entries(NAMESPACES)
+  .sort(([, a], [, b]) => b.length - a.length);
+
 // ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * A class IRI as the CURIE a compact JSON-LD document should carry.
+ *
+ * CONTRACTED HERE, not carried on the record type. `RecordType` used to hold
+ * both a CURIE and an IRI, and the CURIE cost a hand-kept prefix map to expand
+ * — the last such map once the classes are derived from spec, because expanded
+ * JSON-LD carries IRIs and no prefixes by construction.
+ *
+ * A compact document with an `@context` is the one place the short form is
+ * genuinely wanted, so the contraction happens at the only site that wants it.
+ * An IRI under no known prefix comes back unchanged, which is valid JSON-LD and
+ * is what a class from a vocabulary this SDK has no prefix for should produce.
+ */
+export function curieOf(iri: string): string {
+  const match = CONTRACTIONS.find(([, namespace]) => iri.startsWith(namespace));
+  if (!match) return iri;
+
+  const [prefix, namespace] = match;
+  return `${prefix}:${iri.slice(namespace.length)}`;
+}
 
 /**
  * Convert a Cascade Protocol record to a JSON-LD document.
@@ -39,16 +85,21 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap();
  * ```
  */
 export function toJsonLd(record: CascadeEntity): object {
-  const mappingKey = TYPE_TO_MAPPING_KEY[record.type];
-  const mapping = mappingKey ? TYPE_MAPPING[mappingKey] : undefined;
-  if (!mapping) {
+  // FALLS BACK TO THE LEGACY TABLE for a name spec's derived table has never
+  // heard of, on the same terms `acceptedClassUris` in
+  // `src/deserializer/turtle-parser.ts` does (#89, `SocialHistoryConsent`):
+  // `serializeRecord` already writes this class from `TYPE_MAPPING` when
+  // `recordTypeFor` answers `undefined`, so refusing to write it here would
+  // make Turtle and JSON-LD disagree on which records this SDK can produce.
+  const rdfTypeUri = recordTypeFor(record.type)?.rdfTypeUri ?? legacyRdfTypeUriFor(record.type);
+  if (!rdfTypeUri) {
     throw new Error(`Unknown record type: ${record.type}. No TYPE_MAPPING found.`);
   }
 
   const doc: Record<string, unknown> = {
     '@context': CONTEXT_URI,
     '@id': record.id,
-    '@type': mapping.rdfType,
+    '@type': curieOf(rdfTypeUri),
   };
 
   // Widened once, as `serializeRecord` does at turtle-serializer.ts:642. A term
@@ -93,6 +144,25 @@ export function toJsonLd(record: CascadeEntity): object {
 }
 
 /**
+ * The record type a JSON-LD `@type` names, written either way.
+ *
+ * `toJsonLd` writes a CURIE, but a document produced anywhere else may carry
+ * the full IRI, and both name the same class. Tried as an IRI first because a
+ * full IRI contains a colon too, so a CURIE test would claim `https` as its
+ * prefix.
+ */
+function recordTypeOfJsonLd(rdfType: string): ReturnType<typeof recordTypeForClass> {
+  const byIri = recordTypeForClass(rdfType);
+  if (byIri) return byIri;
+
+  const colonIdx = rdfType.indexOf(':');
+  if (colonIdx < 0) return undefined;
+
+  const namespace = (NAMESPACES as Record<string, string>)[rdfType.slice(0, colonIdx)];
+  return namespace ? recordTypeForClass(`${namespace}${rdfType.slice(colonIdx + 1)}`) : undefined;
+}
+
+/**
  * Parse a JSON-LD document back to a typed Cascade Protocol record.
  *
  * Supports documents using the Cascade Protocol context (either inline
@@ -134,33 +204,33 @@ export function fromJsonLd<T extends CascadeEntity>(doc: object): T {
     }
   }
 
-  // If full URI, extract local name
-  for (const ns of Object.values(NAMESPACES)) {
+  // If full URI, extract local name. LONGEST NAMESPACE FIRST, via `CONTRACTIONS`
+  // — the same table `curieOf` sorts by length for the same reason: `fhir`
+  // (`http://hl7.org/fhir/`) is a string-prefix of `icd10`
+  // (`http://hl7.org/fhir/sid/icd-10-cm/`) and is declared first in
+  // `NAMESPACES`, so scanning declaration order mis-derived `sid/icd-10-cm/E11.9`
+  // for every ICD-10 IRI instead of `E11.9`.
+  for (const [, ns] of CONTRACTIONS) {
     if (rdfType.startsWith(ns)) {
       typeName = rdfType.slice(ns.length);
       break;
     }
   }
 
-  // Resolve to canonical TypeScript type name.
-  // When the RDF local name differs from the TypeScript type name
-  // (e.g., RDF 'clinical:Medication' -> TypeScript 'MedicationRecord'),
-  // find the first TYPE_TO_MAPPING_KEY entry whose mapping's rdfType
-  // has this local name, and use that entry's key as the type.
-  let resolvedType = typeName;
-  for (const [tsType, mappingKey] of Object.entries(TYPE_TO_MAPPING_KEY)) {
-    const mapping = TYPE_MAPPING[mappingKey];
-    if (mapping) {
-      const mColonIdx = mapping.rdfType.indexOf(':');
-      if (mColonIdx >= 0) {
-        const mLocal = mapping.rdfType.slice(mColonIdx + 1);
-        if (mLocal === typeName) {
-          resolvedType = tsType;
-          break;
-        }
-      }
-    }
-  }
+  // Resolve to the canonical type name — the spelling `src/models/` declares.
+  //
+  // THE CLASS DECIDES, NOT THE LOCAL NAME. This used to scan
+  // `TYPE_TO_MAPPING_KEY` for the first entry whose mapping had a matching
+  // local name, which carried both of the defects the deserializer carried.
+  // It broke the tie by key order, so `clinical:Procedure` came back as
+  // `ProcedureRecord`; and it compared LOCAL NAMES, so
+  // `clinical:SocialHistoryRecord` and `health:SocialHistoryRecord` were the
+  // same string to it and whichever was written first won.
+  //
+  // Falls back to the bare local name, which is what a `@type` naming no
+  // registered class already did. Reading is faithful: an unknown class is a
+  // record this SDK has no model for, not a document to refuse.
+  const resolvedType = recordTypeOfJsonLd(rdfType)?.name ?? typeName;
   record['type'] = resolvedType;
 
   // Map all other properties

@@ -18,7 +18,7 @@ import { join, relative } from 'node:path';
 import ts from 'typescript';
 
 /**
- * Every TypeScript file under `dir`, recursively, as absolute paths.
+ * Every source file under `dir`, recursively, as absolute paths.
  *
  * `.mts`, `.cts` and `.tsx` as well as `.ts`, none of which `endsWith('.ts')`
  * is true for. `src/` holds none of them today, and that is the reason to match
@@ -28,14 +28,48 @@ import ts from 'typescript';
  * a claim about `dist/`: tsc does not copy an input declaration file there, but
  * one under `src/` is still source the compiler reads, and a bare specifier in
  * it is still a package the build resolves.
+ *
+ * JAVASCRIPT TOO, AND FOR THE SAME REASON. This walk matched TypeScript alone
+ * until `src/vendor/` existed, at which point roughly 3,300 lines of shipped
+ * JavaScript became invisible to the one check that exists to say `src/` pulls
+ * nothing in. Vendored code is exactly where an unnoticed dependency would
+ * arrive, because nobody reads it: it is copied, not written. A guard blind to
+ * the riskiest directory in the tree reports clean about the part it skipped,
+ * which is the failure this comment's first paragraph already argues against.
+ *
+ * What it finds there is DECLARED rather than exempted — see
+ * {@link VENDOR_BARE_SPECIFIERS}.
  */
 function sourcesUnder(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) return sourcesUnder(full);
-    return /\.[mc]?tsx?$/.test(entry.name) ? [full] : [];
+    return /\.[mc]?[jt]sx?$/.test(entry.name) ? [full] : [];
   });
 }
+
+/**
+ * Bare specifiers in vendored source, as `path -> specifier`, compared BOTH WAYS.
+ *
+ * `src/vendor/n3/N3Lexer.js` line 7 is `require("buffer")`, on the chunked
+ * streaming path this repository never reaches — we hand the parser a complete
+ * string. It is reported rather than exempted because the report is right:
+ * `needsInstalling` treats a bare `buffer` as a finding precisely because an npm
+ * package by that name exists, and here it IS installed, as n3's own dependency.
+ * At a consumer of this package it is not, and the Node builtin answers instead.
+ * Those are two different `Buffer`s and the specifier cannot say which.
+ *
+ * The fix a non-vendored file would get — write `node:buffer` — is unavailable,
+ * because editing the copy ends the three things that make vendoring safe:
+ * upstream's suite no longer validates it, the drift test can no longer compare
+ * byte-for-byte, and re-vendoring a fix stops being a copy. See
+ * `src/vendor/n3/VENDOR.md`.
+ *
+ * So it is written down. Compared with `toEqual` and not filtered out, so a NEW
+ * bare specifier in vendored code fails the test, and so does this one going
+ * away — a declaration that cannot rot into a permanent exemption.
+ */
+export const VENDOR_BARE_SPECIFIERS: readonly string[] = ['vendor/n3/N3Lexer.js -> buffer'];
 
 /**
  * Every module specifier `source` imports, in the order they are written.
@@ -66,7 +100,13 @@ function sourcesUnder(dir: string): string[] {
  *   entry immediately is one somebody switches off.
  */
 function specifiersIn(source: string, fileName: string): string[] {
-  const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  // JS is parsed as JS, not as TS-that-happens-to-be-valid. The two grammars
+  // overlap almost entirely and `ScriptKind.TS` would read the vendored files
+  // today, but "almost" is the wrong guarantee for a check whose failure mode is
+  // silently reporting clean.
+  const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX
+    : /\.[mc]?jsx?$/.test(fileName) ? ts.ScriptKind.JS
+      : ts.ScriptKind.TS;
   const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, kind);
   const found: string[] = [];
 

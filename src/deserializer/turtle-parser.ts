@@ -18,13 +18,10 @@
  * @module deserializer
  */
 
-import {
-  DEPRECATED_TYPE_ALIASES,
-  NAMESPACES,
-  TYPE_MAPPING,
-  TYPE_TO_MAPPING_KEY,
-  buildReversePredicateMap,
-} from '../vocabularies/namespaces.js';
+import { NAMESPACES, buildReversePredicateMap, legacyRdfTypeUriFor } from '../vocabularies/namespaces.js';
+import { recordTypeFor } from '../record-types/index.js';
+import type { ParsedTriple } from './parsed-triple.js';
+import { parseTurtleWithN3 } from './n3-adapter.js';
 import {
   DEFAULT_NESTED_PREFIX,
   blankNodeTermKeys,
@@ -37,14 +34,6 @@ import { BLANK_NODE_PREDICATE_PREFIXES } from '../serializer/turtle-serializer.j
 import type { CascadeEntity } from '../models/common.js';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
-
-interface ParsedTriple {
-  subject: string;
-  predicate: string;
-  object: string;
-  objectType: 'uri' | 'literal' | 'boolean' | 'integer' | 'double' | 'list' | 'blankNode';
-  datatype?: string;
-}
 
 interface ParsedPrefix {
   prefix: string;
@@ -177,43 +166,22 @@ const REVERSE_PREDICATE_MAP = buildReversePredicateMap({
 });
 
 /**
- * Build a reverse mapping from RDF type URI to record type string.
+ * Which record type a class reads back as, and which classes a name accepts,
+ * both answered by `src/record-types/`.
+ *
+ * WHAT USED TO BE HERE. Three private functions — `buildMappingKeyToTypeName`,
+ * `buildReverseTypeMap` and, further down, `resolveTypeUri` — reconstructed
+ * the class half of the vocabulary from two tables in `src/vocabularies/`, and
+ * the reverse direction was decided by OBJECT KEY ORDER: the first name
+ * reaching each mapping key won. That made `clinical:Procedure` read back as
+ * `ProcedureRecord`, a spelling `src/models/procedure.ts` does not declare and
+ * `src/index.ts` does not export, so `deserialize()` returned a value this
+ * package's own published type says is impossible.
+ *
+ * The canonical name is now DECLARED, in `CANONICAL_NAMES`, and a class with
+ * two names and no declared canonical throws at load rather than picking one.
+ * See #42.
  */
-/**
- * Build a reverse mapping from mapping key to the canonical TypeScript type name.
- * Uses the first entry in TYPE_TO_MAPPING_KEY that maps to each mapping key.
- */
-function buildMappingKeyToTypeName(): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const [typeName, mappingKey] of Object.entries(TYPE_TO_MAPPING_KEY)) {
-    if (!map.has(mappingKey)) {
-      map.set(mappingKey, typeName);
-    }
-  }
-  return map;
-}
-
-const MAPPING_KEY_TO_TYPE_NAME = buildMappingKeyToTypeName();
-
-function buildReverseTypeMap(): Map<string, { recordType: string; mappingKey: string }> {
-  const reverseMap = new Map<string, { recordType: string; mappingKey: string }>();
-  for (const [key, mapping] of Object.entries(TYPE_MAPPING)) {
-    const colonIdx = mapping.rdfType.indexOf(':');
-    if (colonIdx >= 0) {
-      const nsPrefix = mapping.rdfType.slice(0, colonIdx);
-      const localName = mapping.rdfType.slice(colonIdx + 1);
-      const nsUri = NAMESPACES[nsPrefix as keyof typeof NAMESPACES];
-      if (nsUri) {
-        // Use the canonical TypeScript type name if available, otherwise fall back to localName
-        const recordType = MAPPING_KEY_TO_TYPE_NAME.get(key) ?? localName;
-        reverseMap.set(`${nsUri}${localName}`, { recordType, mappingKey: key });
-      }
-    }
-  }
-  return reverseMap;
-}
-
-const REVERSE_TYPE_MAP = buildReverseTypeMap();
 
 // ─── Fields requiring special type conversion ───────────────────────────────
 
@@ -449,12 +417,33 @@ function stripAngleBrackets(uri: string): string {
 }
 
 /**
- * Parse Turtle content into a list of parsed triples.
+ * The hand-written Turtle parser. NO LONGER ON THE PRODUCTION PATH.
  *
- * This is a lightweight regex-based parser that handles the subset of Turtle
- * used by Cascade Protocol records. It does NOT implement a full Turtle grammar.
+ * `deserialize` reads through `parseTurtleWithN3` now. This is retained as the
+ * differential's oracle — `tests/deserializer/parser-differential.test.ts`
+ * runs both over all 92 fixtures and declares every difference — and exported
+ * for no other reason.
+ *
+ * IT IS DEAD CODE THAT SHIPS, and that is a real cost, not a neutral one:
+ * roughly 700 lines reach `dist` and every consumer downloads them. The case
+ * for keeping it is that the differential is what makes the swap reviewable,
+ * and a differential with one side deleted asserts nothing. Deleting it is
+ * #71's to finish, along with the helpers only it reaches.
+ *
+ * What the differential found, so it is written where the code is:
+ *
+ * - **It has no branch for the comma object list** `:p :a , :b`. Four fixtures
+ *   in the corpus carry one, and each lost every object after the first —
+ *   `absent-003`, `lab-009` (twice), `lab-013` and `pod-001`, where nineteen
+ *   `ldp:contains` entries came back as one object holding the raw text of the
+ *   whole block. `lab-013` is the fixture that exists to be written in full
+ *   and rejected for carrying two values; it was being read with one, and a
+ *   record with one violates nothing.
+ * - **It decides a value's kind from the lexical form.** A bare `5` was an
+ *   integer and `"5"^^xsd:integer` an uninterpreted literal, though they are
+ *   the same RDF term.
  */
-function parseTurtleContent(content: string): {
+export function parseTurtleContent(content: string): {
   prefixes: ParsedPrefix[];
   triples: ParsedTriple[];
 } {
@@ -985,58 +974,35 @@ function parseListItems(content: string): string[] {
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
 /**
- * Resolve a Cascade record type string (e.g., "MedicationRecord") to the full
- * RDF type URI used in Turtle.
- */
-function resolveTypeUri(type: string): string | null {
-  // Try via TYPE_TO_MAPPING_KEY first (handles cases where the TypeScript
-  // type name differs from the RDF local name, e.g. 'MedicationRecord' -> 'clinical:Medication')
-  const mappingKey = TYPE_TO_MAPPING_KEY[type];
-  if (mappingKey) {
-    const mapping = TYPE_MAPPING[mappingKey];
-    if (mapping) {
-      const colonIdx = mapping.rdfType.indexOf(':');
-      if (colonIdx >= 0) {
-        const nsPrefix = mapping.rdfType.slice(0, colonIdx);
-        const localName = mapping.rdfType.slice(colonIdx + 1);
-        const nsUri = NAMESPACES[nsPrefix as keyof typeof NAMESPACES];
-        if (nsUri) return `${nsUri}${localName}`;
-      }
-    }
-  }
-
-  // Fallback: try direct match in TYPE_MAPPING values by RDF local name
-  for (const mapping of Object.values(TYPE_MAPPING)) {
-    const colonIdx = mapping.rdfType.indexOf(':');
-    if (colonIdx >= 0) {
-      const nsPrefix = mapping.rdfType.slice(0, colonIdx);
-      const localName = mapping.rdfType.slice(colonIdx + 1);
-      if (localName === type) {
-        const nsUri = NAMESPACES[nsPrefix as keyof typeof NAMESPACES];
-        if (nsUri) return `${nsUri}${localName}`;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Every RDF type IRI a subject may carry and still be read back as `typeUri`.
+ * Every class IRI a subject may carry and still be read back as `type`.
  *
- * This is where clinical v1.13's read/write asymmetry lives. v1.13 deprecated
- * `clinical:LabResult`, `clinical:Condition`, `clinical:Allergy` and
- * `clinical:Immunization` but did NOT remove them: the pod export path is still
- * their sole emitter and existing pods contain them. Refusing to read those
- * pods would be a data-loss bug dressed up as standards compliance, so the
- * deprecated spellings stay readable here while `TYPE_MAPPING` keeps this SDK
- * from ever writing one.
+ * One lookup where there were two functions and a fallback scan. The
+ * deprecated `clinical:` spellings are part of the answer rather than a second
+ * table consulted afterwards: clinical v1.13 deprecated four classes and v1.5 a
+ * fifth, none was REMOVED, and the pod export path is still their sole emitter.
+ * Refusing to read those pods would be a data-loss bug dressed up as standards
+ * compliance.
+ *
+ * A NAME-KEYED FALLBACK TO THE LEGACY TABLE STAYS, and is not the fallback the
+ * paragraph above used to say was dead. That one scanned `TYPE_MAPPING` for an
+ * entry whose RDF LOCAL NAME equalled the requested type, reached only when
+ * the primary lookup missed by name — genuinely unreachable, since every local
+ * name it could hit was already a registered type name. This is a different
+ * question: `recordTypeFor(type)` asks spec's derived table, and a handful of
+ * names — `SocialHistoryConsent` among them (#89) — are in `TYPE_TO_MAPPING_KEY`
+ * but not there, because spec models `cascade:SocialHistoryConsent` as a NAMED
+ * INDIVIDUAL of `cascade:ConsentScope`, never marked `cascade:RecordClass`, so
+ * the derived table correctly has no row for it. `serializeRecord`
+ * (`src/serializer/turtle-serializer.ts`) already falls back to the legacy
+ * table when `recordTypeFor` answers `undefined`; refusing to read the class a
+ * write just produced was the asymmetry `legacyRdfTypeUriFor` closes.
  */
-function acceptedTypeUris(typeUri: string): string[] {
-  const accepted = [typeUri];
-  for (const [deprecated, supersededBy] of Object.entries(DEPRECATED_TYPE_ALIASES)) {
-    if (supersededBy === typeUri) accepted.push(deprecated);
-  }
-  return accepted;
+function acceptedClassUris(type: string): readonly string[] | null {
+  const derived = recordTypeFor(type)?.acceptedClassUris;
+  if (derived) return derived;
+
+  const legacy = legacyRdfTypeUriFor(type);
+  return legacy ? [legacy] : null;
 }
 
 /**
@@ -1435,17 +1401,15 @@ function triplesToRecord<T extends CascadeEntity>(
  * ```
  */
 export function deserialize<T extends CascadeEntity>(turtle: string, type: string): T[] {
-  const { triples } = parseTurtleContent(turtle);
+  const triples = parseTurtleWithN3(turtle);
 
-  // Resolve the requested type to a full URI
-  const typeUri = resolveTypeUri(type);
-  if (!typeUri) {
+  // Every class this type answers to, deprecated spellings included.
+  const acceptedUris = acceptedClassUris(type);
+  if (!acceptedUris) {
     throw new Error(`Unknown record type: ${type}. Cannot resolve to RDF type URI.`);
   }
 
-  // Find all subjects with a matching rdf:type. Deprecated-but-still-emitted
-  // clinical: spellings count as matches (clinical v1.13).
-  const accepted = new Set(acceptedTypeUris(typeUri));
+  const accepted = new Set(acceptedUris);
   const matchingSubjects: string[] = [];
   for (const triple of triples) {
     if (triple.predicate === RDF_TYPE && accepted.has(triple.object)) {
@@ -1453,9 +1417,10 @@ export function deserialize<T extends CascadeEntity>(turtle: string, type: strin
     }
   }
 
-  // Look up the record type name from REVERSE_TYPE_MAP
-  const typeInfo = REVERSE_TYPE_MAP.get(typeUri);
-  const recordType = typeInfo?.recordType ?? type;
+  // The spelling a read RETURNS, which is not necessarily the one it was asked
+  // under: `deserialize(ttl, 'ProcedureRecord')` finds the same subjects and
+  // answers `Procedure`, the literal `src/models/procedure.ts` declares.
+  const recordType = recordTypeFor(type)?.name ?? type;
 
   // Convert each subject to a record
   return matchingSubjects.map((subjectUri) =>

@@ -2,6 +2,20 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Everything generated from the spec checkout, and nothing else, lives here:
+# the JSON-LD data written by scripts/build-spec-data.mjs, and the TypeScript
+# tables scripts/build-record-types.mjs and scripts/build-terms.mjs derive from
+# it under src/spec/derived/.
+#
+# One directory, one rule, no exceptions. Not committed on purpose: a generated
+# artifact cannot fall behind its source, because there is no copy to go stale.
+# CI clones the commit conformance/scripts/SPEC_PIN names and points
+# CASCADE_SPEC_DIR at it, so every CI build uses pinned data with nobody having
+# to remember anything. The cost is that npm run build needs a spec checkout,
+# exactly as npm test already does — and pretest and pretypecheck run
+# npm run generate, so a clean clone builds what it needs before it needs it.
+src/spec/
+
 # Editor config: share what describes the project, keep what describes a person.
 # Denying the directory first means a settings.json or a credentials file dropped
 # here later is ignored by default rather than riding along in someone's commit.

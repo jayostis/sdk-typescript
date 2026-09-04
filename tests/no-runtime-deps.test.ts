@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
-import { thirdPartyImports } from './no-runtime-deps.js';
+import { thirdPartyImports, VENDOR_BARE_SPECIFIERS } from './no-runtime-deps.js';
 
 const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -221,7 +221,17 @@ describe('thirdPartyImports', () => {
     ]);
   });
 
-  it('finds no third-party import in src/', () => {
-    expect(thirdPartyImports(srcDir)).toEqual([]);
+  it('finds no third-party import in src/ but the ones vendored code declares', () => {
+    // Compared BOTH WAYS. Not `[]` with the vendored findings filtered out: a
+    // filter answers the same whether the list is empty or the walk skipped the
+    // directory, and `src/vendor/` is the one place a dependency could arrive
+    // without anybody writing a line. A new bare specifier there fails here, and
+    // so does one of these disappearing — which is what re-vendoring should do.
+    expect(
+      thirdPartyImports(srcDir).sort(),
+      'a bare specifier in src/ names a package the build resolves. If it is '
+      + 'vendored and unavoidable, declare it in VENDOR_BARE_SPECIFIERS with the '
+      + 'reason; if it is ours, write the node: prefix or the relative path.',
+    ).toEqual([...VENDOR_BARE_SPECIFIERS].sort());
   });
 });

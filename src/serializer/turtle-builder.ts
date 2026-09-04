@@ -28,11 +28,36 @@ import type { Output } from '../terms/index.js';
 // ─── String Escaping ────────────────────────────────────────────────────────
 
 /**
+ * A string as a one-line quoted literal — the form N-Triples allows and Turtle
+ * shares.
+ *
+ * THE ONE PLACE THIS REPOSITORY DECIDES HOW A LITERAL IS SPELLED.
+ * `src/converter/to-rdf.ts` writes literals too, and it had its own scheme: a
+ * second set of control-character rules, in a function whose output is exported
+ * to consumers rather than always reparsed here. Two schemes means a fix to
+ * either is a fix to half the output, and which half a caller gets depends on
+ * whether their record type has been routed to the generic writer.
+ *
+ * `JSON.stringify` IS THE ESCAPER, not a shortcut around one. JSON's string
+ * escapes are a subset of Turtle's: `\"`, `\\`, `\n`, `\r`, `\t`, `\b` and `\f`
+ * are all Turtle ECHARs, and everything else JSON escapes it escapes as
+ * `\uXXXX`, which is a Turtle UCHAR. Written by hand, the five-replace chain
+ * this replaces passed U+0000 and U+0007 through as raw bytes — legal by the
+ * grammar, and the kind of thing a downstream tool refuses while naming neither
+ * the record nor the field.
+ */
+export function quoteTurtleString(value: string): string {
+  return JSON.stringify(value);
+}
+
+/**
  * Escape a string value for use in a Turtle literal.
  *
- * Handles backslashes, double quotes, newlines, carriage returns, and tabs.
  * For very long strings (> 200 chars) or strings containing embedded newlines,
- * uses triple-quoted long literals.
+ * uses triple-quoted long literals; otherwise the one-line form
+ * {@link quoteTurtleString} defines. A long literal is Turtle only — N-Triples
+ * has no triple-quoted form — which is why the two are separate functions and
+ * the generic writer takes the narrower one.
  */
 export function escapeTurtleString(value: string): string {
   // Use triple-quoted long literal for very long strings or strings with embedded newlines
@@ -42,13 +67,7 @@ export function escapeTurtleString(value: string): string {
       .replace(/"""/g, '\\"\\"\\"');
     return `"""${longEscaped}"""`;
   }
-  const escaped = value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
-  return `"${escaped}"`;
+  return quoteTurtleString(value);
 }
 
 // ─── SubjectBuilder ─────────────────────────────────────────────────────────
