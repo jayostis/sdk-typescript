@@ -39,6 +39,14 @@
  * through `scripts/lib/node-globals.mjs`), which names such a reference on
  * every path. One script, one exit code, both halves.
  *
+ * THAT HALF READS THE VENDORED JAVASCRIPT TOO. `src/vendor/n3/n3.js` is the
+ * largest thing in the bundle and the one file here that is generated rather
+ * than written, which makes it the likeliest arrival point for a
+ * `process.env.X` — through a re-vendor at a version whose lexer reads one.
+ * `tsconfig.browser.json` sets `allowJs` and includes `src/**\/*.js` so the
+ * compile opens it; a `.js` file is judged on unresolved names alone, for the
+ * reason `scripts/lib/node-globals.mjs` gives.
+ *
  * Exported as a function so `tests/browser-bundle.test.ts` can hand it source
  * that MUST fail before pointing it at ours — as text, resolved from the
  * repository root, because a scratch file under the system temp directory
@@ -157,8 +165,9 @@ if (isMainModule(import.meta.url)) {
       + 'A node: builtin, createRequire, or a CommonJS require() on any path reachable '
       + 'from src/index.ts is what the bundle half reports. The compile half reports '
       + 'what src/ cannot compile with Node\'s types withheld: a bare process, Buffer, '
-      + '__dirname or global anywhere in src/ — or any other error under that config, '
-      + 'which is a compile error to fix, not a Node global.',
+      + '__dirname or global in any .ts or .js under src/, the vendored parser included '
+      + '— and from a .ts file, any other error under that config too, which is a '
+      + 'compile error to fix, not a Node global.',
     );
     process.exit(1);
   }

@@ -121,8 +121,10 @@ jobs:
       # fails on any `node:` builtin, `createRequire` or CommonJS `require()` on
       # the way; then compiles src/ with Node's types withheld
       # (tsconfig.browser.json) and fails on a bare `process`, `Buffer`,
-      # `__dirname` or `global` on any path, which a bundler passes through in
-      # silence. `tests/browser-bundle.test.ts` then executes the bundle where
+      # `__dirname` or `global` in any .ts or .js under src/ — the vendored
+      # n3 included, which is where a re-vendor would bring one in — since a
+      # bundler passes those through in silence.
+      # `tests/browser-bundle.test.ts` then executes the bundle where
       # no Node global exists; this step is the same verdict, one line, named in
       # the job log so a red run says "browser" before anyone opens the test.
       - name: Browser bundle

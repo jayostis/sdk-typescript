@@ -96,3 +96,12 @@ node scripts/vendor-n3.mjs            # rebuild n3.js and re-copy LICENSE.md
 Then update the table above, check `NOTICE` at the repository root still states
 the right version, and re-read `n3.d.ts` against the new `src/N3Parser.js` and
 `src/N3Writer.js` — it declares only what this SDK calls, by hand.
+
+The drift test compares bytes, so it accepts whatever the new upstream contains,
+a `process.env.N3_DEBUG` included — and esbuild passes a free identifier through
+`platform: 'browser'` untouched and unreported. What catches that is
+`npm run check:browser`: `tsconfig.browser.json` sets `allowJs` and includes
+`src/**/*.js`, so this file is compiled with Node's types withheld and a bare
+`process`, `Buffer`, `__dirname` or `global` in it is named with its line. Run
+it after every re-vendor; a version that needs a Node global cannot be vendored
+here as-is.

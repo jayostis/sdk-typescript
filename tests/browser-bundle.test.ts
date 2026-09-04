@@ -17,7 +17,9 @@
  * — `process`, `Buffer`, `__dirname` — is a free identifier it passes
  * through in silence, and the vm run below sees only the paths imm-001
  * walks. `nodeGlobalsIn` compiles with Node's types withheld
- * (`tsconfig.browser.json`) and names such a reference on every path.
+ * (`tsconfig.browser.json`) and names such a reference on every path — in the
+ * vendored JavaScript as well as the TypeScript, since that is the largest
+ * thing in the bundle and the one file here nobody wrote by hand.
  *
  * @see https://github.com/the-cascade-protocol/spec/blob/main/decisions/2026-09-03-browser-safety.md
  */
@@ -29,7 +31,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
 
 import { bundleForBrowser } from '../scripts/check-browser-bundle.mjs';
-import { nodeGlobalsIn, nodeGlobalsInSrc } from '../scripts/lib/node-globals.mjs';
+import { browserGateFiles, nodeGlobalsIn, nodeGlobalsInJs, nodeGlobalsInSrc } from '../scripts/lib/node-globals.mjs';
 import { loadFixture } from './support/fixtures.js';
 import { graphDifference, quadsFromTurtle } from './support/graph.js';
 
@@ -167,7 +169,64 @@ describe('nodeGlobalsIn', () => {
   });
 });
 
+describe('nodeGlobalsInJs', () => {
+  // The vendored parser is JavaScript, and it is the largest thing in the
+  // browser bundle. A compile that only ever opened `.ts` would report the
+  // gate clean without having read it — the file the gate most needs to see.
+  it('names every bare Node global a JavaScript file reaches, with its line', () => {
+    const findings = nodeGlobalsInJs(
+      'export const home = process.cwd();\n'
+      + "export const bytes = Buffer.from('x');\n"
+      + 'export const here = __dirname;\n'
+      + 'export const there = __filename;\n'
+      + 'export const g = global;\n',
+    );
+
+    expect(findings).toHaveLength(5);
+    expect(findings[0]).toMatch(/^probe\.js:1 .*'process'/);
+    expect(findings[1]).toMatch(/^probe\.js:2 .*'Buffer'/);
+    expect(findings[2]).toMatch(/^probe\.js:3 .*'__dirname'/);
+    expect(findings[3]).toMatch(/^probe\.js:4 .*'__filename'/);
+    expect(findings[4]).toMatch(/^probe\.js:5 .*'global'/);
+  });
+
+  it('is silent for untyped JavaScript that reaches none', () => {
+    // What makes the JavaScript half narrower than the TypeScript one. Under
+    // `checkJs` the vendored bundle produces hundreds of inference
+    // diagnostics — implicit `any` parameters, properties absent from an
+    // inferred shape — none of which is a Node global, and every one of which
+    // would turn the gate red for code nobody here wrote. So a `.js` file is
+    // judged on unresolved names alone. This probe is exactly that noise: if
+    // the filter goes away, it fails.
+    expect(nodeGlobalsInJs(
+      'export function add(a, b) { return a.x + b.y; }\n'
+      + 'const bag = {};\nbag.z = 1;\nexport const z = bag.z;\n',
+    )).toEqual([]);
+  });
+
+  it('follows a relative import out of JavaScript, and names the global behind it', () => {
+    const findings = nodeGlobalsInJs(
+      "import { home } from './probe-dep.js';\nexport const where = home;\n",
+      { 'probe-dep.js': 'export const home = process.cwd();\n' },
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatch(/^probe-dep\.js:1 .*'process'/);
+  });
+});
+
 describe('src/index.ts for a browser', () => {
+  // The gate's promise is "on any path", and `src/vendor/n3/n3.js` is 91 KB of
+  // shipped code that `src/converter/to-rdf.ts` imports statically — inlined
+  // into the browser bundle, and passed through by esbuild untouched. An
+  // `include` of `src/**/*.ts`, or an `allowJs` left off, silently drops it.
+  it('compiles the vendored JavaScript, not only the TypeScript', () => {
+    expect(
+      browserGateFiles(),
+      'tsconfig.browser.json must reach every file that ships in the browser bundle',
+    ).toContain('src/vendor/n3/n3.js');
+  });
+
   it('reaches no Node global on any path', { timeout: 60_000 }, () => {
     expect(
       nodeGlobalsInSrc(),

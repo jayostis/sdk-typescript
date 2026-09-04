@@ -63,7 +63,9 @@
   `createRequire` or `require()` left on the way, then compiles `src/` with
   Node's types withheld (`tsconfig.browser.json`, through
   `scripts/lib/node-globals.mjs`) and fails on a bare `process`, `Buffer`,
-  `__dirname` or `global` on any path, which a bundler passes through in
+  `__dirname` or `global` in any `.ts` or `.js` under `src/` — the vendored
+  `n3.js` included, which is the largest thing in the bundle and the likeliest
+  arrival point for one — which a bundler passes through in
   silence — red against the epic head
   on three sites, green after — and `tests/browser-bundle.test.ts` runs the
   bundle in a bare vm context with no `process`, `Buffer` or `require`
