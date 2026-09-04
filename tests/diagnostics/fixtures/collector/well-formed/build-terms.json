@@ -1,0 +1,33 @@
+[
+  {
+    "id": "unclassifiable-range:https://ns.cascadeprotocol.org/health/v1#HRVReading",
+    "code": "unclassifiable-range",
+    "subject": "https://ns.cascadeprotocol.org/health/v1#HRVReading",
+    "severity": "info",
+    "owner": "spec",
+    "location": ["ontologies/health/v1/health.ttl"],
+    "source": "build-terms"
+  },
+  {
+    "id": "term-value-not-iri:cascade:__comment_core",
+    "code": "term-value-not-iri",
+    "subject": "cascade:__comment_core",
+    "severity": "info",
+    "owner": "spec",
+    "location": ["contexts/v1/cascade.jsonld"],
+    "source": "build-terms"
+  },
+  {
+    "id": "term-cross-context-conflict:notes",
+    "code": "term-cross-context-conflict",
+    "subject": "notes",
+    "severity": "error",
+    "owner": "spec",
+    "location": ["contexts/v1/clinical.jsonld", "contexts/v1/health.jsonld"],
+    "source": "build-terms",
+    "predicates": [
+      "https://ns.cascadeprotocol.org/clinical/v1#notes",
+      "https://ns.cascadeprotocol.org/health/v1#notes"
+    ]
+  }
+]

@@ -19,7 +19,7 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 /** A term whose value is a namespace IRI is a prefix declaration, not a term. */
 export function isPrefixDeclaration(value) {
@@ -125,4 +125,50 @@ export function mergedOntologyGraph(ontologiesDir) {
   }
 
   return nodes;
+}
+
+/**
+ * Where the generated spec data lives: `src/spec/` under `root`, or the
+ * directory `CASCADE_SPEC_DATA_DIR` names when it is set.
+ *
+ * THE OVERRIDE EXISTS FOR TESTS, and for nothing else. A generator that can
+ * only read and write the real tree cannot be handed a fixture — and a
+ * detector is proven by making it speak (`tests/README.md`), which the pinned
+ * spec mostly cannot be made to do. `build-spec-data.mjs` also EMPTIES its
+ * output directories before writing, so a generator pointed at the tree from a
+ * vitest worker would race every sibling test reading it. Every test that runs
+ * a generator therefore sets this, and none of them ever leaves it unset.
+ *
+ * @param {string} root - The repository root.
+ * @returns {string}
+ */
+export function specDataDir(root) {
+  const override = process.env.CASCADE_SPEC_DATA_DIR;
+  return override ? resolve(override) : join(root, 'src/spec');
+}
+
+/**
+ * The layout of the generated data directory, spelled once.
+ *
+ * THIS SDK'S OWN LAYOUT, NOT SPEC'S. `ontologies/` and `contexts/` here are
+ * where `scripts/build-spec-data.mjs` WRITES its conversion of spec, and the
+ * other two are what the later generators derive from that — none of them is
+ * a path into a spec checkout, which only `spec-sources.json` names. Spelled
+ * in one function so the four scripts that share the directory cannot drift
+ * on a segment, and so `tests/spec-single-source.test.ts` — which reports a
+ * bare `ontologies` literal as a self-resolved spec path — has one file to
+ * spare with the reason written beside it, rather than four.
+ *
+ * @param {string} root - The repository root.
+ * @returns {{ data: string, ontologies: string, contexts: string, derived: string, diagnostics: string }}
+ */
+export function specDataLayout(root) {
+  const data = specDataDir(root);
+  return {
+    data,
+    ontologies: join(data, 'ontologies'),
+    contexts: join(data, 'contexts'),
+    derived: join(data, 'derived'),
+    diagnostics: join(data, 'diagnostics'),
+  };
 }

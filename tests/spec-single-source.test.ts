@@ -109,14 +109,24 @@ describe('specPathLiterals', () => {
     // is NOT spared either — it reads the layout's top directory off the
     // manifest rather than spelling it, which is what keeps it silent here.
     //
-    // The two spared files are the ones that BUILD scratch spec checkouts to
-    // prove a resolver refuses or resolves — they have to name real paths to do
-    // it. No file that reads spec for a verdict is spared, which is the rule
-    // this check is for.
+    // The spared files are of two kinds, and no file that reads spec for a
+    // verdict is among them, which is the rule this check is for. The first
+    // kind BUILDS a scratch spec checkout or a scratch `src/spec/` tree, or
+    // names a path as fixture data, to prove a resolver, a generator or a copy
+    // step does what it says — they have to write real paths down to do it.
+    // The second is `scripts/lib/spec-source.mjs`, the ONE place this SDK's
+    // own generated layout is spelled: `src/spec/ontologies/` is where
+    // `build-spec-data.mjs` writes its conversion of spec, not a path into a
+    // checkout, and the segment is a literal there so the four scripts that
+    // share the directory cannot drift on it.
     expect(
       specPathLiterals(repoRoot, [
         'tests/spec-single-source.test.ts',
         'tests/support/spec-sources.test.ts',
+        'tests/diagnostics/scratch.ts',
+        'tests/diagnostics/render.test.ts',
+        'tests/scripts/copy-spec-data.test.ts',
+        'scripts/lib/spec-source.mjs',
       ]),
     ).toEqual([]);
   });

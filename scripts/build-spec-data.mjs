@@ -43,14 +43,17 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { normativeLanguageInComments } from './lib/detectors.mjs';
+import { openFindings } from './lib/diagnostics.mjs';
+import { specDataLayout } from './lib/spec-source.mjs';
+
 const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The vendored parser, the same one `deserialize` reads pods with. */
 const N3Parser = require(join(root, 'src/vendor/n3/N3Parser.js')).default;
 
-const OUT = join(root, 'src/spec/ontologies');
-const CONTEXTS = join(root, 'src/spec/contexts');
+const { ontologies: OUT, contexts: CONTEXTS, diagnostics: DIAGNOSTICS } = specDataLayout(root);
 
 /**
  * Where `spec` is.
@@ -114,14 +117,20 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
  * other quad survives and that this is the ONLY predicate absent, so the
  * omission is a declaration rather than a silence.
  *
- * WHAT IS LOST, named rather than waved past. 28 of those comments carry MUST /
- * SHOULD / VALUE FORM language, and for some of them the comment is the only
- * place the rule is written at all — `clinical:sourceIdentity` specifies a
- * scheme-prefixed value form in 3,978 characters that no shape encodes. Nothing
- * mechanical is lost, because prose was never actionable; what is lost is a
- * reader of the shipped artifact finding it. Those rules wanting a machine-
- * readable form is a spec question, and dropping the prose here does not make
- * it one bit more or less true.
+ * WHAT IS LOST, named rather than waved past. Some of those comments state a
+ * rule in RFC 2119 language — MUST / SHOULD / VALUE FORM — and for some of them
+ * the comment is the only place the rule is written at all:
+ * `cascade:sourceIdentity` specifies a scheme-prefixed value form in 3,978
+ * characters that no shape encodes. Nothing mechanical is lost, because prose
+ * was never actionable; what is lost is a reader of the shipped artifact
+ * finding it. Those rules wanting a machine-readable form is a spec question,
+ * and dropping the prose here does not make it one bit more or less true.
+ *
+ * HOW MANY is not written here, on purpose: a count in a comment is never
+ * re-measured (this one said "28" for a corpus that had 9 under the uppercase
+ * rule and 33 case-insensitively). `normativeLanguageInComments` measures it
+ * on every build and records each subject as a `normative-language-in-comment`
+ * finding — see `docs/spec-diagnostics.md`.
  */
 const OMITTED = 'http://www.w3.org/2000/01/rdf-schema#comment';
 
@@ -194,6 +203,13 @@ function provenanceOf(specDir) {
   }
 }
 
+// Opened before anything that can fail — `specRoot()` refuses a missing
+// checkout — and closed after everything is written: a crash between the two
+// leaves no findings file, which is what the collector needs to tell "did not
+// finish" from "found nothing". Opened AFTER it, a refused checkout would
+// leave the previous run's file for the collector to merge as this run's.
+const findings = openFindings({ source: 'build-spec-data', dir: DIAGNOSTICS });
+
 const { root: specDir, manifest } = specRoot();
 const vocabularies = Object.keys(manifest).sort();
 
@@ -216,6 +232,9 @@ mkdirSync(CONTEXTS, { recursive: true });
 
 let total = 0;
 
+/** subject IRI -> the rule-stating comments on it and the vocabularies carrying them, folded across files. */
+const normative = new Map();
+
 for (const vocabulary of vocabularies) {
   const source = join(specDir, manifest[vocabulary].ontology);
 
@@ -234,6 +253,14 @@ for (const vocabulary of vocabularies) {
       `${source} parsed to zero quads. An empty ontology answers every question with "absent", `
       + 'which is indistinguishable from a class that does not exist.',
     );
+  }
+
+  // Over the raw quads, subject and object intact: `toExpandedJsonLd` is where
+  // the predicate is dropped, and this has to read the comment before that.
+  for (const [subject, { comments }] of normativeLanguageInComments(quads)) {
+    const entry = normative.get(subject) ?? normative.set(subject, { comments: [], vocabularies: new Set() }).get(subject);
+    entry.comments.push(...comments);
+    entry.vocabularies.add(vocabulary);
   }
 
   const json = JSON.stringify(toExpandedJsonLd(quads));
@@ -270,10 +297,49 @@ writeFileSync(
   'utf-8',
 );
 
+/** A comment, bounded, so a 3,978-character rule does not become the whole row. */
+const TEXT_LIMIT = 400;
+const bounded = (text) => (text.length > TEXT_LIMIT ? `${text.slice(0, TEXT_LIMIT)}…` : text);
+
+// ONE ROW PER SUBJECT, however many of its comments match and however many
+// files they are spread across — three subjects in the corpus carry more than
+// one `rdfs:comment` — so `${code}:${subject}` stays unique. Blank-node
+// subjects never reach here. `reconcile`, not `spec`: whether a prose rule
+// was meant to be checkable at all is spec's question before it is spec's fix.
+for (const [subject, { comments, vocabularies: carriers }] of [...normative].sort(([a], [b]) => a.localeCompare(b))) {
+  const carriedBy = [...carriers].sort();
+  findings.record({
+    code: 'normative-language-in-comment',
+    severity: 'info',
+    owner: 'reconcile',
+    subject,
+    detail: `${comments.length} rdfs:comment(s) on ${subject} state a rule in RFC 2119 language that `
+      + `no SHACL shape encodes: "${bounded(comments[0])}"`,
+    specFix: 'The rule exists only as prose and names no shape. Decide whether it is meant to be '
+      + "enforced: if so, encode it as a SHACL constraint in the vocabulary's shapes file; if not, "
+      + 'say it is advisory.',
+    text: comments.map(bounded),
+    location: carriedBy.flatMap((vocabulary) => [
+      `spec:${manifest[vocabulary].ontology}`,
+      ...(manifest[vocabulary].shapes ? [`spec:${manifest[vocabulary].shapes}`] : []),
+    ]),
+  });
+}
+
+if (normative.size > 0) {
+  console.log(
+    `  NOTE: ${normative.size} subject(s) carry an rdfs:comment stating a rule in RFC 2119 language `
+    + 'that no shape encodes (normative-language-in-comment):\n'
+    + [...normative.keys()].sort().map((subject) => `    ${subject}`).join('\n'),
+  );
+}
+
+const recorded = findings.close();
+
 const bytes = [OUT, CONTEXTS].flatMap((dir) => readdirSync(dir).map((f) => join(dir, f)))
   .reduce((sum, file) => sum + readFileSync(file).length, 0);
 
 console.log(
   `build-spec-data: ${vocabularies.length} ontologies, ${total} quads, `
-  + `${(bytes / 1024).toFixed(0)}K -> src/spec`,
+  + `${(bytes / 1024).toFixed(0)}K -> src/spec; ${recorded} finding(s) -> src/spec/diagnostics/build-spec-data.json`,
 );

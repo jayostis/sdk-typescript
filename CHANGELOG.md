@@ -4,6 +4,32 @@
 
 ### Added
 
+- **The build writes down what it found.** `npm run generate` has always found
+  real spec defects — a name two record classes claim, a range that is neither
+  a code list nor a structured class, a JSON key that means a different
+  predicate under a different context — and printed them to stdout, where they
+  scrolled past; the cross-context conflicts survived only as a count. Each
+  generator now records its findings through `scripts/lib/diagnostics.mjs`
+  (deleting its own file at start, writing it at the end, so a crash leaves
+  nothing stale), `scripts/collect-diagnostics.mjs` merges the three into
+  `src/spec/diagnostics.json` — refusing a missing file, a repeated id, an id
+  that is not `code:subject`, an enum value outside its enum, or a row filed
+  under the wrong generator — and `scripts/render-diagnostics.mjs` renders it
+  through `scripts/templates/diagnostics.md` into `src/spec/diagnostics.md`,
+  grouped by owner (`spec` / `sdk` / `reconcile`) before severity, every row
+  with its code, its files to open and a link into the answer key,
+  `docs/spec-diagnostics.md`, which explains each of the eleven codes and is
+  kept in sync with the codes the helper can emit by test. Seven detectors are
+  new — `normative-language-in-comment`, `term-no-type-info`,
+  `property-no-range`, `declared-predicate-not-in-ontology`,
+  `record-class-no-published-name`, `deprecated-class-unresolved-successor`,
+  `range-has-unrecognized-typed-members` — all `scripts/lib/detectors.mjs`
+  functions over the graph, so a fixture can be handed to them; the four
+  existing findings go through the same channel, and `term-cross-context-conflict`
+  is now one row per key with its predicates rather than a transition count.
+  Not a gate: the build exits 0 with findings present, and `copy-spec-data.mjs`
+  leaves `src/spec/diagnostics*` out of `dist/`. Measured at spec `e77ba5e`:
+  92 findings. (#92)
 - **The zero-runtime-dependency claim is enforced instead of assumed.**
   `README.md` advertises a zero-dependency Turtle deserializer and
   `package.json` has no `dependencies` key at all, and nothing checked either —
