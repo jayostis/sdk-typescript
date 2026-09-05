@@ -28,11 +28,11 @@
  * 3. **The JavaScript value**, last. A number is an integer or a double, a
  *    boolean is a boolean, everything else is a plain literal.
  *
- * The value also has a say ABOVE step 3 in exactly two places, both to keep
- * the graph honest rather than to judge it: a value whose JavaScript type
- * disagrees with the declared datatype is written in its own type (#99), and a
- * date-precision string under `xsd:dateTime` is written as `xsd:date` (#100).
- * `objectTerm` says why for each.
+ * The value also has a say ABOVE step 3, in two ways, both to keep the graph
+ * honest rather than to judge it: a value is written in the declared datatype
+ * only when its JavaScript kind admits that type, and otherwise in its own
+ * (#99); and a date-precision string under `xsd:dateTime` is written as
+ * `xsd:date` (#100). `objectTerm` says why for each.
  *
  * @module converter
  */
@@ -73,6 +73,29 @@ const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\x00-\x20<>"{}|\\^`]*$/;
 const STRUCTURAL = new Set(['id', 'type']);
 
 /**
+ * The XSD datatypes each JavaScript kind can be written in. A value is written
+ * under the term's declared type only when its kind ADMITS that type, and in
+ * its own type otherwise (#99); see `objectTerm`.
+ *
+ * A TABLE, NOT A LIST OF CASES. This began as two named pairings — a number or
+ * boolean under `xsd:string`, a string under a numeric or boolean type — and
+ * every pairing the list did not name fell through to `String()` under the
+ * declared type. `isActive: 1` became `"1"^^xsd:boolean`, which is IN that
+ * datatype's lexical space, so the number reached the graph as a well-formed
+ * boolean no judge could see: the #99 pass, on every boolean term, and the
+ * same for a number under `xsd:gYear` or `xsd:anyURI`. What a kind admits is
+ * short enough to state; what it disagrees with is not.
+ *
+ * A string has no row because it is the kind that admits nearly everything —
+ * a date, an IRI, a year all have string lexical forms. What a string CANNOT
+ * be is the short list, `NON_STRING_XSD`.
+ */
+const KIND_ADMITS: Readonly<Record<string, ReadonlySet<string>>> = {
+  number: new Set([`${XSD}integer`, `${XSD}double`, `${XSD}decimal`]),
+  boolean: new Set([`${XSD}boolean`]),
+};
+
+/**
  * The XSD datatypes a JSON string cannot be one of. A string handed to a term
  * declared as one of these is written PLAIN, so the shape sees a string where
  * it asked for a number (#99); see `objectTerm`.
@@ -83,8 +106,39 @@ const NON_STRING_XSD = new Set([`${XSD}integer`, `${XSD}double`, `${XSD}decimal`
  * The `xsd:date` lexical form (XML Schema Part 2, §3.3.9): a calendar day,
  * then an optional timezone. `YYYY` and `YYYY-MM` are not this — no shape
  * admits either — and neither is anything carrying a time.
+ *
+ * THE GRAMMAR ALONE IS NOT THE GATE. Its day group knows no month and no leap
+ * year, so `2024-02-30` matches it; `isXsdDate` is the test to call.
  */
-const XSD_DATE = /^-?(?:[1-9][0-9]{3,}|0[0-9]{3})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])(?:Z|[+-](?:(?:0[0-9]|1[0-3]):[0-5][0-9]|14:00))?$/;
+const XSD_DATE = /^-?([1-9][0-9]{3,}|0[0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])(?:Z|[+-](?:(?:0[0-9]|1[0-3]):[0-5][0-9]|14:00))?$/;
+
+/**
+ * Is this string an `xsd:date` — the lexical form AND a day the calendar has?
+ *
+ * The value space matters because the oracle's does not: rdf-validate-shacl
+ * checks `xsd:date` by pattern, two digits for the month and two for the day,
+ * so `"2024-02-30"^^xsd:date` conforms there while `"2024-02-30"^^xsd:dateTime`
+ * never did. Typing on the grammar alone flipped a calendar-impossible day from
+ * rejected to accepted. A day outside the month stays whatever the term
+ * declared, ill-formed, for the shape to reject.
+ *
+ * Proleptic Gregorian throughout, as XML Schema Part 2 says: a year divisible
+ * by 4 is leap unless divisible by 100 and not by 400, and year `0000` (XSD
+ * 1.1) is leap. The sign is outside the year group, and divisibility does not
+ * care about it.
+ */
+function isXsdDate(value: string): boolean {
+  const match = XSD_DATE.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = month === 2 ? (leap ? 29 : 28) : [4, 6, 9, 11].includes(month) ? 30 : 31;
+
+  return day <= daysInMonth;
+}
 
 /**
  * Which context stack a record's keys resolve against.
@@ -356,13 +410,17 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
   // is what lets it be asked. Refusing here is not the alternative: a throw on
   // a wrong type is a judgement, made where CLAUDE.md says none is made.
   //
-  // Only the disagreements a JSON value can actually express are handled: a
-  // number or boolean under `xsd:string`, a string under a numeric or boolean
-  // type. A string under `xsd:date` or `xsd:dateTime` is not a disagreement
-  // — it is the only form a JSON date has — and is typed as declared below.
-  if (datatype === `${XSD}string` && (typeof value === 'number' || typeof value === 'boolean')) {
-    return fromJavaScriptType(value);
-  }
+  // ONE RULE, NOT AN ENUMERATION OF DISAGREEMENTS: the declared type is used
+  // only when the value's kind admits it (`KIND_ADMITS`). A number or boolean
+  // under any other XSD type — `xsd:string`, but equally `xsd:boolean` for a
+  // number, `xsd:gYear`, `xsd:anyURI` — is written in its own type. Naming the
+  // pairings let `isActive: 1` through as `"1"^^xsd:boolean`, well-formed.
+  //
+  // A string is the mirror: written plain only under the types a string cannot
+  // be. A string under `xsd:date` or `xsd:dateTime` is not a disagreement — it
+  // is the only form a JSON date has — and is typed as declared below.
+  const admits = KIND_ADMITS[typeof value];
+  if (datatype?.startsWith(XSD) && admits && !admits.has(datatype)) return fromJavaScriptType(value);
   if (datatype && NON_STRING_XSD.has(datatype) && typeof value === 'string') return literal(value);
 
   // `xsd:string` is written as a PLAIN literal. In RDF 1.1 the two are the same
@@ -380,9 +438,11 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
   // message saying a source that stated only a calendar day must not be given
   // an invented time — so both types are the term's declared meaning, and
   // picking the one the lexical form fits is the writer saying what it was
-  // given, not judging it. A value well-formed for neither type is still
-  // written as `xsd:dateTime`, ill-formed, for the shape to reject.
-  if (datatype === `${XSD}dateTime` && typeof value === 'string' && XSD_DATE.test(value)) {
+  // given, not judging it. A value well-formed for neither type — including a
+  // day the calendar does not have, which the `xsd:date` grammar admits and
+  // its value space does not — is still written as `xsd:dateTime`, ill-formed,
+  // for the shape to reject.
+  if (datatype === `${XSD}dateTime` && typeof value === 'string' && isXsdDate(value)) {
     return literal(value, `${XSD}date`);
   }
   if (datatype && datatype.startsWith(XSD)) return literal(String(value), datatype);

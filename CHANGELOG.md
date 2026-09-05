@@ -168,11 +168,16 @@
   `convertToRdf` wrote a JavaScript number handed to an `xsd:string` term as
   a plain string literal, so `vaccineName: 42` reached the graph as `"42"` —
   a conformant literal no shape could see, the same defect as #57 on a path
-  where a `sh:datatype` reader was meant to be the answer. A number or
-  boolean under `xsd:string` is now written as `xsd:integer`, `xsd:double`
-  or `xsd:boolean`, and a string under an integer, double, decimal or
-  boolean term is written plain, so the graph shows what was handed over and
-  `sh:datatype` rejects it. A value whose type agrees with its declaration
+  where a `sh:datatype` reader was meant to be the answer. A value is now
+  written under the declared type only when its JavaScript kind admits that
+  type — a number under `xsd:integer`, `xsd:double` or `xsd:decimal`, a
+  boolean under `xsd:boolean` — and in its own type otherwise, and a string
+  under an integer, double, decimal or boolean term is written plain, so the
+  graph shows what was handed over and `sh:datatype` rejects it. The rule is
+  a table rather than a list of pairings because the list missed
+  `isActive: 1`, which `"1"^^xsd:boolean` spells as a well-formed boolean no
+  shape can see; the same held for a number under `xsd:gYear` or
+  `xsd:anyURI`. A value whose type agrees with its declaration
   is written exactly as before; the immunization fixtures still compare equal
   to their expected graphs. Refusing at the writer was the alternative and is
   not taken: a throw on a wrong type is a judgement, and only the validator
@@ -184,10 +189,14 @@
   `"2024-01-15"` became an ill-formed literal both SHACL oracles reject —
   although `health:ImmunizationRecordShape`'s `sh:or` exists precisely to
   permit `xsd:date`. A string that matches the `xsd:date` lexical form
-  (a calendar day, optional timezone) is now typed `xsd:date` under a
-  `dateTime` term. Anything else under `xsd:dateTime` is written as before,
-  including a value well-formed for neither type, which stays an ill-formed
-  `xsd:dateTime` for the shape to reject.
+  (a calendar day, optional timezone) that names a day the calendar has is
+  now typed `xsd:date` under a `dateTime` term. Anything else under
+  `xsd:dateTime` is written as before, including a value well-formed for
+  neither type, which stays an ill-formed `xsd:dateTime` for the shape to
+  reject. The value space is checked as well as the grammar because the
+  grammar admits `2024-02-30` and the test oracle's `xsd:date` check is
+  pattern-only, so a calendar-impossible day typed `xsd:date` would have
+  flipped from rejected to conforms.
 - **A coverage record with no `providerName` is no longer accepted.**
   `coverage:InsurancePlanShape` declares `sh:minCount 1` on
   `coverage:providerName` and judges records typed `CoverageRecord` as well as
