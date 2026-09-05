@@ -30,11 +30,15 @@ Both still refuse to INVENT. A value with no expressible form throws, naming the
 inexpressibility, not invalidity, and the two are not the same question.
 
 **`validate()` is the only judge, and it ships alone.** `rdf-validate-shacl` is a devDependency and
-the shapes are read from a `spec` checkout that is not part of this package at all, so SHACL is a
-test-time tool and nothing a consumer installs can reach it. Anything the shapes should catch in
-production has to be reachable from `validate()` — today that means a rule a term declares, since
-`validateCardinality` reads
-`maxCount` off `termFor(field)` and knows nothing about the rest.
+the shapes it reads come from a `spec` checkout that is not part of this package at all, so that
+validator is a test-time oracle and nothing a consumer installs can reach it. Anything the shapes
+should catch in production has to be reachable from `validate()`. For a record type routed on the
+`validate` path (`src/migration/allow-list.ts`), it is: the shapes ship as data
+(`src/spec/shapes/`, indexed into `src/spec/derived/shapes.generated.ts`) and `src/shacl/evaluate.ts`
+judges from them, reporting every parameter it does not evaluate as an error rather than skipping
+it, and a record no shape selected as an error rather than a pass. For every other type it still
+means a rule a term declares, since `validateCardinality` reads `maxCount` off `termFor(field)` and
+knows nothing about the rest.
 
 ## MANDATORY: Deployment Discipline
 

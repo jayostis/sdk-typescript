@@ -150,23 +150,24 @@ export function specDataDir(root) {
 /**
  * The layout of the generated data directory, spelled once.
  *
- * THIS SDK'S OWN LAYOUT, NOT SPEC'S. `ontologies/` and `contexts/` here are
- * where `scripts/build-spec-data.mjs` WRITES its conversion of spec, and the
- * other two are what the later generators derive from that — none of them is
+ * THIS SDK'S OWN LAYOUT, NOT SPEC'S. `ontologies/`, `shapes/` and `contexts/`
+ * here are where `scripts/build-spec-data.mjs` WRITES its conversion of spec,
+ * and the other two are what the later generators derive from that — none of them is
  * a path into a spec checkout, which only `spec-sources.json` names. Spelled
- * in one function so the four scripts that share the directory cannot drift
+ * in one function so the five scripts that share the directory cannot drift
  * on a segment, and so `tests/spec-single-source.test.ts` — which reports a
  * bare `ontologies` literal as a self-resolved spec path — has one file to
  * spare with the reason written beside it, rather than four.
  *
  * @param {string} root - The repository root.
- * @returns {{ data: string, ontologies: string, contexts: string, derived: string, diagnostics: string }}
+ * @returns {{ data: string, ontologies: string, shapes: string, contexts: string, derived: string, diagnostics: string }}
  */
 export function specDataLayout(root) {
   const data = specDataDir(root);
   return {
     data,
     ontologies: join(data, 'ontologies'),
+    shapes: join(data, 'shapes'),
     contexts: join(data, 'contexts'),
     derived: join(data, 'derived'),
     diagnostics: join(data, 'diagnostics'),

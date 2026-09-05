@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
-    "generate": "node scripts/build-spec-data.mjs && node scripts/build-record-types.mjs && node scripts/build-terms.mjs && node scripts/collect-diagnostics.mjs && node scripts/render-diagnostics.mjs",
+    "generate": "node scripts/build-spec-data.mjs && node scripts/build-record-types.mjs && node scripts/build-terms.mjs && node scripts/build-shapes.mjs && node scripts/collect-diagnostics.mjs && node scripts/render-diagnostics.mjs",
     "prebuild": "npm run generate",
     "pretest": "npm run generate",
     "pretypecheck": "npm run generate",

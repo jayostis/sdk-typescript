@@ -39,6 +39,42 @@
 
 ### Added
 
+- **`validate()` judges a routed record type from the shapes spec publishes**
+  (#98). `health:ImmunizationRecord`, the one type on the migration allow-list,
+  is now routed for `'validate'` as well as `'serialize'`: `validate()` converts
+  the record with `convertToRdf`, evaluates the graph with `src/shacl/evaluate.ts`
+  over shape data shipped in the package, and maps each result to a finding
+  whose `field` is the JSON key behind the path and whose `message` is the
+  shape's own `sh:message`. `schemaVersion: "abc"` (#53's instance),
+  `administrationDate: "yesterday"` and `vaccineName: 42` (#57's instance),
+  all accepted by the legacy chain, are rejected — the first evidence for either
+  closed issue on a routed type. `ValidationResult` does not change shape.
+  - **The shapes ship.** `scripts/build-spec-data.mjs` converts each
+    vocabulary's `.shapes.ttl` to expanded JSON-LD under `src/spec/shapes/`,
+    every quad but `sh:name`; `scripts/build-shapes.mjs` indexes them into
+    `src/spec/derived/shapes.generated.ts` with RDF lists resolved and blank
+    shapes inlined, filtering nothing, and records
+    `target-class-not-in-ontology` (a twelfth diagnostic code; two rows at the
+    pin, both classes checkup v3.0 removed while their shapes stayed).
+  - **The engine implements exactly what `health:ImmunizationRecordShape` and
+    the four predicate-targeted core shapes exercise** — `sh:targetClass`,
+    `sh:targetSubjectsOf`, bare predicate paths, `sh:datatype` with the
+    lexical check `rdf-validate-shacl` applies, `sh:minCount`, `sh:maxCount`,
+    `sh:minLength`, `sh:maxLength`, `sh:pattern`, `sh:in`, `sh:nodeKind`, and
+    `sh:or` over datatype alternatives — and REPORTS every other parameter it
+    meets as unevaluated: a report with anything unevaluated, or with zero
+    constraints evaluated, does not conform. Through `validate()` each becomes
+    an `error` finding, so nothing the engine skipped can read as a pass.
+  - **Agreement is measured.** `tests/shacl/` hands the engine and
+    `rdf-validate-shacl` one graph each and compares `conforms` and the set of
+    `(focusNode, path, component)` tuples: on the three imm fixtures, six
+    authored negatives, nine per-component pairs, and every top-level
+    conformance fixture the engine evaluates in full; the rest are listed
+    with what went unjudged.
+  - Two legacy rows moved: `tests/rules/min-length.test.ts`'s "accepts a
+    numeric vaccineName" case flips to rejected, and the `ImmunizationRecord`
+    rows leave the two legacy rule tables for
+    `tests/validator/routed-immunization.test.ts`.
 - **The package loads and runs in a browser, and CI proves it** (#95,
   D-BROWSER-1). `serialize()` and `deserialize()` reached the vendored n3
   through `createRequire` and a CommonJS `require()`, which no bundler can

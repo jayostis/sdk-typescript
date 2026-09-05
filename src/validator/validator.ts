@@ -1,8 +1,11 @@
 import type { CascadeEntity } from '../models/common.js';
+import { isMigrated } from '../migration/index.js';
+import { recordTypeFor } from '../record-types/index.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
 import type { Severity } from '../terms/index.js';
 import { validatorFor } from './entity-validator-registry.js';
 import { VALID_PROVENANCE_TYPES } from './entity-validator.js';
+import { routedFindings } from './routed.js';
 import { termFindings } from './term-findings.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
@@ -356,8 +359,11 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
  *
  * THE ONLY JUDGE THAT SHIPS. `rdf-validate-shacl` is a devDependency and the
  * shapes are read from a `spec` checkout that this package does not contain, so
- * nothing a consumer installs can reach SHACL: anything the shapes should catch
- * in production has to be reachable from here.
+ * nothing a consumer installs can reach it: anything the shapes should catch
+ * in production has to be reachable from here. For a record type routed on
+ * `'validate'` (`src/migration/allow-list.ts`) it is: the shapes ship as data
+ * and `src/shacl/evaluate.ts` judges from them (#98). Every other type is
+ * judged by the layers below.
  *
  * Three layers, and they answer different questions. `validateBase` and the
  * per-type checks are hand-transcribed from the shapes and drift in both
@@ -367,6 +373,18 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
  * warnings never do.
  */
 export function validate(record: CascadeEntity): ValidationResult {
+  // THE SEAM, above the fork below and mirroring `serialize()`'s at its
+  // entry: a routed type gets the shipped shapes' answer and nothing else. Not
+  // wrapped in a try/catch, for the reason the serializer seam gives —
+  // `recordTypeFor` throws rather than answering `undefined` for a name two
+  // classes claim, and catching it here would send a contested record down a
+  // legacy path that never heard the question.
+  const recordType = recordTypeFor(record.type);
+
+  if (recordType && isMigrated(recordType.rdfTypeUri, 'validate')) {
+    return verdictOf(routedFindings({ ...record } as Record<string, unknown>, recordType));
+  }
+
   // THE FORK, and it is a REPLACEMENT rather than a supplement.
   //
   // A record type with a validator gets that validator's answer and nothing

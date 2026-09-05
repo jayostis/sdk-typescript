@@ -6,12 +6,12 @@
  * the data has to travel with the tarball — and today the only thing that
  * travels is a hand-committed transcription of it.
  *
- * ONTOLOGIES, NOT SHAPES. #76 as written converts `*.shapes.ttl`; this converts
- * `*.ttl`. That is deliberate and it is the half the record-type table needs:
- * the class question is answered ONLY by the ontologies. Measured against what
- * this SDK registers — ontologies 36/36, contexts 27/36, `sh:targetClass`
- * 27/36, contexts and shapes together 29/36. The shapes conversion joins this
- * script when #79 has something that reads a constraint.
+ * ONTOLOGIES AND SHAPES, TO TWO DIRECTORIES. The ontologies answer the class
+ * question — the record-type table reads ONLY them — and the shapes answer the
+ * constraint question, which nothing shipped could ask until `src/shacl/`
+ * existed (#98). Each vocabulary's shapes file, where `spec-sources.json` names
+ * one, is converted the same way to `src/spec/shapes/<vocabulary>.jsonld`, and
+ * `scripts/build-shapes.mjs` indexes those for the evaluator.
  *
  * EXPANDED JSON-LD, no context. A context is a naming table for authoring; a
  * graph consumer wants the quads. Expanded form is a mechanical transform of
@@ -50,7 +50,7 @@ import { Parser as N3Parser } from '../src/vendor/n3/n3.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const { ontologies: OUT, contexts: CONTEXTS, diagnostics: DIAGNOSTICS } = specDataLayout(root);
+const { ontologies: OUT, shapes: SHAPES, contexts: CONTEXTS, diagnostics: DIAGNOSTICS } = specDataLayout(root);
 
 /**
  * Where `spec` is.
@@ -132,7 +132,18 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const OMITTED = 'http://www.w3.org/2000/01/rdf-schema#comment';
 
 /**
- * Quads to an expanded JSON-LD node array.
+ * The one predicate the SHAPES conversion drops, and it is a different one.
+ *
+ * `sh:name` is a display label for a form builder — "Vaccine Name" beside
+ * `health:vaccineName` — and #76 and #79 both drop it. `rdfs:comment` is KEPT
+ * on the shapes, unlike the ontologies above: `tests/spec-data/shapes-jsonld.test.ts`
+ * asserts `sh:name` is the only absent predicate, both ways, and a shapes
+ * comment is where spec writes why a constraint has the severity it has.
+ */
+const OMITTED_FROM_SHAPES = 'http://www.w3.org/ns/shacl#name';
+
+/**
+ * Quads to an expanded JSON-LD node array, every predicate but `omitted`.
  *
  * SORTED, at every level, and MINIFIED. The artifact is gitignored and built
  * from the pinned checkout, so nobody reads its diff and indentation buys
@@ -141,7 +152,7 @@ const OMITTED = 'http://www.w3.org/2000/01/rdf-schema#comment';
  * spec commit are byte-identical and a change in the output means a change in
  * the input.
  */
-function toExpandedJsonLd(quads) {
+function toExpandedJsonLd(quads, omitted = OMITTED) {
   const nodes = new Map();
 
   for (const quad of quads) {
@@ -162,7 +173,7 @@ function toExpandedJsonLd(quads) {
     }
 
     const key = quad.predicate.value;
-    if (key === OMITTED) continue;
+    if (key === omitted) continue;
 
     node[key] = [...(node[key] ?? []), termToJsonLd(quad.object)];
   }
@@ -213,21 +224,25 @@ const vocabularies = Object.keys(manifest).sort();
 // Removed rather than overwritten: a vocabulary dropped from the manifest must
 // not leave its artifact behind, where every consumer would go on reading it.
 //
-// THE TWO DIRECTORIES THIS SCRIPT OWNS, not `src/spec/` whole. Everything under
+// THE THREE DIRECTORIES THIS SCRIPT OWNS, not `src/spec/` whole. Everything under
 // `src/spec/` is generated, but not all of it by this script:
-// `src/spec/derived/` is written by `build-record-types.mjs` and
-// `build-terms.mjs`, which run AFTER this one and read what it writes. Wiping
+// `src/spec/derived/` is written by `build-record-types.mjs`, `build-terms.mjs`
+// and `build-shapes.mjs`, which run AFTER this one and read what it writes. Wiping
 // the parent would delete their output too — harmless in `npm run generate`,
 // where they run next, and not harmless anywhere a test rebuilds only the data
 // (`tests/record-types/derivation.test.ts`, `tests/spec-data/ontology-jsonld.test.ts`),
 // which would leave a sibling test file importing a module that no longer
 // exists.
 rmSync(OUT, { recursive: true, force: true });
+rmSync(SHAPES, { recursive: true, force: true });
 rmSync(CONTEXTS, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
+mkdirSync(SHAPES, { recursive: true });
 mkdirSync(CONTEXTS, { recursive: true });
 
 let total = 0;
+let shapeQuads = 0;
+let shaped = 0;
 
 /** subject IRI -> the rule-stating comments on it and the vocabularies carrying them, folded across files. */
 const normative = new Map();
@@ -267,6 +282,47 @@ for (const vocabulary of vocabularies) {
   console.log(
     `  ${vocabulary.padEnd(10)} ${String(quads.length - omitted).padStart(5)} quads`
     + ` (${omitted} rdfs:comment omitted)`,
+  );
+
+  // The shapes, where the manifest names a file. A vocabulary listed without
+  // one publishes no shapes and contributes nothing — that is what omitting
+  // the key means, and `tests/support/spec-sources.ts` reads it the same way.
+  // A file the manifest names and the checkout lacks is refused exactly as an
+  // ontology is: a vocabulary whose shapes went missing would be judged by
+  // nothing, and the evaluator reports zero constraints as a refusal only
+  // when it knows a shape should have fired.
+  const shapesRelative = manifest[vocabulary].shapes;
+  if (!shapesRelative) continue;
+
+  const shapesSource = join(specDir, shapesRelative);
+  if (!existsSync(shapesSource)) {
+    throw new Error(
+      `spec-sources.json names ${shapesRelative} for "${vocabulary}", and `
+      + `${shapesSource} does not exist. Either the checkout is at a revision that does not publish `
+      + 'it, or the manifest entry has outlived the file.',
+    );
+  }
+
+  const shapes = new N3Parser().parse(readFileSync(shapesSource, 'utf-8'));
+
+  if (shapes.length === 0) {
+    throw new Error(
+      `${shapesSource} parsed to zero quads. An empty shapes file constrains nothing, and every `
+      + 'record of the vocabulary would be judged by no shape at all.',
+    );
+  }
+
+  writeFileSync(
+    join(SHAPES, `${vocabulary}.jsonld`),
+    `${JSON.stringify(toExpandedJsonLd(shapes, OMITTED_FROM_SHAPES))}\n`,
+    'utf-8',
+  );
+  shapeQuads += shapes.length;
+  shaped += 1;
+  const names = shapes.filter((q) => q.predicate.value === OMITTED_FROM_SHAPES).length;
+  console.log(
+    `  ${`${vocabulary} shapes`.padEnd(16)} ${String(shapes.length - names).padStart(5)} quads`
+    + ` (${names} sh:name omitted)`,
   );
 }
 
@@ -333,10 +389,11 @@ if (normative.size > 0) {
 
 const recorded = findings.close();
 
-const bytes = [OUT, CONTEXTS].flatMap((dir) => readdirSync(dir).map((f) => join(dir, f)))
+const bytes = [OUT, SHAPES, CONTEXTS].flatMap((dir) => readdirSync(dir).map((f) => join(dir, f)))
   .reduce((sum, file) => sum + readFileSync(file).length, 0);
 
 console.log(
-  `build-spec-data: ${vocabularies.length} ontologies, ${total} quads, `
-  + `${(bytes / 1024).toFixed(0)}K -> src/spec; ${recorded} finding(s) -> src/spec/diagnostics/build-spec-data.json`,
+  `build-spec-data: ${vocabularies.length} ontologies, ${total} quads; ${shaped} shapes files, `
+  + `${shapeQuads} quads; ${(bytes / 1024).toFixed(0)}K -> src/spec; `
+  + `${recorded} finding(s) -> src/spec/diagnostics/build-spec-data.json`,
 );

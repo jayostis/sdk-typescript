@@ -143,3 +143,15 @@ The document every code in `src/spec/diagnostics.md` links to. The rendered file
 **Owner / severity.** `reconcile` / `info`.
 
 **Goes away when** spec adds `owl:NamedIndividual`, or `membersOf()` learns the form and this check is updated to match.
+
+### `target-class-not-in-ontology`
+
+**What it means.** A shape declares `sh:targetClass` for a class that no ontology this SDK ships declares as an `owl:Class` or `rdfs:Class`. A conforming record is typed to a declared class, so the shape selects none of them: every constraint it states is enforced on nobody, and a record of the class the shape was written for validates clean against it. This is the assertion `spec/validation/index.md` §6 says a consumer that vendors shapes owes.
+
+**Where to look.** The `spec:ontologies/<vocab>/v1/<vocab>.shapes.ttl` in the row's locations at the `sh:targetClass`, then `spec:ontologies/<vocab>/v1/<vocab>.ttl` for the class — at the current pin the two rows are classes checkup v3.0 removed (`checkup:PatientProfile`, `checkup:VitalSignsTrend`) whose shapes were not. Detector: `scripts/build-shapes.mjs`, `indexShapes()`, over every named shape's `sh:targetClass` against the merged ontology graph.
+
+**Why it's a judgment call.** A misspelling wants the target corrected; a class the ontology removed wants the shape removed or retargeted at the successor; a class spec meant to declare wants the ontology fixed. Each is a one-line change and only spec knows which.
+
+**Owner / severity.** `spec` / `warning`.
+
+**Goes away when** the ontology declares the class, or the shape names one it does.
