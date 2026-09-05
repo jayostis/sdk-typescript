@@ -114,12 +114,12 @@ describe('collect-diagnostics', () => {
     });
 
     it('records a null commit when the set carries no PROVENANCE.json', () => {
-      // The same three files, copied without their provenance: a checkout with
+      // The same four files, copied without their provenance: a checkout with
       // no `.git` builds artifacts too, and they must not claim a commit.
       const findingsDir = mkdtempSync(join(tmpdir(), 'collector-no-provenance-'));
       scratch.push(findingsDir);
 
-      for (const file of ['build-spec-data.json', 'build-record-types.json', 'build-terms.json']) {
+      for (const file of ['build-spec-data.json', 'build-record-types.json', 'build-terms.json', 'build-shapes.json']) {
         copyFileSync(join(FIXTURES, 'well-formed', file), join(findingsDir, file));
       }
 
