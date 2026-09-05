@@ -164,6 +164,30 @@
 
 ### Fixed
 
+- **The generic writer writes a mistyped value in its own type** (#99).
+  `convertToRdf` wrote a JavaScript number handed to an `xsd:string` term as
+  a plain string literal, so `vaccineName: 42` reached the graph as `"42"` —
+  a conformant literal no shape could see, the same defect as #57 on a path
+  where a `sh:datatype` reader was meant to be the answer. A number or
+  boolean under `xsd:string` is now written as `xsd:integer`, `xsd:double`
+  or `xsd:boolean`, and a string under an integer, double, decimal or
+  boolean term is written plain, so the graph shows what was handed over and
+  `sh:datatype` rejects it. A value whose type agrees with its declaration
+  is written exactly as before; the immunization fixtures still compare equal
+  to their expected graphs. Refusing at the writer was the alternative and is
+  not taken: a throw on a wrong type is a judgement, and only the validator
+  judges.
+- **A date-precision value under an `xsd:dateTime` term is written as
+  `xsd:date`** (#100). `health.jsonld` gives `administrationDate` no
+  `@type` (`jayostis/spec#46`), so the datatype came from the ontology's
+  `rdfs:range xsd:dateTime` whatever the value's precision, and
+  `"2024-01-15"` became an ill-formed literal both SHACL oracles reject —
+  although `health:ImmunizationRecordShape`'s `sh:or` exists precisely to
+  permit `xsd:date`. A string that matches the `xsd:date` lexical form
+  (a calendar day, optional timezone) is now typed `xsd:date` under a
+  `dateTime` term. Anything else under `xsd:dateTime` is written as before,
+  including a value well-formed for neither type, which stays an ill-formed
+  `xsd:dateTime` for the shape to reject.
 - **A coverage record with no `providerName` is no longer accepted.**
   `coverage:InsurancePlanShape` declares `sh:minCount 1` on
   `coverage:providerName` and judges records typed `CoverageRecord` as well as

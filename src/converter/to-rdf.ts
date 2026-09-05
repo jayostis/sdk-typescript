@@ -28,6 +28,12 @@
  * 3. **The JavaScript value**, last. A number is an integer or a double, a
  *    boolean is a boolean, everything else is a plain literal.
  *
+ * The value also has a say ABOVE step 3 in exactly two places, both to keep
+ * the graph honest rather than to judge it: a value whose JavaScript type
+ * disagrees with the declared datatype is written in its own type (#99), and a
+ * date-precision string under `xsd:dateTime` is written as `xsd:date` (#100).
+ * `objectTerm` says why for each.
+ *
  * @module converter
  */
 
@@ -65,6 +71,20 @@ const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\x00-\x20<>"{}|\\^`]*$/;
 
 /** Keys that name the record rather than describing it. */
 const STRUCTURAL = new Set(['id', 'type']);
+
+/**
+ * The XSD datatypes a JSON string cannot be one of. A string handed to a term
+ * declared as one of these is written PLAIN, so the shape sees a string where
+ * it asked for a number (#99); see `objectTerm`.
+ */
+const NON_STRING_XSD = new Set([`${XSD}integer`, `${XSD}double`, `${XSD}decimal`, `${XSD}boolean`]);
+
+/**
+ * The `xsd:date` lexical form (XML Schema Part 2, §3.3.9): a calendar day,
+ * then an optional timezone. `YYYY` and `YYYY-MM` are not this — no shape
+ * admits either — and neither is anything carrying a time.
+ */
+const XSD_DATE = /^-?(?:[1-9][0-9]{3,}|0[0-9]{3})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])(?:Z|[+-](?:(?:0[0-9]|1[0-3]):[0-5][0-9]|14:00))?$/;
 
 /**
  * Which context stack a record's keys resolve against.
@@ -327,11 +347,44 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
   // 2 — the context, then the ontology, says what kind of literal it is.
   const datatype = definition.type ?? definition.range;
 
+  // A VALUE WHOSE JAVASCRIPT TYPE DISAGREES WITH THE DECLARATION IS WRITTEN IN
+  // ITS OWN TYPE (#99). `vaccineName: 42` under `xsd:string` was `String()`ed
+  // to `"42"` — a conformant string literal — so the writer's coercion
+  // satisfied the shape's `sh:datatype` on the shape's behalf and no judge of
+  // the graph could see the number. The graph has to show what was handed
+  // over; whether that is acceptable is the validator's question, and this
+  // is what lets it be asked. Refusing here is not the alternative: a throw on
+  // a wrong type is a judgement, made where CLAUDE.md says none is made.
+  //
+  // Only the disagreements a JSON value can actually express are handled: a
+  // number or boolean under `xsd:string`, a string under a numeric or boolean
+  // type. A string under `xsd:date` or `xsd:dateTime` is not a disagreement
+  // — it is the only form a JSON date has — and is typed as declared below.
+  if (datatype === `${XSD}string` && (typeof value === 'number' || typeof value === 'boolean')) {
+    return fromJavaScriptType(value);
+  }
+  if (datatype && NON_STRING_XSD.has(datatype) && typeof value === 'string') return literal(value);
+
   // `xsd:string` is written as a PLAIN literal. In RDF 1.1 the two are the same
   // term, so the graph is identical either way — but every string field in the
   // corpus would otherwise carry an explicit datatype the hand-rolled writer
   // never wrote, and a diff nobody can act on is worse than no diff.
   if (datatype === `${XSD}string`) return literal(String(value));
+
+  // A DATE-PRECISION VALUE UNDER `xsd:dateTime` IS WRITTEN AS `xsd:date` (#100).
+  // `health.jsonld` gives `administrationDate` no `@type` (`jayostis/spec#46`),
+  // so the datatype is the ontology's `rdfs:range xsd:dateTime` whatever the
+  // value's precision, and `"2024-01-15"^^xsd:dateTime` is an ill-formed
+  // literal every SHACL oracle rejects. The shape on that term declares
+  // `sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] )` with a
+  // message saying a source that stated only a calendar day must not be given
+  // an invented time — so both types are the term's declared meaning, and
+  // picking the one the lexical form fits is the writer saying what it was
+  // given, not judging it. A value well-formed for neither type is still
+  // written as `xsd:dateTime`, ill-formed, for the shape to reject.
+  if (datatype === `${XSD}dateTime` && typeof value === 'string' && XSD_DATE.test(value)) {
+    return literal(value, `${XSD}date`);
+  }
   if (datatype && datatype.startsWith(XSD)) return literal(String(value), datatype);
 
   // A range that is a CLASS on a term the context did not mark `@id` means the
@@ -340,6 +393,15 @@ function objectTerm(value: unknown, definition: TermDefinition): string | null {
   if (datatype && !datatype.startsWith(XSD)) return null;
 
   // 3 — the JavaScript value, last.
+  return fromJavaScriptType(value);
+}
+
+/**
+ * A literal typed from the JavaScript value alone: what a term with no
+ * declared datatype gets, and what a number or boolean handed to an
+ * `xsd:string` term gets (#99). `null` for an object, which is not a literal.
+ */
+function fromJavaScriptType(value: unknown): string | null {
   if (typeof value === 'boolean') return literal(String(value), `${XSD}boolean`);
   if (typeof value === 'number') {
     if (Number.isInteger(value)) return literal(String(value), `${XSD}integer`);
