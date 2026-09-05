@@ -30,19 +30,19 @@ const procedure = recordTypeFor('Procedure')?.rdfTypeUri as string;
 const clinical = 'https://ns.cascadeprotocol.org/clinical/v1#';
 
 describe('the shipped allow-list', () => {
-  it('routes ImmunizationRecord, on serialize alone', () => {
+  it('routes ImmunizationRecord, on serialize and validate', () => {
     // Asserted by contents, so adding a second entry is a deliberate act with a
     // test to update rather than something that rides along with a refactor.
-    expect(MIGRATED_CLASSES).toEqual({ [immunization]: ['serialize'] });
+    expect(MIGRATED_CLASSES).toEqual({ [immunization]: ['serialize', 'validate'] });
   });
 
-  it('answers yes for the routed path and no for the others', () => {
-    // The whole point of the path dimension. There is no generic reader (#78)
-    // and no generic validator (#79), so claiming those paths would make the
-    // switch lie about code that does not exist.
+  it('answers yes for the routed paths and no for the other', () => {
+    // The whole point of the path dimension. There is no generic reader (#78),
+    // so claiming that path would make the switch lie about code that does
+    // not exist.
     expect(isMigrated(immunization, 'serialize')).toBe(true);
+    expect(isMigrated(immunization, 'validate')).toBe(true);
     expect(isMigrated(immunization, 'deserialize')).toBe(false);
-    expect(isMigrated(immunization, 'validate')).toBe(false);
   });
 
   it('answers no for an unrouted class and one that does not exist', () => {
@@ -59,15 +59,15 @@ describe('the shipped allow-list', () => {
     expect(isMigratedType('NotARecordType', 'serialize')).toBe(false);
   });
 
-  it('reports one routed pair out of every type on every path', () => {
+  it('reports two routed pairs out of every type on every path', () => {
     const state = migrationState();
 
-    expect(state.routed).toBe(1);
+    expect(state.routed).toBe(2);
     expect(state.routed + state.remaining)
       .toBe(allRecordTypes().length * MIGRATION_PATHS.length);
     expect(state.byPath.get('serialize')?.map((type) => type.name)).toEqual(['ImmunizationRecord']);
+    expect(state.byPath.get('validate')?.map((type) => type.name)).toEqual(['ImmunizationRecord']);
     expect(state.byPath.get('deserialize')).toEqual([]);
-    expect(state.byPath.get('validate')).toEqual([]);
   });
 });
 

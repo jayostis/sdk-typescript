@@ -293,7 +293,13 @@ describe('src/index.ts for a browser', () => {
     // that exists on the page and throws on its first line is the failure mode.
     const doc = sdk.toJsonLd(fixture.input);
     expect(sdk.fromJsonLd(doc).id).toBe(fixture.input.id);
-    expect(sdk.validate(fixture.input)).toHaveProperty('valid');
+    expect(sdk.validate(fixture.input).valid).toBe(true);
+
+    // The routed judge, on the page. `cascade:schemaVersion`'s `sh:pattern` is
+    // stated by the shapes and by nothing else in this SDK, so a `true` here
+    // means the page reached no shape data — the bundle carried none, or the
+    // engine read it through something a browser does not have.
+    expect(sdk.validate({ ...fixture.input, schemaVersion: 'abc' }).valid).toBe(false);
 
     // The random fallback, on the page's own Web Crypto: a record with nothing
     // to hash still gets a well-formed identifier where a browser would mint it.

@@ -65,9 +65,15 @@ const CAPPED_BY_A_TERM: ReadonlyArray<readonly [string, string, Record<string, u
   ['LabResultRecord', 'testName', { resultValue: '412', resultUnit: 'ng/mL' }],
   ['LabResultRecord', 'resultUnit', { testName: 'Ferritin', resultValue: '412' }],
   ['VitalSign', 'unit', { vitalType: 'heartRate', value: 72 }],
-  ['ImmunizationRecord', 'vaccineName', {}],
   ['CoverageRecord', 'providerName', {}],
 ];
+
+// `ImmunizationRecord.vaccineName` is capped AND required, and is not here:
+// the type is routed for `'validate'` (`src/migration/allow-list.ts`), so the
+// legacy chain whose message this file asserts never judges it. Its row's
+// equivalent, asserting the shape's own message, is
+// `tests/validator/routed-immunization.test.ts > the rows that left the
+// legacy tables`.
 
 /**
  * The subset of {@link CAPPED_BY_A_TERM} that is ALSO required, for the guard
