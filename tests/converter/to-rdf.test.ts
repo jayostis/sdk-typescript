@@ -18,11 +18,17 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import env from '@zazuko/env';
+import type { Term } from '@rdfjs/types';
+import SHACLValidator from 'rdf-validate-shacl';
+import type { ValidationReport } from 'rdf-validate-shacl/src/validation-report.js';
 import { describe, it, expect } from 'vitest';
 
 import { convertToRdf, convertToTurtle } from '../../src/converter/to-rdf.js';
-import { graphDifference, quadsFromTurtle } from '../support/graph.js';
+import { clinical, graphDifference, health, parseDataset, quadsFromTurtle } from '../support/graph.js';
 import { loadFixture } from '../support/fixtures.js';
+import { shapesGraph, SHACL_NS } from '../support/spec-sources.js';
+import { SPEC_TERMS } from '../../src/spec/derived/terms.generated.js';
 import { escapeTurtleString } from '../../src/serializer/turtle-builder.js';
 
 const fixturesDir = resolve(
@@ -463,5 +469,195 @@ describe('a term whose range is unclassifiable — neither members nor fields', 
     // the ambiguity is per VALUE, not per type. A record that never mentions
     // the term must convert exactly as it does today.
     expect(() => convertToRdf(immunization)).not.toThrow();
+  });
+});
+
+/**
+ * The shapes, as a judge over the graph THIS writer produces.
+ *
+ * `tests/support/shacl.ts` validates what `serialize()` writes — the legacy
+ * path — and keeps its validator private, so a verdict on `convertToRdf`'s
+ * output needs one built here from the same shapes graph. Assertions are on
+ * `sourceConstraintComponent` and `path`, never on `message` or a bare
+ * `conforms`: a message is prose spec owns, and a `conforms: true` over a graph
+ * the shapes hold nothing for would be a pass on nothing.
+ *
+ * BUILT ON FIRST USE, NOT AT IMPORT. `shapesGraph()` reads and parses every
+ * shapes file and throws when neither `CASCADE_SPEC_DIR` nor the `../spec`
+ * sibling resolves. At module scope that ran at collection, so the fixture and
+ * refusal tests — which never validate anything — failed without a spec
+ * checkout, and every run paid the parse and the validator's indexing before
+ * the first test, whatever `-t` selected. Only the tests that judge need the
+ * checkout, and only they pay for it.
+ */
+let validator: SHACLValidator | undefined;
+const oracle = () => (validator ??= new SHACLValidator(shapesGraph()));
+const sh = env.namespace(SHACL_NS);
+const xsd = env.namespace('http://www.w3.org/2001/XMLSchema#');
+
+const judge = (record: Record<string, unknown>) =>
+  oracle().validate(parseDataset(convertToRdf(record)));
+
+/**
+ * The constraint components the report raised against one property path.
+ *
+ * `path` is `null` on a result a NodeShape raised in its own right — a
+ * node-level `sh:or`, `sh:closed`, `sh:sparql` — because there is no
+ * `sh:resultPath` to read; the library's declaration says `Term` and its
+ * implementation says `term || null`. `health:DailyVitalReadingShape` writes
+ * exactly such an `sh:or`, and a report carrying its result has to answer for
+ * every other path on it rather than throw from inside this helper.
+ */
+const resultsAt = (report: ValidationReport, path: Term) =>
+  report.results
+    .filter((r) => r.path?.equals(path) ?? false)
+    .map((r) => r.sourceConstraintComponent.value);
+
+describe('a value whose JavaScript type disagrees with the declared datatype', () => {
+  // The writer writes the value in ITS OWN type, so the graph shows what was
+  // handed over and the shape can see it. Stringifying under the term's
+  // declared type made a mistyped value a conformant literal — `vaccineName: 42`
+  // reached the graph as `"42"`, which satisfies `sh:datatype xsd:string` — and
+  // no judge of that graph could tell. Refusing at the writer is not taken: a
+  // throw on a wrong type is a judgement, and only the validator judges.
+  const imm001 = loadFixture('imm-001');
+  const fam002 = loadFixture('fam-002');
+  const med001 = loadFixture('med-001');
+
+  it('writes a number under an xsd:string term as xsd:integer, and the oracle rejects it', async () => {
+    const record = { ...imm001.input, vaccineName: 42 };
+
+    expect(convertToRdf(record)).toContain('"42"^^<http://www.w3.org/2001/XMLSchema#integer>');
+    expect(resultsAt(await judge(record), health.vaccineName))
+      .toContain(sh.DatatypeConstraintComponent.value);
+  });
+
+  it('writes a non-integer number under an xsd:string term as xsd:double', () => {
+    expect(convertToRdf({ ...imm001.input, vaccineName: 0.5 }))
+      .toContain('"0.5"^^<http://www.w3.org/2001/XMLSchema#double>');
+  });
+
+  it('writes a boolean under an xsd:string term as xsd:boolean', () => {
+    expect(convertToRdf({ ...imm001.input, vaccineName: true }))
+      .toContain('"true"^^<http://www.w3.org/2001/XMLSchema#boolean>');
+  });
+
+  it('writes a number under an xsd:boolean term as xsd:integer, and the oracle rejects it', async () => {
+    // `1` is in xsd:boolean's lexical space, so `"1"^^xsd:boolean` is a
+    // well-formed boolean no judge can tell from a real one — the #99 pass
+    // again, on every boolean term. The rule is the KIND: a value is written
+    // in the declared type only when its JavaScript kind admits that type.
+    expect(SPEC_TERMS.vocabularies['clinical']?.['asNeeded']?.type).toBe(xsd.boolean.value);
+
+    const record = { ...med001.input, asNeeded: 1 };
+
+    expect(convertToRdf(record)).toContain('"1"^^<http://www.w3.org/2001/XMLSchema#integer>');
+    expect(resultsAt(await judge(record), clinical.asNeeded))
+      .toContain(sh.DatatypeConstraintComponent.value);
+  });
+
+  it('writes a boolean under an xsd:integer term as xsd:boolean', () => {
+    expect(convertToRdf({ ...fam002.input, onsetAge: true }))
+      .toContain('"true"^^<http://www.w3.org/2001/XMLSchema#boolean>');
+  });
+
+  it('writes a string under an xsd:integer term as a plain literal, and the oracle rejects it', async () => {
+    // The mirror. `onsetAge` is the term rather than one named in the issue
+    // because fam-002 is the one numeric-valued fixture this writer converts
+    // whole; the declared type is read back from the generated terms so the
+    // test cannot keep passing on a term that stopped being an integer.
+    expect(SPEC_TERMS.vocabularies['health']?.['onsetAge']?.type).toBe(xsd.integer.value);
+
+    const record = { ...fam002.input, onsetAge: '52' };
+
+    expect(convertToRdf(record)).toMatch(/<https:\/\/ns\.cascadeprotocol\.org\/health\/v1#onsetAge> "52" \./);
+    expect(resultsAt(await judge(record), health.onsetAge))
+      .toContain(sh.DatatypeConstraintComponent.value);
+  });
+});
+
+describe('a date-precision value under an xsd:dateTime term', () => {
+  // `health.jsonld` gives `administrationDate` no `@type` (`jayostis/spec#46`),
+  // so the datatype comes from `rdfs:range xsd:dateTime` whatever the value's
+  // precision, and `health:ImmunizationRecordShape`'s
+  // `sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] )` has one
+  // alternative the writer could never produce. Its message says a source
+  // that stated only a calendar day must not be given an invented time.
+  const imm001 = loadFixture('imm-001');
+
+  it('writes a well-formed xsd:date lexical form as xsd:date, and the oracle conforms', async () => {
+    const record = { ...imm001.input, administrationDate: '2024-01-15' };
+
+    expect(convertToRdf(record)).toContain('"2024-01-15"^^<http://www.w3.org/2001/XMLSchema#date>');
+
+    const report = await judge(record);
+    expect(resultsAt(report, health.administrationDate)).toEqual([]);
+    expect(report.conforms).toBe(true);
+  });
+
+  it('keeps a timezone on the date, which the xsd:date grammar permits', () => {
+    expect(convertToRdf({ ...imm001.input, administrationDate: '2024-01-15Z' }))
+      .toContain('"2024-01-15Z"^^<http://www.w3.org/2001/XMLSchema#date>');
+    expect(convertToRdf({ ...imm001.input, administrationDate: '2024-01-15-05:00' }))
+      .toContain('"2024-01-15-05:00"^^<http://www.w3.org/2001/XMLSchema#date>');
+  });
+
+  it('still writes a value well-formed for neither type as xsd:dateTime, which the oracle rejects', async () => {
+    // Admitting well-formed dates must not admit arbitrary strings.
+    const record = { ...imm001.input, administrationDate: 'yesterday' };
+
+    expect(convertToRdf(record)).toContain('"yesterday"^^<http://www.w3.org/2001/XMLSchema#dateTime>');
+    expect(resultsAt(await judge(record), health.administrationDate))
+      .toContain(sh.OrConstraintComponent.value);
+  });
+
+  it('leaves a full xsd:dateTime value typed as xsd:dateTime', () => {
+    expect(convertToRdf({ ...imm001.input, administrationDate: '2024-01-15T00:00:00Z' }))
+      .toContain('"2024-01-15T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>');
+  });
+
+  it('keeps a day the calendar does not have as xsd:dateTime, which the oracle rejects', async () => {
+    // The xsd:date GRAMMAR admits `2024-02-30`; its value space does not. This
+    // oracle's datatype check is shape-only, so written as xsd:date the value
+    // is a conformant literal — where, as an ill-formed xsd:dateTime, it was
+    // rejected before #100. The lexical gate has to be a value-space gate too.
+    for (const day of ['2024-02-30', '2023-02-29', '2024-04-31', '2024-06-31']) {
+      const record = { ...imm001.input, administrationDate: day };
+
+      expect(convertToRdf(record)).toContain(`"${day}"^^<http://www.w3.org/2001/XMLSchema#dateTime>`);
+      expect(resultsAt(await judge(record), health.administrationDate))
+        .toContain(sh.OrConstraintComponent.value);
+    }
+  });
+
+  it('writes a leap day as xsd:date in a leap year, and not in a century year that is none', () => {
+    expect(convertToRdf({ ...imm001.input, administrationDate: '2024-02-29' }))
+      .toContain('"2024-02-29"^^<http://www.w3.org/2001/XMLSchema#date>');
+    expect(convertToRdf({ ...imm001.input, administrationDate: '2000-02-29' }))
+      .toContain('"2000-02-29"^^<http://www.w3.org/2001/XMLSchema#date>');
+    expect(convertToRdf({ ...imm001.input, administrationDate: '1900-02-29' }))
+      .toContain('"1900-02-29"^^<http://www.w3.org/2001/XMLSchema#dateTime>');
+  });
+});
+
+describe('the oracle helper, on a report carrying a node-level result', () => {
+  // `health:DailyVitalReadingShape` requires a timestamp through a node-level
+  // `sh:or`, and a result a NodeShape raises in its own right carries no
+  // `sh:resultPath`: rdf-validate-shacl answers `null` for its `path`.
+  // `resultsAt` filters by path, so the report has to stay readable for every
+  // other path on it rather than fail inside the helper.
+  //
+  // The graph is written by hand because `health:DailyVitalReading` is not a
+  // record class — it lives inside a history container — so `convertToRdf`
+  // refuses it as a top-level subject. What is under test is the REPORT, not
+  // the writer.
+  it('answers for a property path when a node-level result has no path at all', async () => {
+    const reading = `<urn:uuid:reading> a <${health.DailyVitalReading.value}> ; <${health.unit.value}> "bpm" .`;
+
+    const report = await oracle().validate(parseDataset(reading));
+
+    expect(report.conforms).toBe(false);
+    expect(report.results.some((r) => r.path === null)).toBe(true);
+    expect(resultsAt(report, health.unit)).toEqual([]);
   });
 });
