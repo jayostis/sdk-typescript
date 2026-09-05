@@ -1,6 +1,7 @@
 # Vendored: N3.js
 
-This directory is a **verbatim copy** of third-party source. Do not edit it.
+This directory holds third-party code, **bundled from its source by a declared,
+reproducible transform**. Do not edit `n3.js`; re-run the script.
 
 | | |
 |---|---|
@@ -11,74 +12,96 @@ This directory is a **verbatim copy** of third-party source. Do not edit it.
 | license | MIT (SPDX: `MIT`) — see `LICENSE.md`, copied unchanged |
 | copyright | © 2012–present N3.js contributors |
 | upstream | https://github.com/rdfjs/N3.js |
-| vendored | 2026-09-03 |
-| modifications | **none** |
+| vendored | 2026-09-04 (first vendored 2026-09-03 as the CommonJS build; #95) |
+| built by | `scripts/vendor-n3.mjs`, esbuild `0.21.5` (exact devDependency) |
+| modifications | **none by hand.** Two applied at bundle time, both declared in the script: relative imports resolved and inlined; `import { Buffer } from 'buffer'` answered by a shim that throws |
 
 ## Files
 
-Copied from `node_modules/n3/lib/` — the CommonJS build, not `n3/src/`:
-
 ```
-N3Parser.js  N3Lexer.js  N3Writer.js  N3DataFactory.js
-N3Util.js    BaseIRI.js  IRIs.js      Util.js
+n3.js       the bundle: n3's Parser and Writer and what they import, one ES module
+n3.d.ts     OURS — declarations for the sliver this SDK calls; n3@2 ships no types
+LICENSE.md  upstream's, copied unchanged
+VENDOR.md   this file
 ```
 
-`package.json` here is **not** upstream's. It is a one-line `{"type": "commonjs"}`
-marker written by this repository, so Node reads these files as CommonJS inside a
-package whose own `package.json` declares `"type": "module"`.
+## Which of the two paths #95 offered, and why
 
-## Why the CJS build and not the ESM source
+Issue #95 named two ways to make the vendored parser bundleable: copy `n3/src/`
+and rewrite its specifiers at copy time, or bundle a single ESM file. **This is the
+second.** One import site, one file, nothing for a runtime to resolve, and the
+`buffer` question answered once at build time rather than left for every
+consumer's bundler to answer differently. The cost is a larger diff on upgrade
+— 2,500 lines regenerate — which a byte-for-byte drift test makes harmless: the
+diff is never read, it is reproduced.
 
-`n3/src/` is the ESM original and would be the obvious thing to copy. It does not
-run here.
+Not `browser/n3.min.js`, which upstream also ships: a UMD global rather than an
+import, minified, and so unreviewable.
 
-Every relative import in it is **extensionless** — `N3Parser.js` line 2 is
-`import N3Lexer from './N3Lexer'`. Upstream gets away with that because its
-`main` points at this CJS build, and CommonJS resolution extension-guesses. Node's
-ESM resolver does not, and this package is `"type": "module"`, so a byte-identical
-copy of `n3/src/` fails at load with `ERR_MODULE_NOT_FOUND`.
+## Why a bundle and not a copy
 
-Rewriting the specifiers would fix it and would also end the property this whole
-arrangement depends on: an unmodified copy is still covered by upstream's own test
-suite, and a modified one is covered by nothing. The CJS build keeps every byte and
-resolves, at the cost of `createRequire` at the call site.
+`n3/src/` is the ESM original and does not run here as-is: every relative
+import in it is **extensionless** (`import N3Lexer from './N3Lexer'`), which
+Node's ESM resolver refuses under this package's `"type": "module"`, and
+`N3Lexer.js` imports `Buffer` from the `buffer` package. The previous copy dodged
+both by taking the CommonJS build and reaching it through `createRequire` —
+which no browser bundle can resolve, and which is what D-BROWSER-1 forbids.
 
-## Why unmodified matters
-
-Three things rest on it, and editing one line ends all three:
-
-1. **Upstream's test suite validates this copy.** Nothing here re-tests a Turtle parser.
-2. **The drift test can compare byte-for-byte** against `node_modules/n3/lib/`, so a
-   divergence — ours or theirs — is reported rather than discovered.
-3. **Re-vendoring a fix is a copy**, not a merge.
-
-`tests/vendor-drift.test.ts` enforces this. If it fails, the answer is to re-copy or
-to bump the pinned version — never to edit a file here.
+esbuild resolves the extensionless specifiers exactly as CommonJS resolution
+would have, inlines every module reached, and the one external is answered by
+the shim. What comes out is a single ES module with no `import` in it.
 
 ## The `buffer` import
 
-`N3Lexer.js` line 7 is `var _buffer = require("buffer");`, used only on the chunked
-streaming path (around line 552). Nothing this repository calls reaches it — we hand
-the parser a complete string.
+`N3Lexer` reaches `Buffer.concat` on one path only: `tokenize` handed a
+**stream**, joining a chunk onto the bytes a previous chunk left mid-codepoint.
+This SDK hands the parser a complete string, so the path is never entered. The
+shim keeps the import satisfiable without carrying the `buffer` polyfill for a
+branch nothing takes, and throws a message naming this file if a future caller
+ever reaches it.
 
-It is a bare specifier, which `tests/no-runtime-deps.ts` reports as a finding by
-design: an npm package named `buffer` exists, so the specifier alone cannot say
-whether the runtime builtin or the package answers it. Here `buffer@6.0.3` really is
-installed, as n3's own dependency. At a consumer of this package it is not, and the
-Node builtin answers instead.
+## How the drift test is defined now
 
-That is a real difference, so it is **declared rather than exempted** —
-`VENDOR_BARE_SPECIFIERS` in `tests/no-runtime-deps.ts`, compared both ways. A new
-bare specifier appearing in vendored code fails the test, and so does this one
-disappearing.
+The copy this replaced could be compared byte-for-byte against
+`node_modules/n3/lib`. A bundle cannot be, so the comparison moves one step
+earlier. `tests/vendor-drift.test.ts` imports `buildVendoredN3` from
+`scripts/vendor-n3.mjs`, runs it against the installed `n3` and `esbuild`, and
+requires `n3.js` to equal the output **exactly**. So:
+
+1. **Upstream's test suite still validates this code.** Every transform is
+   declared in one script; nothing is edited by hand.
+2. **A divergence is reported rather than discovered** — an edit to `n3.js`, a
+   bumped `n3` pin, a different `esbuild` — all fail the same test with the same
+   message.
+3. **Re-vendoring a fix is a re-run**, not a merge.
+
+The test also holds that the committed bundle carries no `import` or `require(`
+for a runtime to resolve — asked of the shipped file directly, rather than
+inferred from `buildVendoredN3` refusing one, because that refusal has no test
+of its own and the byte-equality above cannot see it removed — that this
+directory holds exactly the four files above, that `LICENSE.md` is upstream's
+unaltered, that the version named here and in `NOTICE` is the one installed,
+and that all of it reaches `dist/vendor/n3/` when the package is built.
+
+`.gitattributes` marks `src/vendor/**` `-text`, so the bytes committed are the
+bytes on disk on every platform.
 
 ## Re-vendoring
 
 ```
-npm install n3@<version>          # update the pin
-cp node_modules/n3/lib/{N3Parser,N3Lexer,N3Writer,N3DataFactory,N3Util,BaseIRI,IRIs,Util}.js src/vendor/n3/
-cp node_modules/n3/LICENSE.md src/vendor/n3/
+npm install --save-dev n3@<version>   # update the pin
+node scripts/vendor-n3.mjs            # rebuild n3.js and re-copy LICENSE.md
 ```
 
-Then update the table above, and check that `NOTICE` at the repository root still
-states the right version.
+Then update the table above, check `NOTICE` at the repository root still states
+the right version, and re-read `n3.d.ts` against the new `src/N3Parser.js` and
+`src/N3Writer.js` — it declares only what this SDK calls, by hand.
+
+The drift test compares bytes, so it accepts whatever the new upstream contains,
+a `process.env.N3_DEBUG` included — and esbuild passes a free identifier through
+`platform: 'browser'` untouched and unreported. What catches that is
+`npm run check:browser`: `tsconfig.browser.json` sets `allowJs` and includes
+`src/**/*.js`, so this file is compiled with Node's types withheld and a bare
+`process`, `Buffer`, `__dirname` or `global` in it is named with its line. Run
+it after every re-vendor; a version that needs a Node global cannot be vendored
+here as-is.

@@ -56,10 +56,11 @@ describe('thirdPartyImports', () => {
   });
 
   it('is silent for a node: builtin', () => {
-    // `src/utils/deterministic-uri.ts` imports `node:crypto`, and a builtin
-    // ships with the runtime: it costs a consumer no install and appears in no
-    // dependency list. It is a different question from whether this package
-    // should run outside Node, which nothing here asks.
+    // A builtin ships with the runtime: it costs a consumer no install and
+    // appears in no dependency list, which is all this check asks. Whether the
+    // package runs OUTSIDE Node — where `node:crypto` does not exist — is a
+    // different question, and `tests/browser-bundle.test.ts` asks it; `src/`
+    // imports no `node:` builtin today for that reason.
     const root = scratchSrc({
       'utils/deterministic-uri.ts': "import { createHash } from 'node:crypto';\n",
     });
@@ -146,6 +147,27 @@ describe('thirdPartyImports', () => {
       'a.mts -> n3',
       'b.cts -> n3',
       'c.tsx -> n3',
+    ]);
+  });
+
+  it('reads JavaScript, not only TypeScript', () => {
+    // `src/vendor/n3/n3.js` is some 3,300 lines of shipped JavaScript nobody
+    // here wrote, and since #95 it declares nothing: `VENDOR_BARE_SPECIFIERS`
+    // is empty, so the both-ways comparison at the end of this file is `[]`
+    // against `[]` and cannot tell "walked the vendor directory and found
+    // nothing" from "never opened a `.js` file". This is what says the walk
+    // reads JavaScript — narrow the extension match back to TypeScript and it
+    // fails, where the suite alone would stay green.
+    const root = scratchSrc({
+      'vendor/x.js': "import { Buffer } from 'buffer';\n",
+      'vendor/y.mjs': "import { Buffer } from 'buffer';\n",
+      'vendor/z.cjs': "const { Buffer } = require('buffer');\nmodule.exports = Buffer;\n",
+    });
+
+    expect(thirdPartyImports(root)).toEqual([
+      'vendor/x.js -> buffer',
+      'vendor/y.mjs -> buffer',
+      'vendor/z.cjs -> buffer',
     ]);
   });
 

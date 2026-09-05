@@ -8,10 +8,10 @@
  * analogous case (`src/vendor` missing) as "nothing to do" and exit 0, which
  * let `npm run build` succeed with no vendored Turtle parser and no
  * `LICENSE.md` copied to `dist/vendor` — a build CI's exit code calls green
- * that ships a package throwing `MODULE_NOT_FOUND` the first time a consumer
- * calls `serialize()`/`deserialize()` on a routed type, since
- * `src/converter/to-rdf.ts` and `src/deserializer/n3-adapter.ts` `require`
- * the vendored parser at runtime, not at compile time.
+ * that ships a package throwing `ERR_MODULE_NOT_FOUND` the first time a
+ * consumer imports it, since `src/converter/to-rdf.ts` and
+ * `src/deserializer/n3-adapter.ts` import the vendored bundle and tsc
+ * resolved that against `n3.d.ts`, never checking the JavaScript beside it.
  *
  * Run as a real child process, not imported: the script's refusal is a
  * `process.exit(1)`, and `import`ing a module that calls that would kill the
@@ -49,6 +49,12 @@ describe('copy-vendor.mjs on a missing src/vendor', () => {
       threw = true;
       const stderr = (err as { stderr: Buffer }).stderr.toString();
       expect(stderr, 'must name the failure, the way copy-spec-data.mjs does').toContain('FAILED');
+      // `src/vendor` is committed — the drift test compares the committed
+      // bytes — so the way back is a checkout, and the message must say so.
+      // `scripts/vendor-n3.mjs` writes into the directory and does not create
+      // it, so "run the vendoring step" would send the reader to an ENOENT.
+      expect(stderr, 'must name the fix, which is restoring the committed directory')
+        .toContain('git checkout -- src/vendor');
       expect((err as { status: number }).status).toBe(1);
     }
 

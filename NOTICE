@@ -8,13 +8,16 @@ See LICENSE for the full text.
 THIRD-PARTY SOFTWARE
 ================================================================================
 
-This distribution contains third-party software, copied verbatim and unmodified.
-Each entry below reproduces the notice its licence requires.
+This distribution contains third-party software. Each entry below reproduces the
+notice its licence requires and states how the code was taken.
 
 --------------------------------------------------------------------------------
 N3.js — https://github.com/rdfjs/N3.js
 Version 2.6.0
-Redistributed at dist/vendor/n3/ (source at src/vendor/n3/)
+Redistributed at dist/vendor/n3/ (source at src/vendor/n3/), as one ES module
+bundled from the package's own src/ by scripts/vendor-n3.mjs. Not edited by hand;
+the transforms applied are declared in that script and described in
+src/vendor/n3/VENDOR.md.
 SPDX-License-Identifier: MIT
 --------------------------------------------------------------------------------
 

@@ -10,8 +10,9 @@
  * data file into `dist/`, which is how `src/data/cascade-terminology.json` gets
  * there — but tsc REPRINTS it rather than copying (3,580 bytes in, 3,730 out,
  * differing from byte 2 on line endings and indent). A verbatim copy is the whole
- * point here: the drift test compares this directory byte-for-byte against
- * `node_modules/n3/lib/`, and upstream's own test suite is what validates it.
+ * point here: the drift test compares the bundle byte-for-byte against what
+ * `scripts/vendor-n3.mjs` builds, and upstream's own test suite is what
+ * validates the code inside it.
  *
  * The licence travels with the code. MIT requires its notice in "all copies or
  * substantial portions", and `package.json` `files` ships only `dist`, so
@@ -26,21 +27,29 @@ const OUT = 'dist/vendor';
 
 // REFUSES ON NO VENDOR, the same way `copy-spec-data.mjs` refuses on no
 // `src/spec`. `src/converter/to-rdf.ts` and `src/deserializer/n3-adapter.ts`
-// `require('../vendor/n3/...')` at RUNTIME, not at compile time — tsc never
-// checks that the file exists, so exiting 0 here let `npm run build` succeed
-// and ship a package that throws `MODULE_NOT_FOUND` the first time a consumer
-// called `serialize`/`deserialize` on a routed type. An absent build input
-// exiting 0 is the failure mode this repository keeps finding.
+// import `../vendor/n3/n3.js`, and tsc resolves that against `n3.d.ts` — it
+// never checks that the JavaScript beside it exists — so exiting 0 here let
+// `npm run build` succeed and ship a package that throws `ERR_MODULE_NOT_FOUND`
+// the first time a consumer imported it. An absent build input exiting 0 is the
+// failure mode this repository keeps finding.
 if (!existsSync(SRC)) {
   console.error(
-    `copy-vendor: FAILED — ${SRC} is missing. It is generated rather than committed, so run `
-    + 'the vendoring step first — a build that skips it ships with no Turtle parser and no '
+    `copy-vendor: FAILED — ${SRC} is missing. It is committed, so restore it: `
+    + 'git checkout -- src/vendor. (scripts/vendor-n3.mjs rebuilds n3.js INTO that directory '
+    + 'and does not create it.) A build that skips it ships with no Turtle parser and no '
     + 'LICENSE.md at ' + OUT + ', and nothing downstream would report it until a consumer '
-    + 'called serialize()/deserialize() and hit MODULE_NOT_FOUND.',
+    + 'imported the package and hit ERR_MODULE_NOT_FOUND.',
   );
   process.exit(1);
 }
 
+// MERGED INTO WHATEVER IS THERE. `cpSync` writes over what it finds and leaves
+// the rest, which once let the `{"type": "commonjs"}` marker of the eight-file
+// n3 outlive the one-file bundle that replaced it (#95). `dist/` is a product
+// of `src/` and nothing in it is worth keeping, so `scripts/clean-dist.mjs`
+// removes it whole at the front of `npm run build` — one rule for every
+// writer, tsc and `copy-spec-data.mjs` included, rather than a removal here
+// for the one copier that happened to bite.
 cpSync(SRC, OUT, { recursive: true });
 
 const copied = walk(OUT);

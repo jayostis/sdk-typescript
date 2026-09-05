@@ -15,26 +15,21 @@
  * (#71) — legal Turtle this SDK's own writer does not emit, so a document from
  * anywhere else lost objects silently.
  *
- * The vendored copy is byte-identical to `node_modules/n3/lib`, so upstream's
- * own suite validates it and nothing here re-tests a Turtle parser. See
- * `src/vendor/n3/VENDOR.md`. It is reached through `createRequire` because it
- * is Babel's CommonJS build; the ESM original does not run under this package's
- * `"type": "module"` — every relative import in it is extensionless.
+ * The vendored bundle is built from n3's own source by a declared, reproducible
+ * transform — `scripts/vendor-n3.mjs`, held to its output byte-for-byte by
+ * `tests/vendor-drift.test.ts` — so upstream's suite still validates the code
+ * and nothing here re-tests a Turtle parser. See `src/vendor/n3/VENDOR.md`.
+ * It is a STATIC import so a bundler can follow it: the `createRequire` of
+ * n3's CommonJS build this replaced was invisible to every one of them
+ * (D-BROWSER-1, #95).
  *
  * @module deserializer
  */
 
-import { createRequire } from 'node:module';
-
 import { NAMESPACES } from '../vocabularies/namespaces.js';
+import { Parser as N3Parser } from '../vendor/n3/n3.js';
+import type { Quad, Term } from '../vendor/n3/n3.js';
 import type { ParsedTriple } from './parsed-triple.js';
-
-const require = createRequire(import.meta.url);
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const N3Parser = require('../vendor/n3/N3Parser.js').default as new (
-  options?: Record<string, unknown>,
-) => { parse(input: string): any[] };
 
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDF_FIRST = `${RDF}first`;
@@ -88,7 +83,7 @@ function labeller(): (label: string) => string {
 }
 
 /** A term as the deserializer spells it: IRIs and blank labels bare, literals unquoted. */
-function termValue(term: any, label: (id: string) => string): string {
+function termValue(term: Term, label: (id: string) => string): string {
   return term.termType === 'BlankNode' ? label(term.value) : String(term.value);
 }
 
@@ -104,7 +99,7 @@ function termValue(term: any, label: (id: string) => string): string {
  * Returns the head-to-members map plus the set of chain nodes, so the caller
  * can emit the one and drop the other.
  */
-function collapseLists(quads: readonly any[], label: (id: string) => string): {
+function collapseLists(quads: readonly Quad[], label: (id: string) => string): {
   membersOf: Map<string, unknown[]>;
   chainNodes: Set<string>;
 } {

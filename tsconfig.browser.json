@@ -1,0 +1,56 @@
+{
+  // Compiles `src/` with Node's types WITHHELD, so a bare Node global is a
+  // compile error on every path — not only on the paths one fixture walks.
+  //
+  // `scripts/check-browser-bundle.mjs` fails on what esbuild cannot resolve: a
+  // `node:` builtin, a bare specifier, a dynamic `require()`. It cannot fail on
+  // `process.env.X`, `Buffer.from(...)`, `__dirname` or `global`, because those
+  // are free identifiers rather than imports — esbuild leaves them in the
+  // output untouched and reports nothing — and the vm smoke test in
+  // `tests/browser-bundle.test.ts` sees only the code imm-001 executes. The
+  // reason such a reference compiles at all is that `tsconfig.json` sets no
+  // `types`, so every installed `@types/*` including `@types/node` is visible.
+  // `types: []` is what does the work here; the DOM lib is what
+  // `globalThis.crypto` and `TextEncoder` compile against without it.
+  //
+  // `lib` must be what `tsconfig.json` gets by default for target ES2022 —
+  // `lib.es2022.full.d.ts`, which is `ES2022`, `DOM`, `DOM.Iterable` and
+  // `DOM.AsyncIterable` (plus `ScriptHost` and `WebWorker.ImportScripts`,
+  // which declare nothing `src/` could reach). Naming `lib` at all replaces
+  // the default set, and without the iterable pair a
+  // `[...new URLSearchParams(q)]` or a `for await (const chunk of body)` that
+  // passes `npm run typecheck` and runs in every browser is reported here as
+  // if it were a Node global.
+  //
+  // `allowJs` and the `.js` half of `include` are what let this see
+  // `src/vendor/n3/n3.js` — 91 KB of shipped JavaScript that
+  // `src/converter/to-rdf.ts` and `src/deserializer/n3-adapter.ts` import
+  // statically, so it IS inlined into the browser bundle, and it is the file
+  // a re-vendor is most likely to bring a `process.env.X` in through.
+  // Without both, the compile opens no JavaScript at all and reports the gate
+  // clean for never having looked. `checkJs` is what makes an opened `.js`
+  // produce diagnostics; the base config's `declaration` is why `n3.d.ts`
+  // still wins for anything that IMPORTS `./n3.js` — a declaration file
+  // outranks its implementation, so the TypeScript half is unchanged by this.
+  //
+  // What comes back from a `.js` file is narrowed, and only there:
+  // `scripts/lib/node-globals.mjs` keeps the unresolved-name diagnostics and
+  // drops the rest. Untyped third-party JavaScript under `checkJs` produces
+  // hundreds of inference findings — implicit `any` parameters, properties
+  // absent from an inferred shape — none of them a Node global, all of them
+  // about code nobody here wrote. A `.ts` file is still held to every
+  // diagnostic it produces.
+  //
+  // Read by `scripts/lib/node-globals.mjs` through the TypeScript API, so the
+  // same options judge a scratch source in a test and `src/` in the gate.
+  // Never emits, never run by `npm run build`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.js"]
+}

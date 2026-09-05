@@ -2,8 +2,79 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Identity keys and set members are ordered by Unicode code point** (#96).
+  core v3.6 states it normatively on `cascade:cascadeUri`: "Sort ascending by
+  Unicode code point. (Code point, not locale collation: a locale-dependent
+  order would make identity depend on the machine.)" `contentHashedUri` sorted
+  identity keys with `localeCompare` and `canonicalFieldValue` sorted the members
+  of a set-valued field with a bare `.sort()`; the first is locale collation and
+  the second is UTF-16 code-unit order, and neither is the rule. Both now call
+  `compareCodePoints`, exported from the package barrel so a consumer assembling
+  its own identity string sorts the way this SDK does. Conformance's
+  `keyOrderVectors` and `multiValuedFieldVectors/condition-member-order-astral-vs-bmp`
+  (test-vectors.json 1.3, conformance#21) are wired into the suite and were
+  observed red on three of them before the change.
+
+  **This re-mints identifiers, so it is breaking.** Which ones was measured
+  rather than asserted: `scripts/dump-identity-uris.mjs` mints every
+  deterministic URI this SDK can produce over the shared fixture corpus — each
+  object's full field set, that set reversed, every single field and every
+  unordered pair, since a two-key identity string turns on exactly one
+  comparison — and diffing a run before against a run after gives **60,305
+  URIs, 10 moved**. All ten are inside
+  `conformance/fixtures/deterministic-ids/test-vectors.json` and all ten are the
+  vectors written to move: the astral key pair, the astral member, and the
+  two pairs a collator gets wrong (`_under` against `Alpha`, `é` against `z`).
+  Across the other 162 fixture files, **59,613 URIs, zero differences** — no
+  identifier over terminology codes, dates, names or URIs moves.
+- **The Node floor is 20.** `engines.node` is `>=20.0.0`, from `>=18.0.0`,
+  and CI runs 20.x and 22.x. Node 18 has no `globalThis.crypto` without
+  `--experimental-global-webcrypto`, so once `node:crypto` left the identity
+  module (#95, below) the only synchronous, browser-safe randomness left on
+  that runtime was `Math.random` — a downgrade from the `randomUUID()` it had.
+  Node 18 reached end of life in April 2025; rather than ship a weaker path
+  for it, the package stops claiming it. Nothing else in the API changes.
+
 ### Added
 
+- **The package loads and runs in a browser, and CI proves it** (#95,
+  D-BROWSER-1). `serialize()` and `deserialize()` reached the vendored n3
+  through `createRequire` and a CommonJS `require()`, which no bundler can
+  follow and no browser can resolve, and `deterministic-uri.ts` imported
+  `node:crypto`; a Vite or webpack build of any page importing this package
+  failed on `node:module`. The vendored parser is now `src/vendor/n3/n3.js`,
+  one ES module bundled from n3's own source by `scripts/vendor-n3.mjs` —
+  relative imports resolved, `buffer` answered by a declared shim on a
+  streaming path nothing here takes — and both call sites import it statically.
+  `tests/vendor-drift.test.ts` now holds the committed bundle byte-for-byte to
+  what the script builds from the installed n3, so "unmodified" means
+  "reproducible" and esbuild is an exact devDependency. `deterministicUuid`
+  hashes with `src/utils/sha1.ts`, a synchronous pure-JS SHA-1 pinned to
+  `node:crypto`'s output in `tests/sha1.test.ts` (D-BROWSER-1 as amended
+  2026-09-04: identity stays synchronous), and the random fallback for a
+  record with no content field and no `fallbackId` uses `crypto.randomUUID()`
+  — every browser since early 2022, Node since 19 — or assembles a v4 UUID
+  from `crypto.getRandomValues()` where only that exists; a platform with
+  neither gets an error naming what is missing. The gate:
+  `scripts/check-browser-bundle.mjs` (`npm run check:browser`, a CI step)
+  bundles `src/index.ts` for a browser and fails on any `node:` builtin,
+  `createRequire` or `require()` left on the way, then compiles `src/` with
+  Node's types withheld (`tsconfig.browser.json`, through
+  `scripts/lib/node-globals.mjs`) and fails on a bare `process`, `Buffer`,
+  `__dirname` or `global` in any `.ts` or `.js` under `src/` — the vendored
+  `n3.js` included, which is the largest thing in the bundle and the likeliest
+  arrival point for one — which a bundler passes through in
+  silence — red against the epic head
+  on three sites, green after — and `tests/browser-bundle.test.ts` runs the
+  bundle in a bare vm context with no `process`, `Buffer` or `require`
+  through `serialize`, `deserialize`, `toJsonLd`, `fromJsonLd` and
+  `validate` on imm-001. `npm run build` now removes `dist/` whole before
+  anything writes there (`scripts/clean-dist.mjs`), so a renamed module, a
+  dropped ontology or a stale vendored file cannot survive from the build
+  before; and `npm run check:browser` generates `src/spec/` first, as `test`
+  and `typecheck` do.
 - **The build writes down what it found.** `npm run generate` has always found
   real spec defects — a name two record classes claim, a range that is neither
   a code list nor a structured class, a JSON key that means a different

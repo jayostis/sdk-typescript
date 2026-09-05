@@ -38,7 +38,8 @@ import ts from 'typescript';
  * which is the failure this comment's first paragraph already argues against.
  *
  * What it finds there is DECLARED rather than exempted — see
- * {@link VENDOR_BARE_SPECIFIERS}.
+ * {@link VENDOR_BARE_SPECIFIERS}, which today declares nothing, and is kept so
+ * that the next one is written down rather than filtered out.
  */
 function sourcesUnder(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -51,25 +52,23 @@ function sourcesUnder(dir: string): string[] {
 /**
  * Bare specifiers in vendored source, as `path -> specifier`, compared BOTH WAYS.
  *
- * `src/vendor/n3/N3Lexer.js` line 7 is `require("buffer")`, on the chunked
- * streaming path this repository never reaches — we hand the parser a complete
- * string. It is reported rather than exempted because the report is right:
- * `needsInstalling` treats a bare `buffer` as a finding precisely because an npm
- * package by that name exists, and here it IS installed, as n3's own dependency.
- * At a consumer of this package it is not, and the Node builtin answers instead.
- * Those are two different `Buffer`s and the specifier cannot say which.
+ * Empty since #95. The CommonJS copy of n3 this replaced carried
+ * `require("buffer")` in `N3Lexer.js`, on a streaming path this repository
+ * never reaches, and it was declared here because the report was right: an npm
+ * package named `buffer` exists, it was installed as n3's own dependency, and
+ * at a consumer the Node builtin answered instead — two different `Buffer`s
+ * the specifier could not tell apart. `scripts/vendor-n3.mjs` now answers that
+ * import with a declared shim at bundle time, so the shipped `n3.js` has no
+ * specifier in it at all, and `tests/vendor-drift.test.ts` holds that.
  *
- * The fix a non-vendored file would get — write `node:buffer` — is unavailable,
- * because editing the copy ends the three things that make vendoring safe:
- * upstream's suite no longer validates it, the drift test can no longer compare
- * byte-for-byte, and re-vendoring a fix stops being a copy. See
- * `src/vendor/n3/VENDOR.md`.
- *
- * So it is written down. Compared with `toEqual` and not filtered out, so a NEW
- * bare specifier in vendored code fails the test, and so does this one going
- * away — a declaration that cannot rot into a permanent exemption.
+ * Kept, and compared with `toEqual` rather than deleted, so a NEW bare
+ * specifier in vendored code is a failure with a named place to declare it.
+ * Empty, though, the comparison is `[]` against `[]` and cannot by itself tell
+ * "walked `src/vendor/` and found nothing" from "never opened a `.js` file";
+ * the scratch case `reads JavaScript, not only TypeScript` in the test file is
+ * what says the walk reads JavaScript.
  */
-export const VENDOR_BARE_SPECIFIERS: readonly string[] = ['vendor/n3/N3Lexer.js -> buffer'];
+export const VENDOR_BARE_SPECIFIERS: readonly string[] = [];
 
 /**
  * Every module specifier `source` imports, in the order they are written.

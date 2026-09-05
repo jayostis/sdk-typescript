@@ -39,7 +39,6 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,11 +46,9 @@ import { normativeLanguageInComments } from './lib/detectors.mjs';
 import { openFindings } from './lib/diagnostics.mjs';
 import { specDataLayout } from './lib/spec-source.mjs';
 
-const require = createRequire(import.meta.url);
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+import { Parser as N3Parser } from '../src/vendor/n3/n3.js';
 
-/** The vendored parser, the same one `deserialize` reads pods with. */
-const N3Parser = require(join(root, 'src/vendor/n3/N3Parser.js')).default;
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const { ontologies: OUT, contexts: CONTEXTS, diagnostics: DIAGNOSTICS } = specDataLayout(root);
 

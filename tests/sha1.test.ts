@@ -1,0 +1,51 @@
+/**
+ * `sha1Hex` — the synchronous, dependency-free SHA-1 `deterministicUuid` hashes with.
+ *
+ * `node:crypto`'s `createHash` has no browser equivalent, and the browser's
+ * `crypto.subtle.digest` is async-only; the identity API is synchronous and
+ * shared with cascade-cli and the desktop app, so D-BROWSER-1 (amended
+ * 2026-09-04) settles on a vendored pure-JS SHA-1 with byte-identical output.
+ * "Byte-identical" is the whole claim, so the oracle here is the Node builtin
+ * it replaces, on the inputs where an implementation goes wrong: the padding
+ * boundaries at 55/56/64 bytes, and multi-byte UTF-8, where a hash over
+ * UTF-16 code units instead of UTF-8 bytes agrees on ASCII and nowhere else.
+ */
+
+import { createHash } from 'node:crypto';
+
+import { describe, it, expect } from 'vitest';
+
+import { sha1Hex } from '../src/utils/sha1.js';
+
+const oracle = (s: string) => createHash('sha1').update(s).digest('hex');
+
+describe('sha1Hex', () => {
+  it('matches the published vectors', () => {
+    expect(sha1Hex('')).toBe('da39a3ee5e6b4b0d3255bfef95601890afd80709');
+    expect(sha1Hex('abc')).toBe('a9993e364706816aba3e25717850c26c9cd0d89d');
+    // The cross-SDK identity vector: deterministicUuid("hello") is cut from this.
+    expect(sha1Hex('hello')).toBe('aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d');
+  });
+
+  it('agrees with node:crypto at every padding boundary', () => {
+    // 55 bytes fits in one block with its length; 56 needs a second block; 64
+    // is exactly one block; 119/120 repeat the pair a block later.
+    for (const n of [0, 1, 3, 54, 55, 56, 57, 63, 64, 65, 119, 120, 121, 1000]) {
+      const s = 'x'.repeat(n);
+      expect(sha1Hex(s), `length ${n}`).toBe(oracle(s));
+    }
+  });
+
+  it('hashes UTF-8 bytes, not UTF-16 code units', () => {
+    for (const s of ['héllo', 'Straße', '日本語', '𝔘nicode ✓', 'a\0b', 'Patient::name=José|dob=1980-05-15']) {
+      expect(sha1Hex(s), s).toBe(oracle(s));
+    }
+  });
+
+  it('agrees with node:crypto on identity strings of every shape', () => {
+    for (let i = 0; i < 200; i++) {
+      const s = Array.from({ length: i }, (_, k) => String.fromCodePoint(32 + ((k * 7919 + i) % 0x2ff))).join('');
+      expect(sha1Hex(s)).toBe(oracle(s));
+    }
+  });
+});

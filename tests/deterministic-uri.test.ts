@@ -8,13 +8,15 @@
  *   deterministicUuid("hello") === "aaf4c61d-dcc5-58a2-9abe-de0f3b482cd9"
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import {
   deterministicUuid,
+  compareCodePoints,
   contentHashedUri,
+  randomUuid,
   patientUri,
   immunizationUri,
   observationUri,
@@ -132,6 +134,53 @@ describe('contentHashedUri — determinism and field handling', () => {
 
 // ─── Typed Helper Functions ───────────────────────────────────────────────────
 
+describe('randomUuid — the fallback for a record with nothing to hash', () => {
+  // RFC 4122 v4: version nibble 4, variant nibble 8–b, 32 hex digits in 8-4-4-4-12.
+  const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is a v4 UUID from crypto.randomUUID where the platform has it', () => {
+    expect(globalThis.crypto.randomUUID, 'this Node has randomUUID; the test needs it').toBeDefined();
+    expect(randomUuid()).toMatch(V4);
+  });
+
+  it('is a v4 UUID assembled from getRandomValues where only that exists', () => {
+    // A current browser on an INSECURE page — plain `http://` on a LAN
+    // address, where `randomUUID` is withheld and `getRandomValues` is not —
+    // and equally a 2014-era one: Web Crypto, no randomUUID. This is the
+    // branch that assembles the layout by hand, so this is where a wrong slice
+    // or a lost version nibble would ship — a prefix check on the URN cannot
+    // see it. Not a legacy path; pruning it breaks those pages.
+    const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    vi.stubGlobal('crypto', { getRandomValues: (b: Uint8Array) => real(b) });
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const id = randomUuid();
+      expect(id).toMatch(V4);
+      seen.add(id);
+    }
+    expect(seen.size).toBe(50);
+  });
+
+  it('fills every byte from the platform, not from a constant', () => {
+    // Bytes 6 and 8 are masked for version and variant; every other byte must
+    // reach the output as given. A fixed pattern proves the assembly reads
+    // what getRandomValues wrote rather than, say, a zeroed buffer.
+    vi.stubGlobal('crypto', {
+      getRandomValues: (b: Uint8Array) => { for (let i = 0; i < b.length; i++) b[i] = 0x10 + i; return b; },
+    });
+    expect(randomUuid()).toBe('10111213-1415-4617-9819-1a1b1c1d1e1f');
+  });
+
+  it('refuses, naming Web Crypto, on a platform with neither', () => {
+    // No Math.random branch. Node 18 without --experimental-global-webcrypto
+    // was the only runtime that landed here, and the engines floor is 20.
+    vi.stubGlobal('crypto', undefined);
+    expect(() => randomUuid()).toThrow(/Web Crypto/);
+  });
+});
+
 describe('typed helper functions', () => {
   it('observationUri produces stable URIs', () => {
     const fields = { loincCode: '8867-4', date: '2024-03-01', patient: 'urn:uuid:p1' };
@@ -199,6 +248,14 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
       canonicalIdentityString: string;
       expectedUri: string;
     }>;
+    keyOrderVectors?: Array<{
+      label: string;
+      proves: string[];
+      resourceType: string;
+      contentFields: Record<string, string | string[]>;
+      canonicalIdentityString: string;
+      expectedUri: string;
+    }>;
   };
 
   // Without this the loop below generates zero `it()` blocks against a fixture
@@ -208,6 +265,28 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
   it('the multi-valued vectors are actually loaded', () => {
     expect(fixtures.multiValuedFieldVectors, 'conformance test-vectors.json must carry multiValuedFieldVectors (added with core v3.6)').toBeDefined();
     expect(fixtures.multiValuedFieldVectors!.length).toBeGreaterThan(0);
+  });
+
+  it('the key-order vectors are actually loaded', () => {
+    expect(fixtures.keyOrderVectors, 'conformance test-vectors.json must carry keyOrderVectors').toBeDefined();
+    expect(fixtures.keyOrderVectors!.length).toBeGreaterThan(0);
+  });
+
+  // The astral vectors are the ones that discriminate code POINT order from
+  // UTF-16 code UNIT order, and they are the only reason this file iterates
+  // keyOrderVectors at all. A fixture checkout that had lost them would leave
+  // every remaining vector passing, which is exactly the shape of a green run
+  // that proves nothing — so their presence is asserted by label.
+  it('both astral-plane vectors are present, at the key sort and at the member sort', () => {
+    const keyLabels = (fixtures.keyOrderVectors ?? []).map((v) => v.label);
+    expect(keyLabels, 'keyOrderVectors must carry the astral/BMP key vector').toContain(
+      'key-order-astral-vs-bmp',
+    );
+    const memberLabels = (fixtures.multiValuedFieldVectors ?? []).map((v) => v.label);
+    expect(
+      memberLabels,
+      'multiValuedFieldVectors must carry the astral/BMP member vector',
+    ).toContain('condition-member-order-astral-vs-bmp');
   });
 
   for (const vector of fixtures.primitiveVectors) {
@@ -235,6 +314,21 @@ describe('conformance fixtures — cross-SDK test vectors', () => {
   // other implementation.
   for (const vector of fixtures.multiValuedFieldVectors ?? []) {
     it(`multiValuedFieldVector: ${vector.label} [${vector.proves.join(', ')}]`, () => {
+      expect(contentHashedUri(vector.resourceType, vector.contentFields)).toBe(vector.expectedUri);
+    });
+  }
+
+  // Key-order vectors, fed as fields for the same reason: the vector is only
+  // satisfied if this SDK sorts the keys itself and lands on the shared answer.
+  // Measured against what this branch shipped, a `localeCompare` key sort:
+  // `key-order-underscore-after-uppercase` and `key-order-bmp-non-ascii-control`
+  // both failed, because a collator reweights punctuation and folds accents.
+  // `key-order-astral-vs-bmp` PASSED there — this ICU build happened to agree
+  // with code point on that one pair — which is why the collator has to go
+  // rather than be spot-fixed: it was right by accident, and another ICU build
+  // is free to be wrong.
+  for (const vector of fixtures.keyOrderVectors ?? []) {
+    it(`keyOrderVector: ${vector.label} [${vector.proves.join(', ')}]`, () => {
       expect(contentHashedUri(vector.resourceType, vector.contentFields)).toBe(vector.expectedUri);
     });
   }
@@ -319,5 +413,123 @@ describe('canonical form of a set-valued identity input (core v3.6)', () => {
     // its docstring records that the other SDKs did not implement it yet. This
     // is that gap closing: same input, same canonical string.
     expect(canonicalFieldValue(['73211009', '44054006', '44054006'])).toBe('44054006,73211009');
+  });
+});
+
+// ─── The comparator itself (core v3.6, "sort ascending by Unicode code point")─
+//
+// The conformance vectors above measure the comparator through the URIs it
+// feeds, which is the cross-implementation contract. These test it directly, so
+// a failure says WHICH property broke rather than only that a hash moved.
+
+describe('compareCodePoints', () => {
+  const ASTRAL = '\u{1D51E}'; // MATHEMATICAL FRAKTUR SMALL A, surrogate pair D835 DD1E
+  const FULLWIDTH_BANG = '\uFF01'; // FULLWIDTH EXCLAMATION MARK
+
+  it('THE DIVERGENCE: an astral character sorts AFTER a BMP character above U+E000', () => {
+    // This is the one comparison where code-point order and JavaScript's native
+    // UTF-16 code-unit order disagree, and half the reason this function exists.
+    expect(compareCodePoints(FULLWIDTH_BANG, ASTRAL)).toBeLessThan(0);
+    expect(compareCodePoints(ASTRAL, FULLWIDTH_BANG)).toBeGreaterThan(0);
+
+    // Pinned as an inequality against the built-in so the test states what is
+    // being corrected, and fails loudly if a future engine changes either one.
+    expect(FULLWIDTH_BANG < ASTRAL).toBe(false);
+    expect([ASTRAL, FULLWIDTH_BANG].sort()).toEqual([ASTRAL, FULLWIDTH_BANG]);
+    expect([ASTRAL, FULLWIDTH_BANG].sort(compareCodePoints)).toEqual([FULLWIDTH_BANG, ASTRAL]);
+  });
+
+  it('agrees with the built-in comparator across the Basic Multilingual Plane', () => {
+    // The migration claim for the MEMBER sort, executable: everything a real
+    // terminology code contains is BMP, and there code-point order and the
+    // built-in code-unit order are identical, so no member-sorted identifier
+    // already minted moves.
+    const sample = [
+      'Alpha', '_under', 'alpha', 'Zeta', 'z', '\u00E9', 'loincCode', 'date',
+      'patient', '2339-0', 'E11.65', 'E11.9', 'urn:uuid:patient-smith', '',
+      'a', 'ab', 'abc', '\uE000', '\uFFFD', '0', '9', '~',
+    ];
+    for (const a of sample) {
+      for (const b of sample) {
+        const builtin = a < b ? -1 : a > b ? 1 : 0;
+        expect(Math.sign(compareCodePoints(a, b)), `${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBe(builtin);
+      }
+    }
+  });
+
+  it('is not locale collation, which is what the key sort used to call', () => {
+    // A collator puts 'alpha' before 'Zeta' and '_under' before 'Alpha'.
+    // Code point puts both the other way round, which is the property that
+    // keeps an identifier independent of the machine that minted it. The second
+    // pair is conformance's `key-order-underscore-after-uppercase`, reduced to
+    // the single comparison it turns on.
+    expect(compareCodePoints('Zeta', 'alpha')).toBeLessThan(0);
+    expect(compareCodePoints('Alpha', '_under')).toBeLessThan(0);
+    expect('Alpha'.localeCompare('_under')).toBeGreaterThan(0);
+  });
+
+  it('is a total order: antisymmetric, reflexive, and transitive on a mixed sample', () => {
+    const sample = [ASTRAL, FULLWIDTH_BANG, 'a', 'A', '_', '\uE000', '', 'ab', '\uD800'];
+    for (const a of sample) {
+      expect(compareCodePoints(a, a)).toBe(0);
+      for (const b of sample) {
+        // `|| 0` because `-Math.sign(0)` is `-0`, and vitest's `toBe` is
+        // Object.is, which distinguishes the two zeros. The sign is the claim.
+        const forward = Math.sign(compareCodePoints(a, b)) || 0;
+        const reverse = -Math.sign(compareCodePoints(b, a)) || 0;
+        expect(forward, `${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBe(reverse);
+      }
+    }
+    const sorted = [...sample].sort(compareCodePoints);
+    for (let i = 1; i < sorted.length; i++) {
+      expect(compareCodePoints(sorted[i - 1], sorted[i])).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('orders a prefix before the string that extends it', () => {
+    expect(compareCodePoints('E11', 'E11.9')).toBeLessThan(0);
+    expect(compareCodePoints('', 'a')).toBeLessThan(0);
+    expect(compareCodePoints(ASTRAL, ASTRAL + 'a')).toBeLessThan(0);
+  });
+
+  it('BOTH sort sites use it, not just the key sort', () => {
+    // The member sort and the key sort are separate lines of code, and a fix
+    // that reached only one would still pass every key-order vector. Fed as
+    // MEMBERS of one field, the same astral pair must canonicalize fullwidth
+    // first — this is the conformance member vector's expected URI.
+    expect(
+      contentHashedUri('Condition', {
+        patient: 'urn:uuid:patient-smith',
+        snomedCode: [ASTRAL, FULLWIDTH_BANG],
+      }),
+    ).toBe('urn:uuid:f2d72e66-e623-592b-adf3-e2dd98e7534c');
+
+    // And as KEYS, where the same pair must order fullwidth first.
+    expect(
+      contentHashedUri('Observation', { [ASTRAL]: 'fraktur', [FULLWIDTH_BANG]: 'fullwidth' }),
+    ).toBe('urn:uuid:94048491-e370-5d1e-9372-25a5dfd23966');
+  });
+});
+
+// ─── The comparator may not regress to a collator ────────────────────────────
+
+describe('identity module hygiene', () => {
+  it('the identity module never calls localeCompare outside prose', () => {
+    // `localeCompare` makes an identifier a function of the importing machine's
+    // locale. This module's key sort called it until 2026-09; the ban is here so
+    // the next writer cannot reintroduce it by reflex. Only occurrences in
+    // comments survive, and they are the ones explaining why it is absent.
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../src/utils/deterministic-uri.ts'),
+      'utf-8',
+    );
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    expect(code).not.toContain('localeCompare');
+    // And neither sort site may fall back to the default comparator.
+    expect(code).not.toMatch(/\.sort\(\s*\)/);
   });
 });
