@@ -249,8 +249,13 @@ const TERMS_BY_VOCABULARY = new Map<string, Record<string, TermDefinition>>();
  * fresh per call, this spread roughly 800 definitions into a new object for
  * every record — measured at about half the total cost of a conversion, doing
  * work whose result was identical every time.
+ *
+ * EXPORTED FOR THE ROUTED VALIDATOR, which has to answer the inverse question:
+ * which JSON key a `sh:path` predicate came from, so a SHACL result can name
+ * the field a caller wrote. Read off the same table the writer resolved
+ * against, so the key a result names is the key that produced the triple.
  */
-function termsFor(classIri: string): Record<string, TermDefinition> {
+export function termsFor(classIri: string): Record<string, TermDefinition> {
   const vocabulary = vocabularyOf(classIri);
 
   // REFUSED RATHER THAN DEFAULTED. The old code answered `'core'` here for any

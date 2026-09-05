@@ -57,10 +57,18 @@ const TERMED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> 
   ['ConditionRecord', 'conditionName', { status: 'active' }],
   ['AllergyRecord', 'allergen', {}],
   ['LabResultRecord', 'testName', { resultValue: '412', resultUnit: 'ng/mL' }],
-  ['ImmunizationRecord', 'vaccineName', {}],
   ['CoverageRecord', 'providerName', {}],
   ['FamilyHistoryRecord', 'relationship', { conditionName: 'Type 2 diabetes' }],
 ];
+
+/**
+ * A field whose term declares a `minLength` and whose only record type is
+ * routed off the legacy chain (`src/migration/allow-list.ts`), so no row above
+ * can reach it. The rule is asserted on that type by
+ * `tests/validator/routed-immunization.test.ts > the rows that left the legacy
+ * tables`, against the shape's own message.
+ */
+const ROUTED: readonly string[] = ['vaccineName'];
 
 describe('the sweep covers what it claims to', () => {
   it('checks every term that declares a minLength, so an empty sweep cannot pass', () => {
@@ -71,7 +79,7 @@ describe('the sweep covers what it claims to', () => {
       .map((term) => term.key)
       .sort();
 
-    expect(declaring).toEqual([...TERMED.map(([, field]) => field)].sort());
+    expect(declaring).toEqual([...TERMED.map(([, field]) => field), ...ROUTED].sort());
   });
 
   it('every one of them is minLength 1, which is what the message hardcodes', () => {
@@ -191,11 +199,24 @@ describe('what skipping a non-string costs, said out loud', () => {
   it.each([
     ['AllergyRecord', 'allergen', {}],
     ['LabResultRecord', 'testName', { resultValue: '412', resultUnit: 'ng/mL' }],
-    ['ImmunizationRecord', 'vaccineName', {}],
   ])('%s accepts a numeric %s, and no layer objects', (type, field, rest) => {
     const result = validate(record(type, { ...rest, [field]: 42 }));
 
     expect(messagesFor(result, field)).toEqual([]);
     expect(result.valid).toBe(true);
+  });
+
+  it('ImmunizationRecord rejects a numeric vaccineName, because its judge reads sh:datatype', () => {
+    // THE ROW THAT FLIPPED. `health:ImmunizationRecord` is routed for
+    // `'validate'` (`src/migration/allow-list.ts`), so it is judged from the
+    // shapes spec publishes, and `health:ImmunizationRecordShape` declares
+    // `sh:datatype xsd:string` on `vaccineName`. The two rows above stay on
+    // the legacy chain and stay accepted; the day they route, they flip too.
+    // The message is the shape's, asserted in
+    // `tests/validator/routed-immunization.test.ts`.
+    const result = validate(record('ImmunizationRecord', { vaccineName: 42 }));
+
+    expect(messagesFor(result, 'vaccineName')).not.toEqual([]);
+    expect(result.valid).toBe(false);
   });
 });

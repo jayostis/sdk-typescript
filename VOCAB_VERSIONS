@@ -712,3 +712,16 @@ pots=1.4
 #   the CURIE unchanged) matches what each call site already did once
 #   NAMESPACES[''] is considered, and tests/record-types/round-trip.test.ts and
 #   tests/namespaces.test.ts pass unchanged.
+
+# 2026-09-05 — NO BUMP. validate() judges health:ImmunizationRecord from shipped shapes (#98).
+#   No vocabulary changed and no file under src/models/, src/vocabularies/ or
+#   src/jsonld/ moved. What changed is which JUDGE reads a type: the one entry in
+#   src/migration/allow-list.ts is routed for 'validate' as well as 'serialize',
+#   so an ImmunizationRecord is judged by src/shacl/evaluate.ts over the shapes
+#   spec publishes — converted by scripts/build-spec-data.mjs to
+#   src/spec/shapes/<vocab>.jsonld and indexed by scripts/build-shapes.mjs into
+#   src/spec/derived/shapes.generated.ts — rather than by the hand-transcribed
+#   chain in src/validator/. The shapes are health v2.x's own at the pinned spec
+#   revision, read rather than registered, which is why nothing here is bumped:
+#   the rows record what this SDK transcribed, and this change transcribes less.
+#   Every other record type is judged exactly as before.

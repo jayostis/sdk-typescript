@@ -66,6 +66,7 @@ export const DIAGNOSTIC_CODES = Object.freeze([
   'record-class-no-published-name',
   'deprecated-class-unresolved-successor',
   'range-has-unrecognized-typed-members',
+  'target-class-not-in-ontology',
 ]);
 
 export const SEVERITIES = Object.freeze(['error', 'warning', 'info']);
@@ -78,7 +79,7 @@ export const SEVERITIES = Object.freeze(['error', 'warning', 'info']);
 export const OWNERS = Object.freeze(['spec', 'sdk', 'reconcile']);
 
 /** The generators, in the order `npm run generate` runs them. */
-export const SOURCES = Object.freeze(['build-spec-data', 'build-record-types', 'build-terms']);
+export const SOURCES = Object.freeze(['build-spec-data', 'build-record-types', 'build-terms', 'build-shapes']);
 
 /** The findings file one generator writes, under the diagnostics directory. */
 export const findingsFile = (dir, source) => join(dir, `${source}.json`);
@@ -278,7 +279,7 @@ function renderRow(finding) {
  * GROUPED BY OWNER FIRST, severity second, then source and code. The reader is
  * one party about to go fix things — in spec, in this SDK, or by asking — and
  * the first thing they need is whether a row is theirs at all. Severity does
- * not track one consistent thing across the eleven codes, so it is the second
+ * not track one consistent thing across the twelve codes, so it is the second
  * cut, not the first. Every row and every code heading carries the code, and
  * the heading links the answer key, so a reader who does not know what
  * `unclassifiable-range` means is one click from the explanation and a row

@@ -178,7 +178,11 @@ const TURTLE_PREFIXES = `@prefix owl: <${OWL}> .
  * Returns the directory, for `CASCADE_SPEC_DIR`.
  *
  * EVERY MANIFEST VOCABULARY IS WRITTEN, whether or not the caller cares about
- * it, because `build-spec-data` refuses a checkout missing any one of them.
+ * it, because `build-spec-data` refuses a checkout missing any one of them —
+ * the shapes file too, where the manifest names one, since a named shapes
+ * file the checkout lacks is refused the same way. Each scratch shapes file
+ * carries one node shape targeting `cascade:Widget`, the class `core` always
+ * declares, so `build-shapes` finds every target declared and records nothing.
  * `core` always marks one record class, because `build-record-types` refuses a
  * graph that marks none — so the whole pipeline can run against this.
  * `turtle` APPENDS to a vocabulary's file; `contexts` REPLACES the default
@@ -190,15 +194,25 @@ export function scratchCheckout({
 } = {}): string {
   const dir = scratch('spec-checkout');
   const manifest = JSON.parse(readFileSync(join(repoRoot, 'spec-sources.json'), 'utf-8')) as
-    Record<string, { ontology: string }>;
+    Record<string, { ontology: string; shapes?: string }>;
 
-  for (const [vocabulary, { ontology: path }] of Object.entries(manifest)) {
+  for (const [vocabulary, { ontology: path, shapes }] of Object.entries(manifest)) {
     const namespace = vocabulary === 'core' ? CASCADE : `https://ns.cascadeprotocol.org/${vocabulary}/v1#`;
     const base = `${TURTLE_PREFIXES}@prefix ${vocabulary}: <${namespace}> .\n\n<${namespace}> a owl:Ontology .\n`
       + (vocabulary === 'core' ? 'cascade:Widget a owl:Class, cascade:RecordClass .\n' : '');
 
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), `${base}\n${turtle[vocabulary] ?? ''}`, 'utf-8');
+
+    if (shapes) {
+      mkdirSync(dirname(join(dir, shapes)), { recursive: true });
+      writeFileSync(
+        join(dir, shapes),
+        `${TURTLE_PREFIXES}@prefix sh: <http://www.w3.org/ns/shacl#> .\n@prefix ${vocabulary}: <${namespace}> .\n\n`
+        + `${vocabulary}:WidgetShape a sh:NodeShape ; sh:targetClass cascade:Widget ; sh:name "Widget"@en .\n`,
+        'utf-8',
+      );
+    }
   }
 
   mkdirSync(join(dir, 'contexts/v1'), { recursive: true });
@@ -215,7 +229,7 @@ export function scratchCheckout({
  * is a fixture bug, and the message it refused with is the fastest way to it.
  */
 export function runGenerator(
-  script: 'build-spec-data' | 'build-record-types' | 'build-terms',
+  script: 'build-spec-data' | 'build-record-types' | 'build-terms' | 'build-shapes',
   env: Record<string, string>,
 ): { stdout: string; stderr: string } {
   const result = spawnSync(

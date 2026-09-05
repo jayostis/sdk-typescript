@@ -9,7 +9,7 @@
  * side's leftovers, and the fixture cases prove it names them rather than
  * counting them.
  *
- * THE ELEVEN CODES ARE WRITTEN OUT. Without that, an empty code list against
+ * THE TWELVE CODES ARE WRITTEN OUT. Without that, an empty code list against
  * an empty document agrees perfectly, and the both-ways check is satisfied by
  * a build that diagnoses nothing.
  */
@@ -34,6 +34,7 @@ const CODES = [
   'range-has-unrecognized-typed-members',
   'record-class-name-collision',
   'record-class-no-published-name',
+  'target-class-not-in-ontology',
   'term-cross-context-conflict',
   'term-no-type-info',
   'term-value-not-iri',
@@ -52,7 +53,7 @@ What it means.
 `;
 
 describe('the answer key', () => {
-  it('declares exactly the eleven codes', () => {
+  it('declares exactly the twelve codes', () => {
     expect([...(DIAGNOSTIC_CODES as readonly string[])].sort()).toEqual(CODES);
   });
 

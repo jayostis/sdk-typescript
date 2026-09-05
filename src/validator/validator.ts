@@ -1,8 +1,11 @@
 import type { CascadeEntity } from '../models/common.js';
+import { isMigrated } from '../migration/index.js';
+import { recordTypeFor } from '../record-types/index.js';
 import { CURRENT_SCHEMA_VERSION } from '../vocabularies/namespaces.js';
 import type { Severity } from '../terms/index.js';
 import { validatorFor } from './entity-validator-registry.js';
 import { VALID_PROVENANCE_TYPES } from './entity-validator.js';
+import { routedFindings } from './routed.js';
 import { termFindings } from './term-findings.js';
 
 // ─── Public Types ───────────────────────────────────────────────────────────
@@ -76,10 +79,6 @@ const VALID_VITAL_TYPES: ReadonlySet<string> = new Set([
   'weight', 'height', 'bmi',
 ]);
 
-const VALID_IMMUNIZATION_STATUSES: ReadonlySet<string> = new Set([
-  'completed', 'entered-in-error', 'not-done',
-]);
-
 // prov:Agent / prov:Activity classes — NOT cascade:HealthRecord subclasses, so
 // they carry no dataProvenance/schemaVersion. Required fields follow each SHACL
 // shape (e.g. ProxyAgentShape) instead.
@@ -125,11 +124,16 @@ const AGENT_ACTIVITY_REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>
 // A validator migrating a type takes this rule with it and removes the name,
 // the same way it deletes its `case` from `validateTypeSpecific`. The set
 // empties as the migration finishes, and goes when the last type lands.
+//
+// A type ROUTED on `'validate'` (`src/migration/allow-list.ts`) leaves the
+// same way, and takes NO copy of the rule with it: a routed type gets the
+// shipped shapes' answer and nothing else, and this warning is SDK policy
+// transcribed by hand, not a constraint spec publishes. `ImmunizationRecord`
+// was listed and was dead; the CHANGELOG entry for #98 writes the drop down.
 const CLINICAL_TYPES_WANTING_CODES: ReadonlySet<string> = new Set([
   'ConditionRecord',
   'LabResultRecord',
   'VitalSign',
-  'ImmunizationRecord',
   'ProcedureRecord',
 ]);
 
@@ -327,18 +331,9 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
       break;
     }
 
-    case 'ImmunizationRecord': {
-      const status = rec['status'];
-      if (status !== undefined && typeof status === 'string' && !VALID_IMMUNIZATION_STATUSES.has(status)) {
-        errors.push({
-          field: 'status',
-          message: `status "${status}" must be a valid ImmunizationStatus`,
-          severity: 'error',
-        });
-      }
-      break;
-    }
-
+    // ImmunizationRecord is routed on `'validate'` and never reaches this
+    // switch; its `status` is judged by `health:ImmunizationRecordShape`'s
+    // `sh:in` through `src/validator/routed.ts`.
     // ActivitySnapshot, SleepSnapshot, ProcedureRecord, FamilyHistoryRecord
     // have no additional type-specific required field validations beyond base
     default:
@@ -356,8 +351,11 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
  *
  * THE ONLY JUDGE THAT SHIPS. `rdf-validate-shacl` is a devDependency and the
  * shapes are read from a `spec` checkout that this package does not contain, so
- * nothing a consumer installs can reach SHACL: anything the shapes should catch
- * in production has to be reachable from here.
+ * nothing a consumer installs can reach it: anything the shapes should catch
+ * in production has to be reachable from here. For a record type routed on
+ * `'validate'` (`src/migration/allow-list.ts`) it is: the shapes ship as data
+ * and `src/shacl/evaluate.ts` judges from them (#98). Every other type is
+ * judged by the layers below.
  *
  * Three layers, and they answer different questions. `validateBase` and the
  * per-type checks are hand-transcribed from the shapes and drift in both
@@ -367,6 +365,18 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
  * warnings never do.
  */
 export function validate(record: CascadeEntity): ValidationResult {
+  // THE SEAM, above the fork below and mirroring `serialize()`'s at its
+  // entry: a routed type gets the shipped shapes' answer and nothing else. Not
+  // wrapped in a try/catch, for the reason the serializer seam gives —
+  // `recordTypeFor` throws rather than answering `undefined` for a name two
+  // classes claim, and catching it here would send a contested record down a
+  // legacy path that never heard the question.
+  const recordType = recordTypeFor(record.type);
+
+  if (recordType && isMigrated(recordType.rdfTypeUri, 'validate')) {
+    return verdictOf(routedFindings({ ...record } as Record<string, unknown>, recordType));
+  }
+
   // THE FORK, and it is a REPLACEMENT rather than a supplement.
   //
   // A record type with a validator gets that validator's answer and nothing

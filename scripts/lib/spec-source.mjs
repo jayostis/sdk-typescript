@@ -21,9 +21,58 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
+
 /** A term whose value is a namespace IRI is a prefix declaration, not a term. */
 export function isPrefixDeclaration(value) {
   return typeof value === 'string' && /^https?:\/\/.*[#/]$/.test(value);
+}
+
+/**
+ * A subject's key — its `@id` in expanded JSON-LD, and its key in a map of
+ * subjects: blank nodes prefixed `_:` so they cannot collide with an IRI.
+ *
+ * Written once for `build-spec-data.mjs` (which writes the `@id`) and
+ * `build-shapes.mjs` (which keys its subject map and spells a blank
+ * reference the same way), so the two cannot disagree about what a blank
+ * node is called.
+ *
+ * @param {{ termType: string, value: string }} term
+ * @returns {string}
+ */
+export function subjectKey(term) {
+  return term.termType === 'BlankNode' ? `_:${term.value}` : term.value;
+}
+
+/**
+ * One RDF term as expanded JSON-LD.
+ *
+ * A plain literal gets no `@type`: in RDF 1.1 every simple literal IS an
+ * `xsd:string`, and n3 supplies the datatype implicitly. Writing it out would
+ * put an explicit type on every label and comment in the corpus and make the
+ * document disagree with the Turtle it came from about nothing.
+ *
+ * SHARED, NOT COPIED. `build-spec-data.mjs` writes the shapes documents in
+ * this form and `build-shapes.mjs` indexes them in it; `sh:in` membership is
+ * then a term comparison in `src/shacl/evaluate.ts` against exactly these
+ * objects. Two spellings of "what a plain literal is" would let a change to
+ * one — an explicit `@type` on a language-tagged string, say — silently move
+ * which values the shipped judge accepts.
+ *
+ * @param {{ termType: string, value: string, language?: string, datatype?: { value: string } }} term
+ * @returns {{ '@id': string } | { '@value': string, '@type'?: string, '@language'?: string }}
+ */
+export function termToJsonLd(term) {
+  if (term.termType === 'NamedNode') return { '@id': term.value };
+  if (term.termType === 'BlankNode') return { '@id': subjectKey(term) };
+
+  const datatype = term.datatype?.value ?? '';
+
+  if (term.language) return { '@value': term.value, '@language': term.language };
+  if (datatype && datatype !== XSD_STRING) {
+    return { '@value': term.value, '@type': datatype };
+  }
+  return { '@value': term.value };
 }
 
 /**
@@ -150,23 +199,24 @@ export function specDataDir(root) {
 /**
  * The layout of the generated data directory, spelled once.
  *
- * THIS SDK'S OWN LAYOUT, NOT SPEC'S. `ontologies/` and `contexts/` here are
- * where `scripts/build-spec-data.mjs` WRITES its conversion of spec, and the
- * other two are what the later generators derive from that — none of them is
+ * THIS SDK'S OWN LAYOUT, NOT SPEC'S. `ontologies/`, `shapes/` and `contexts/`
+ * here are where `scripts/build-spec-data.mjs` WRITES its conversion of spec,
+ * and the other two are what the later generators derive from that — none of them is
  * a path into a spec checkout, which only `spec-sources.json` names. Spelled
- * in one function so the four scripts that share the directory cannot drift
+ * in one function so the five scripts that share the directory cannot drift
  * on a segment, and so `tests/spec-single-source.test.ts` — which reports a
  * bare `ontologies` literal as a self-resolved spec path — has one file to
  * spare with the reason written beside it, rather than four.
  *
  * @param {string} root - The repository root.
- * @returns {{ data: string, ontologies: string, contexts: string, derived: string, diagnostics: string }}
+ * @returns {{ data: string, ontologies: string, shapes: string, contexts: string, derived: string, diagnostics: string }}
  */
 export function specDataLayout(root) {
   const data = specDataDir(root);
   return {
     data,
     ontologies: join(data, 'ontologies'),
+    shapes: join(data, 'shapes'),
     contexts: join(data, 'contexts'),
     derived: join(data, 'derived'),
     diagnostics: join(data, 'diagnostics'),
