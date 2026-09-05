@@ -76,10 +76,23 @@ export interface ShaclResult {
   /** The `sh:path` IRI, or `null` for a node-level constraint. */
   readonly path: string | null;
   readonly sourceConstraintComponent: string;
+  /**
+   * The `sh:` parameter the component reports under, by local name:
+   * `maxCount` for `sh:MaxCountConstraintComponent`. Carried because the
+   * engine has it in hand when it reports, and a caller printing a finding
+   * for a shape that wrote no message would otherwise re-derive it from the
+   * component IRI by naming convention.
+   */
+  readonly parameter: string;
   /** The `sh:severity` IRI; `sh:Violation` where the shape declares none. */
   readonly severity: string;
-  /** The shape's `sh:message`, unaltered; absent where it carries none. */
-  readonly message?: string;
+  /**
+   * Every `sh:message` the shape carries, unaltered and in graph order; empty
+   * where it carries none. SHACL permits several and `rdf-validate-shacl`
+   * returns them all; six clinical shapes at the pin write two on one
+   * property, and a result that kept "the one" kept neither.
+   */
+  readonly messages: readonly string[];
 }
 
 export interface ShaclReport {
@@ -88,6 +101,13 @@ export interface ShaclReport {
   readonly results: readonly ShaclResult[];
   /** Constraint evaluations performed. Zero is a refusal, never a pass. */
   readonly evaluated: number;
+  /**
+   * Focus nodes selected, summed over the shapes that selected them. Zero
+   * means no shape targeted anything in the graph — which `evaluated === 0`
+   * alone cannot say, since a selected shape whose every parameter was
+   * refused also evaluates nothing.
+   */
+  readonly selected: number;
   /** Parameter IRIs present on a selected shape that this engine did not judge, distinct and sorted. */
   readonly unevaluated: readonly string[];
 }
@@ -128,6 +148,11 @@ function literalOf(shape: IndexedShape, parameter: string): string | undefined {
   return values.length === 1 && isLiteral(only) ? only['@value'] : undefined;
 }
 
+/** Every literal a parameter carries, as lexical forms in graph order; a non-literal value is skipped. */
+function literalsOf(shape: IndexedShape, parameter: string): string[] {
+  return valuesOf(shape, parameter).flatMap((value) => (isLiteral(value) ? [value['@value']] : []));
+}
+
 // ─── The data graph, read ───────────────────────────────────────────────────
 
 /** A term's key in a map: blank nodes prefixed so they cannot collide with an IRI. */
@@ -137,13 +162,33 @@ const keyOf = (term: Term): string => (term.termType === 'BlankNode' ? `_:${term
 const datatypeOf = (term: Term): string =>
   term.language ? RDF_LANG_STRING : term.datatype?.value ?? XSD_STRING;
 
-/** The data graph indexed by subject, and by class for `sh:targetClass`. */
+/** A term's identity for set membership: a literal by lexical form, language and datatype, so `"1"` and `"1"^^xsd:integer` stay distinct. */
+const identityOf = (term: Term): string =>
+  term.termType === 'Literal'
+    ? `"${term.value}"@${term.language ?? ''}^^${datatypeOf(term)}`
+    : keyOf(term);
+
+/**
+ * The data graph indexed by subject, and by class for `sh:targetClass`.
+ *
+ * A SET OF TRIPLES, as an RDF graph is. The parser hands over one quad per
+ * statement in the document, and a Turtle document may state a triple twice;
+ * `rdf-validate-shacl` judges a dataset and sees one value node where this
+ * saw two, tripping `sh:maxCount 1` on a record every RDF store holds as
+ * conforming. Deduplicated here, once, so every count and every per-value
+ * walk below reads the graph and not the serialization.
+ */
 class Graph {
   private readonly bySubject = new Map<string, Quad[]>();
 
   constructor(quads: readonly Quad[]) {
+    const seen = new Set<string>();
     for (const quad of quads) {
       const key = keyOf(quad.subject);
+      const statement = `${key} ${quad.predicate.value} ${identityOf(quad.object)}`;
+      if (seen.has(statement)) continue;
+      seen.add(statement);
+
       const own = this.bySubject.get(key);
       if (own) own.push(quad);
       else this.bySubject.set(key, [quad]);
@@ -252,8 +297,18 @@ const NOT_CONSTRAINTS: ReadonlySet<string> = new Set([
   'severity', 'message', 'name', 'description', 'flags',
 ]);
 
-/** Target parameters this engine does not select by. Reported, never silently unselected. */
-const UNSELECTED_TARGETS = ['targetNode', 'targetObjectsOf', 'target'];
+/**
+ * Target parameters this engine does not select by. Reported where the target
+ * WOULD SELECT something, never silently unselected — and never reported for
+ * a shape that selected nothing, since a refusal belongs to a selected shape
+ * (`ShaclReport.unevaluated`) and a shape that matched nothing in the graph
+ * has nothing to refuse. `sh:targetObjectsOf` selects iff the graph carries
+ * its predicate, which is checkable; `sh:targetNode` names its focus nodes
+ * outright and selects them whether or not the graph mentions them, so it is
+ * always reported; `sh:target` is a custom or SPARQL target this engine cannot
+ * read, and is reported on the assumption that it selects.
+ */
+const UNSELECTED_TARGETS = ['targetNode', 'target'];
 
 /** The component IRI a parameter reports under. */
 const component = (parameter: string): string =>
@@ -270,6 +325,7 @@ class Evaluation {
   readonly results: ShaclResult[] = [];
   readonly unevaluated = new Set<string>();
   evaluated = 0;
+  selected = 0;
 
   constructor(private readonly graph: Graph, private readonly shapes: readonly IndexedShape[]) {}
 
@@ -277,6 +333,13 @@ class Evaluation {
   select(shape: IndexedShape): void {
     for (const target of UNSELECTED_TARGETS) {
       if (valuesOf(shape, target).length > 0) this.unevaluated.add(`${SH}${target}`);
+    }
+    for (const value of valuesOf(shape, 'targetObjectsOf')) {
+      // Reported only where the predicate occurs, so the shape would have
+      // selected its objects; a form this cannot read is reported outright.
+      if (!isReference(value) || this.graph.subjectsOf(value['@id']).length > 0) {
+        this.unevaluated.add(`${SH}targetObjectsOf`);
+      }
     }
 
     const focus = new Map<string, Term>();
@@ -291,6 +354,7 @@ class Evaluation {
       else this.unevaluated.add(`${SH}targetSubjectsOf`);
     }
 
+    this.selected += focus.size;
     for (const node of focus.values()) this.evaluateShape(shape, node);
   }
 
@@ -324,15 +388,16 @@ class Evaluation {
     const path: string | null = walkable;
     const values = path === null ? [focus] : this.graph.objects(focus, path);
     const severity = iriOf(shape, 'severity') ?? `${SH}Violation`;
-    const message = literalOf(shape, 'message');
+    const messages = literalsOf(shape, 'message');
 
     const report = (parameter: string): void => {
       this.results.push({
         focusNode: focus.value,
         path,
         sourceConstraintComponent: component(parameter),
+        parameter,
         severity,
-        ...(message === undefined ? {} : { message }),
+        messages,
       });
     };
 
@@ -395,7 +460,19 @@ class Evaluation {
         const pattern = literalOf(shape, 'pattern');
         if (pattern === undefined) return undefined;
         const flags = literalOf(shape, 'flags');
-        const re = flags === undefined ? new RegExp(pattern) : new RegExp(pattern, flags);
+        // A pattern JavaScript cannot compile, or flags it does not know (the
+        // SPARQL-only `q` among them), is a parameter this cannot read: it
+        // goes unevaluated like every other unreadable form, rather than
+        // throwing a SyntaxError out of `validate()`. Built once here, before
+        // the value loop, so it is refused even for a focus node with no
+        // values under the path — where the oracle, compiling per value,
+        // would conform. Refusal is the permitted direction.
+        let re: RegExp;
+        try {
+          re = flags === undefined ? new RegExp(pattern) : new RegExp(pattern, flags);
+        } catch {
+          return undefined;
+        }
         return (value) => value.termType !== 'BlankNode' && re.test(value.value);
       }
       case 'in': {
@@ -457,6 +534,7 @@ export function evaluate(data: readonly Quad[], shapes: readonly IndexedShape[])
     conforms: evaluation.results.length === 0 && unevaluated.length === 0 && evaluation.evaluated > 0,
     results: evaluation.results,
     evaluated: evaluation.evaluated,
+    selected: evaluation.selected,
     unevaluated,
   };
 }

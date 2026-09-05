@@ -216,6 +216,18 @@ describe('IRI-valued fields accept any absolute IRI', () => {
       .toContain('<https://ns.cascadeprotocol.org/core/v1#ClinicalGenerated>');
   });
 
+  it.each(['EHRVerified', 'SelfReported', 'DeviceGenerated', 'AIExtracted'])(
+    'resolves %s, a member declared two levels below the range',
+    (member) => {
+      // `cascade:EHRVerified rdfs:subClassOf cascade:ClinicalGenerated`, which
+      // is itself a subclass of the range. The shapes list it under `sh:in`
+      // and the conformance corpus carries it; a member walk that stopped at
+      // the direct subclasses refused every one of them.
+      expect(convertToRdf({ ...immunization, dataProvenance: member }))
+        .toContain(`<https://ns.cascadeprotocol.org/core/v1#${member}>`);
+    },
+  );
+
   it('still refuses a bare token that is no member and no IRI', () => {
     expect(() => convertToRdf({ ...immunization, dataProvenance: 'MadeItUp' }))
       .toThrow(/Cannot express "dataProvenance"/);

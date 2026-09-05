@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { quadsOf, engineOverSpec, specShapes, CASCADE, EX, SH } from './harness.js';
+import { quadsOf, engineOver, engineOverSpec, oracleOver, specShapes, CASCADE, EX, SH } from './harness.js';
 
 const CLINICAL = 'https://ns.cascadeprotocol.org/clinical/v1#';
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
@@ -70,7 +70,44 @@ describe('evaluate', () => {
       const report = engineOverSpec(quadsOf('ex:s a ex:NoSuchClass ; ex:p "x" .'));
 
       expect(report.evaluated).toBe(0);
+      expect(report.selected).toBe(0);
       expect(report.results).toEqual([]);
+      expect(report.conforms).toBe(false);
+    });
+  });
+
+  describe('a target form this engine does not select by', () => {
+    // `sh:targetObjectsOf` is refused, never silently unselected — but a
+    // refusal belongs to a SELECTED shape (the report's own contract), and a
+    // shape whose target matches nothing in the graph selected nothing. An
+    // engine that reported it for every graph flipped every verdict the day
+    // spec published one such shape anywhere in six vocabularies.
+    const shapes = 'ex:S a sh:NodeShape ; sh:targetClass ex:Thing ; sh:property [ sh:path ex:p ; sh:datatype xsd:string ] . '
+      + 'ex:T a sh:NodeShape ; sh:targetObjectsOf ex:q ; sh:property [ sh:path ex:r ; sh:minCount 1 ] .';
+
+    it('is not reported on a graph its target would select nothing in', async () => {
+      const data = 'ex:s a ex:Thing ; ex:p "x" .';
+      const report = engineOver(shapes, data);
+
+      expect(report.unevaluated).toEqual([]);
+      expect(report.evaluated).toBeGreaterThan(0);
+      expect(report.conforms).toBe(true);
+      expect((await oracleOver(shapes, data)).conforms).toBe(true);
+    });
+
+    it('is reported on a graph its target would select something in', () => {
+      const report = engineOver(shapes, 'ex:s a ex:Thing ; ex:p "x" ; ex:q ex:o .');
+
+      expect(report.unevaluated).toEqual([`${SH}targetObjectsOf`]);
+      expect(report.conforms).toBe(false);
+    });
+
+    it('sh:targetNode is reported whatever the graph holds, because it always selects', () => {
+      // A target node is a focus node whether or not the graph mentions it;
+      // the oracle evaluates it on an empty set of triples.
+      const report = engineOver('ex:T a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:r ; sh:minCount 1 ] .', 'ex:s a ex:Thing .');
+
+      expect(report.unevaluated).toEqual([`${SH}targetNode`]);
       expect(report.conforms).toBe(false);
     });
   });

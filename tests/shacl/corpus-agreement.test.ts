@@ -38,6 +38,27 @@ interface Outcome {
   readonly disagreement?: string;
 }
 
+/**
+ * The fixtures the engine refuses at the pin, by name, sorted. Every one is
+ * refused on `sh:minInclusive` / `sh:maxInclusive`, `sh:or` over property
+ * alternatives, `sh:class`, or because no shape targets its class at all.
+ */
+const REFUSED_AT_THE_PIN: readonly string[] = [
+  'benefit-001', 'claim-001',
+  'dailyactivity-001', 'dailyactivity-002', 'dailysleep-001', 'dailysleep-002',
+  'dailyvital-001', 'dailyvital-002',
+  'denial-001', 'device-001',
+  'encounter-001', 'encounter-002', 'encounter-003',
+  'fam-001', 'fam-002', 'fam-003',
+  'imaging-001',
+  'med-001', 'med-002', 'med-003', 'med-004', 'med-005', 'med-006', 'med-007', 'med-008', 'med-009', 'med-010', 'med-011',
+  'medadmin-001',
+  'pod-001', 'pod-002', 'pod-003',
+  'proc-001', 'proc-002', 'proc-003', 'proc-004',
+  'profile-001', 'profile-002', 'profile-003', 'profile-004', 'profile-005',
+  'social-003',
+];
+
 const outcomes: Outcome[] = [];
 
 beforeAll(async () => {
@@ -98,6 +119,17 @@ describe('evaluate', () => {
     const ids = fullyEvaluated().map((o) => o.id);
 
     expect(ids, `refused:\n${listing()}`).toEqual(expect.arrayContaining(['imm-001', 'imm-002', 'imm-003']));
+  });
+
+  it('refuses exactly the fixtures it refused when this was written, by name', () => {
+    // THE COMPARED SET CANNOT SHRINK IN SILENCE. A refused fixture is listed
+    // and passed over, so an engine that started refusing a parameter it used
+    // to judge would drop fixtures out of oracle comparison and every
+    // assertion above would stay green (`tests/README.md`: a skip that reports
+    // green is worse than a failure). The list is written by hand, not
+    // measured; an engine that judges more moves a name OFF it deliberately,
+    // and one that judges less puts a name on and is asked why.
+    expect(refused().map((o) => o.id)).toEqual(REFUSED_AT_THE_PIN);
   });
 
   it('refuses by naming a parameter, never by naming nothing', () => {

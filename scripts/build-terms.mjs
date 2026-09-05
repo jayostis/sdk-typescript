@@ -126,7 +126,7 @@ for (const node of nodes.values()) {
  * already carries.
  *
  * MEMBERS ARE PUBLISHED TWO WAYS, and both count. `cascade:DataProvenance`
- * declares its three values as SUBCLASSES; `cascade:ConsentScope` and five
+ * declares its values as SUBCLASSES, at any depth; `cascade:ConsentScope` and five
  * more (`GenerationTrigger`, `ReconciliationStatus`,
  * `ConflictResolutionStrategy`, `LayerPromotionStatusValue`,
  * `health:SleepQuality`) declare theirs as NAMED INDIVIDUALS — each member
@@ -157,13 +157,36 @@ function membersOf(rangeIri) {
 
   const members = {};
 
+  // TRANSITIVE over `rdfs:subClassOf`. `cascade:DataProvenance` declares its
+  // values at two depths — `cascade:EHRVerified` under `ClinicalGenerated`,
+  // `cascade:SelfReported` under `ConsumerGenerated` — and the shapes' `sh:in`
+  // on `cascade:dataProvenance` names grandchildren directly. A walk that
+  // stopped at the direct subclasses made the writer refuse `EHRVerified` as
+  // "not a member" of a range that declares it, and put that refusal on the
+  // judge's path for a routed type. A subclass of a member is a member, at
+  // any depth.
+  const subclasses = new Set([rangeIri]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [iri, node] of nodes) {
+      if (subclasses.has(iri)) continue;
+      const types = node['@type'] ?? [];
+      const isSubclass =
+        types.includes(OWL_CLASS) && (node[SUB_CLASS_OF] ?? []).some((parent) => subclasses.has(parent['@id']));
+      if (isSubclass) {
+        subclasses.add(iri);
+        grew = true;
+      }
+    }
+  }
+  subclasses.delete(rangeIri);
+
   for (const [iri, node] of nodes) {
     const types = node['@type'] ?? [];
-    const isSubclass =
-      types.includes(OWL_CLASS) && (node[SUB_CLASS_OF] ?? []).some((parent) => parent['@id'] === rangeIri);
     const isNamedIndividual = types.includes(OWL_NAMED_INDIVIDUAL) && types.includes(rangeIri);
 
-    if (!isSubclass && !isNamedIndividual) continue;
+    if (!subclasses.has(iri) && !isNamedIndividual) continue;
     members[localNameOf(iri)] = iri;
   }
 

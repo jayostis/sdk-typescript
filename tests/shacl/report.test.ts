@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { declaredProperty } from '../support/declared.js';
-import { quadsOf, engineOverSpec, CASCADE, HEALTH, SH } from './harness.js';
+import { quadsOf, engineOver, engineOverSpec, CASCADE, HEALTH, SH } from './harness.js';
 
 const IMMUNIZATION_SHAPE = `${HEALTH}ImmunizationRecordShape`;
 const HAS_ATTACHMENT_EDGE = `${CASCADE}HasAttachmentEdgeShape`;
@@ -36,14 +36,15 @@ describe('evaluate', () => {
       expect(report.results).toHaveLength(1);
       expect(report.results[0]).toMatchObject({
         sourceConstraintComponent: `${SH}MinLengthConstraintComponent`,
-        message: declared.message,
+        parameter: 'minLength',
+        messages: [declared.message],
         severity: declared.severity,
       });
     });
   });
 
   describe('a result on a property shape that declares no message', () => {
-    it('carries no message rather than an invented one', () => {
+    it('carries no message rather than an invented one, and names the parameter', () => {
       const declared = declaredProperty(IMMUNIZATION_SHAPE, `${HEALTH}vaccineCode`);
       expect(declared.message).toBeUndefined();
 
@@ -53,8 +54,28 @@ describe('evaluate', () => {
 
       expect(report.results).toHaveLength(1);
       expect(report.results[0]?.sourceConstraintComponent).toBe(`${SH}MaxCountConstraintComponent`);
-      expect(report.results[0]?.message).toBeUndefined();
+      // The parameter is what a caller with no message prints; carried by the
+      // engine, which has it in hand, rather than re-derived from the component
+      // IRI by a naming convention.
+      expect(report.results[0]?.parameter).toBe('maxCount');
+      expect(report.results[0]?.messages).toEqual([]);
       expect(report.results[0]?.severity).toBe(declared.severity);
+    });
+  });
+
+  describe('a result on a property shape that declares two messages', () => {
+    // SHACL permits several `sh:message` values and the oracle returns them
+    // all. Six clinical shapes at the pin carry two on one property; a result
+    // that read "the one literal" found none and carried nothing.
+    it('carries both, in graph order', () => {
+      const report = engineOver(
+        'ex:S a sh:NodeShape ; sh:targetClass ex:Thing ; sh:property [ sh:path ex:p ; sh:minCount 1 ; '
+        + 'sh:message "First."@en ; sh:message "Second."@en ] .',
+        'ex:s a ex:Thing .',
+      );
+
+      expect(report.results).toHaveLength(1);
+      expect(report.results[0]?.messages).toEqual(['First.', 'Second.']);
     });
   });
 
@@ -74,7 +95,7 @@ describe('evaluate', () => {
       expect(report.results[0]).toMatchObject({
         sourceConstraintComponent: `${SH}NodeKindConstraintComponent`,
         severity: declared.severity,
-        message: declared.message,
+        messages: [declared.message],
       });
     });
   });

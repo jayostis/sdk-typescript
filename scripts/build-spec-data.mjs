@@ -44,7 +44,7 @@ import { fileURLToPath } from 'node:url';
 
 import { normativeLanguageInComments } from './lib/detectors.mjs';
 import { openFindings } from './lib/diagnostics.mjs';
-import { specDataLayout } from './lib/spec-source.mjs';
+import { specDataLayout, subjectKey, termToJsonLd } from './lib/spec-source.mjs';
 
 import { Parser as N3Parser } from '../src/vendor/n3/n3.js';
 
@@ -81,27 +81,6 @@ function specRoot() {
   }
 
   return { root: absolute, manifest };
-}
-
-/**
- * One RDF term as expanded JSON-LD.
- *
- * A plain literal gets no `@type`: in RDF 1.1 every simple literal IS an
- * `xsd:string`, and n3 supplies the datatype implicitly. Writing it out would
- * put an explicit type on every label and comment in the corpus and make the
- * document disagree with the Turtle it came from about nothing.
- */
-function termToJsonLd(term) {
-  if (term.termType === 'NamedNode') return { '@id': term.value };
-  if (term.termType === 'BlankNode') return { '@id': `_:${term.value}` };
-
-  const datatype = term.datatype?.value ?? '';
-
-  if (term.language) return { '@value': term.value, '@language': term.language };
-  if (datatype && datatype !== 'http://www.w3.org/2001/XMLSchema#string') {
-    return { '@value': term.value, '@type': datatype };
-  }
-  return { '@value': term.value };
 }
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
@@ -156,9 +135,7 @@ function toExpandedJsonLd(quads, omitted = OMITTED) {
   const nodes = new Map();
 
   for (const quad of quads) {
-    const id = quad.subject.termType === 'BlankNode'
-      ? `_:${quad.subject.value}`
-      : quad.subject.value;
+    const id = subjectKey(quad.subject);
 
     const node = nodes.get(id) ?? { '@id': id };
     nodes.set(id, node);

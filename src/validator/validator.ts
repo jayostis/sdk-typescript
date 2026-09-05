@@ -79,10 +79,6 @@ const VALID_VITAL_TYPES: ReadonlySet<string> = new Set([
   'weight', 'height', 'bmi',
 ]);
 
-const VALID_IMMUNIZATION_STATUSES: ReadonlySet<string> = new Set([
-  'completed', 'entered-in-error', 'not-done',
-]);
-
 // prov:Agent / prov:Activity classes — NOT cascade:HealthRecord subclasses, so
 // they carry no dataProvenance/schemaVersion. Required fields follow each SHACL
 // shape (e.g. ProxyAgentShape) instead.
@@ -128,11 +124,16 @@ const AGENT_ACTIVITY_REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>
 // A validator migrating a type takes this rule with it and removes the name,
 // the same way it deletes its `case` from `validateTypeSpecific`. The set
 // empties as the migration finishes, and goes when the last type lands.
+//
+// A type ROUTED on `'validate'` (`src/migration/allow-list.ts`) leaves the
+// same way, and takes NO copy of the rule with it: a routed type gets the
+// shipped shapes' answer and nothing else, and this warning is SDK policy
+// transcribed by hand, not a constraint spec publishes. `ImmunizationRecord`
+// was listed and was dead; the CHANGELOG entry for #98 writes the drop down.
 const CLINICAL_TYPES_WANTING_CODES: ReadonlySet<string> = new Set([
   'ConditionRecord',
   'LabResultRecord',
   'VitalSign',
-  'ImmunizationRecord',
   'ProcedureRecord',
 ]);
 
@@ -330,18 +331,9 @@ function validateTypeSpecific(record: CascadeEntity): ValidationError[] {
       break;
     }
 
-    case 'ImmunizationRecord': {
-      const status = rec['status'];
-      if (status !== undefined && typeof status === 'string' && !VALID_IMMUNIZATION_STATUSES.has(status)) {
-        errors.push({
-          field: 'status',
-          message: `status "${status}" must be a valid ImmunizationStatus`,
-          severity: 'error',
-        });
-      }
-      break;
-    }
-
+    // ImmunizationRecord is routed on `'validate'` and never reaches this
+    // switch; its `status` is judged by `health:ImmunizationRecordShape`'s
+    // `sh:in` through `src/validator/routed.ts`.
     // ActivitySnapshot, SleepSnapshot, ProcedureRecord, FamilyHistoryRecord
     // have no additional type-specific required field validations beyond base
     default:

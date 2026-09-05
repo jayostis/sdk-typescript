@@ -71,6 +71,47 @@
     authored negatives, nine per-component pairs, and every top-level
     conformance fixture the engine evaluates in full; the rest are listed
     with what went unjudged.
+  - **The routed type loses the legacy SDK-policy warnings, on purpose.** The
+    seam is a replacement, not a supplement: a routed type gets the shipped
+    shapes' answer and nothing else, so `validate()` on an `ImmunizationRecord`
+    no longer warns on a `schemaVersion` behind the current one or on a
+    missing `loincCode` / `snomedCode`. Both were hand-transcribed SDK policy,
+    which is what this epic replaces with what spec publishes;
+    `health:ImmunizationRecordShape` grades every constraint `sh:Violation`,
+    so `warnings` is empty for this type until spec grades something
+    `sh:Warning`. The type's dead rows in `CLINICAL_TYPES_WANTING_CODES` and
+    `validateTypeSpecific` are gone, as the comment there says a migrating
+    type's are.
+  - **A converter throw propagates out of `validate()` for a routed type.**
+    A value with no expressible form — a `dataProvenance` that is no member of
+    its range and no IRI, a key no context declares, a missing or relative
+    `id` — throws out of `convertToRdf` and out of `validate()`, where the
+    legacy chain returned a finding. That is inexpressibility rather than
+    invalidity, the writer's refusal; whether `validate()` should catch it is
+    #80's open question, and `validateAll()` aborts on the first such record
+    until it is answered.
+  - **A range's value set is transitive over `rdfs:subClassOf`.**
+    `cascade:DataProvenance` declares its values at two depths, and
+    `scripts/build-terms.mjs` walked only the first, so `EHRVerified`,
+    `SelfReported`, `DeviceGenerated` and `AIExtracted` — four of the six
+    values the shapes' `sh:in` lists — were refused by the writer as "not a
+    member", and through the seam above that refusal became a throw out of
+    `validate()` for a value the shape permits. The walk now reaches every
+    depth; only `cascade:DataProvenance`'s set changes at the pin.
+  - **A triple stated twice is one triple.** The engine deduplicates the data
+    graph by term, as `rdf-validate-shacl` does by judging a dataset, so
+    `vaccineName: ['MMR', 'MMR']` — what `deserialize()` hands back for Turtle
+    that repeats the statement — no longer trips `sh:maxCount 1`.
+  - Three latent gaps closed against the module's own contract: a
+    `sh:targetObjectsOf` shape is reported unevaluated only where its
+    predicate occurs in the graph, rather than on every report; a shape with
+    two `sh:message` values carries both (`ShaclResult.messages`), joined in
+    the finding; a `sh:pattern` or `sh:flags` JavaScript cannot compile is
+    reported unevaluated rather than thrown. `ShaclReport.selected` tells "no
+    shape selected the record" from "a selected shape had every parameter
+    refused", and `ShaclResult.parameter` replaces the component-IRI regex
+    in `routed.ts`. The shapes index is parsed on the first routed
+    `validate()` rather than at import.
   - Two legacy rows moved: `tests/rules/min-length.test.ts`'s "accepts a
     numeric vaccineName" case flips to rejected, and the `ImmunizationRecord`
     rows leave the two legacy rule tables for

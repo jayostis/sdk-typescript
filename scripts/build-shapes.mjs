@@ -29,9 +29,12 @@
  * shapes owes: a shape targeting a misspelled class is selected by nothing,
  * fires on nothing, and every record of the class it meant validates clean.
  *
- * A STRING, PARSED AT LOAD, in `src/spec/derived/shapes.generated.ts`, for the
- * reason `terms.generated.ts` gives: tsc infers a type per node of an object
- * literal, and this one has thousands.
+ * A STRING, PARSED ON FIRST USE, in `src/spec/derived/shapes.generated.ts`. A
+ * string for the reason `terms.generated.ts` gives: tsc infers a type per
+ * node of an object literal, and this one has thousands. Parsed behind an
+ * accessor rather than at load because the module sits on the static import
+ * chain from `src/index.ts`, and a top-level parse is a side effect every
+ * consumer pays at import whether or not it ever judges a routed type.
  *
  * `indexShapes` is pure and takes a quad array, so the tests can hand it a
  * shapes graph that MUST make it speak. The script around it reads
@@ -46,7 +49,7 @@ import { fileURLToPath } from 'node:url';
 
 import { openFindings } from './lib/diagnostics.mjs';
 import { isMainModule } from './lib/main-module.mjs';
-import { mergedOntologyGraph, specDataLayout } from './lib/spec-source.mjs';
+import { mergedOntologyGraph, specDataLayout, subjectKey as keyOf, termToJsonLd } from './lib/spec-source.mjs';
 
 const SH = 'http://www.w3.org/ns/shacl#';
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
@@ -61,23 +64,11 @@ const RDFS_CLASS = 'http://www.w3.org/2000/01/rdf-schema#Class';
 
 export const TARGET_CLASS_NOT_IN_ONTOLOGY = 'target-class-not-in-ontology';
 
-/** A term's key in the subject map: blank nodes prefixed so they cannot collide with an IRI. */
-const keyOf = (term) => (term.termType === 'BlankNode' ? `_:${term.value}` : term.value);
-
-/**
- * One RDF term as an index value — the expanded-JSON-LD form
- * `scripts/build-spec-data.mjs` writes, so the two cannot disagree about what
- * a plain literal is: no `@type` means `xsd:string`.
- */
-function termToIndex(term) {
-  if (term.termType === 'NamedNode') return { '@id': term.value };
-  if (term.termType === 'BlankNode') return { '@id': `_:${term.value}` };
-
-  const datatype = term.datatype?.value ?? '';
-  if (term.language) return { '@value': term.value, '@language': term.language };
-  if (datatype && datatype !== XSD_STRING) return { '@value': term.value, '@type': datatype };
-  return { '@value': term.value };
-}
+// An index value IS the expanded-JSON-LD form `scripts/build-spec-data.mjs`
+// writes, read through the one function both scripts share, so the two cannot
+// disagree about what a plain literal is — and `sh:in` membership, compared
+// by term in `src/shacl/evaluate.ts`, cannot drift with a copy.
+const termToIndex = termToJsonLd;
 
 /** The local name of a `sh:` IRI, or the IRI itself for any other namespace. */
 const parameterKey = (predicate) => (predicate.startsWith(SH) ? predicate.slice(SH.length) : predicate);
@@ -303,16 +294,25 @@ if (isMainModule(import.meta.url)) {
  * the evaluator has never heard of is here, so it can be reported as
  * unevaluated rather than skipped.
  *
- * A STRING, PARSED AT LOAD, for the reason \`terms.generated.ts\` gives.
+ * A STRING, for the reason \`terms.generated.ts\` gives, PARSED ON FIRST USE
+ * rather than at load: this module is on the import chain of the package
+ * entry point, and a top-level parse would be paid by every consumer at
+ * import, routed judge or not.
  *
  * @module spec/derived
  */
 
 import type { IndexedShape } from '../../shacl/evaluate.js';
 
-export const SPEC_SHAPES: readonly IndexedShape[] = JSON.parse(
-  ${JSON.stringify(payload)},
-) as IndexedShape[];
+const SPEC_SHAPES_JSON = ${JSON.stringify(payload)};
+
+let parsed: readonly IndexedShape[] | undefined;
+
+/** Every shape \`spec\` publishes, indexed; parsed once, on the first call. */
+export function specShapes(): readonly IndexedShape[] {
+  parsed ??= JSON.parse(SPEC_SHAPES_JSON) as IndexedShape[];
+  return parsed;
+}
 `;
 
   mkdirSync(dirname(OUT), { recursive: true });

@@ -135,5 +135,97 @@ describe('validate() on a routed ImmunizationRecord', () => {
 
       expect(result.errors).toEqual(only('status', status));
     });
+
+    it('reports two vaccineName values and an absent one as the same finding, on purpose', () => {
+      // The legacy row asserted the two were DIFFERENT findings — "carries 2
+      // values" against "must be present". The shape writes one `sh:message`
+      // for its `sh:minCount` and its `sh:maxCount` alike ("exactly one
+      // non-empty vaccineName"), and `ValidationError` carries no component
+      // (#74: the result does not change shape), so the two cases are
+      // indistinguishable through `validate()`. That is the shape's own
+      // wording, accurate for both, and not a verdict the judge got wrong.
+      const two = validate(immunization({ vaccineName: ['first', 'second'] }));
+      const none = validate(immunization({ vaccineName: undefined }));
+
+      expect(two.errors).toEqual(none.errors);
+      expect(two.errors).toHaveLength(1);
+    });
+  });
+
+  describe('the values the range declares and the shape lists', () => {
+    // `cascade:DataProvenance` declares its permitted values as subclasses at
+    // two depths: `EHRVerified` is under `ClinicalGenerated`, `SelfReported`
+    // and `DeviceGenerated` under `ConsumerGenerated`. The shape's `sh:in`
+    // names four of the grandchildren, and the writer refused every one of
+    // them as "not a member" — which, on the judge's path, was a throw out of
+    // `validate()` for a value the shape permits.
+    it.each(['EHRVerified', 'DeviceGenerated', 'SelfReported', 'AIExtracted'])(
+      'accepts dataProvenance %s, which the shape\'s sh:in lists',
+      (provenance) => {
+        const result = validate(immunization({ dataProvenance: provenance }));
+
+        expect(result.errors).toEqual([]);
+        expect(result.valid).toBe(true);
+      },
+    );
+
+    it('rejects a member of the range the shape\'s sh:in omits, as a finding and not a throw', () => {
+      // `ScannedDocument` is a subclass of `ClinicalGenerated` in the ontology
+      // and absent from the shape's list. Faithful first: the writer writes
+      // it, and the judge — not the writer — says it is not permitted.
+      const result = validate(immunization({ dataProvenance: 'ScannedDocument' }));
+
+      expect(result.errors).toEqual(only('dataProvenance', `${CASCADE}dataProvenance`));
+      expect(result.valid).toBe(false);
+    });
+
+    it('still throws on a value that is no member of the range and no IRI', () => {
+      // Inexpressibility, not invalidity: the writer's refusal, which #98
+      // leaves on the judge's path and #80 owns the question of catching.
+      expect(() => validate(immunization({ dataProvenance: 'Bogus' })))
+        .toThrow(/Cannot express "dataProvenance"/);
+    });
+  });
+
+  describe('a value written twice', () => {
+    it('accepts the same vaccineName given twice, because two identical triples are one', () => {
+      // An RDF graph is a SET of triples. `deserialize()` of Turtle carrying
+      // `health:vaccineName "MMR", "MMR"` hands back `['MMR', 'MMR']`, and a
+      // judge that counted the array's length would reject on `sh:maxCount 1`
+      // a document every RDF store holds as one triple — and that the oracle
+      // accepts.
+      const result = validate(immunization({ vaccineName: ['MMR', 'MMR'] }));
+
+      expect(result.errors).toEqual([]);
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('a result on a property shape that declares no sh:message', () => {
+    it('names the parameter the shape did not write a message for', () => {
+      // `vaccineCode` carries `sh:maxCount 1` and no `sh:message`, the one
+      // property on this shape that reaches the fallback wording.
+      const result = validate(immunization({ vaccineCode: ['CVX-1', 'CVX-2'] }));
+
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({ field: 'vaccineCode', severity: 'error' });
+      expect(result.errors[0]?.message).toMatch(/^sh:maxCount on /);
+      expect(result.errors[0]?.message).toMatch(/declares no sh:message/);
+    });
+  });
+
+  describe('the warnings channel', () => {
+    it('carries only what the shapes grade sh:Warning, never the legacy SDK-policy warnings', () => {
+      // A routed type gets the shipped shapes' answer and nothing else — the
+      // seam is a replacement, not a supplement. The legacy chain warned on a
+      // `schemaVersion` behind the current one and on a missing coding; both
+      // are SDK policy transcribed by hand, which is the thing #69 replaces
+      // with what spec publishes. `health:ImmunizationRecordShape` grades
+      // every constraint `sh:Violation`, so on this type the channel is empty.
+      const result = validate(immunization({ schemaVersion: '1.2', snomedCode: undefined, loincCode: undefined }));
+
+      expect(result.errors).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    });
   });
 });

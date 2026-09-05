@@ -98,6 +98,38 @@ describe('evaluate', () => {
     });
   });
 
+  describe('a sh:pattern this engine cannot compile', () => {
+    // The one parameter form that THREW instead of refusing: a regular
+    // expression JavaScript rejects, or flags it does not know (SPARQL's `q`
+    // among them), came out of `evaluate()` as a bare SyntaxError, with no
+    // catch between it and `validate()`'s caller. Every other unreadable
+    // parameter lands in `unevaluated`; this one now does too.
+    const record = 'ex:s a ex:Thing ; ex:p "x" .';
+
+    it.each([
+      ['an unterminated group', String.raw`sh:pattern "^(a$"`],
+      ['flags JavaScript does not accept', 'sh:pattern "^a$" ; sh:flags "xyz"'],
+      ['the SPARQL-only q flag', 'sh:pattern "^a$" ; sh:flags "q"'],
+    ])('with %s, is reported unevaluated rather than thrown', (_, constraint) => {
+      const shape = `ex:S a sh:NodeShape ; sh:targetClass ex:Thing ; sh:property [ sh:path ex:p ; ${constraint} ] .`;
+
+      const report = engineOver(shape, record);
+
+      expect(report.unevaluated).toContain(`${SH}pattern`);
+      expect(report.conforms).toBe(false);
+    });
+
+    it('is refused even where the path has no values, where the oracle would conform', () => {
+      // The oracle compiles per value and never reaches the pattern here. A
+      // refusal is the permitted direction of disagreement: loud, never a pass.
+      const shape = String.raw`ex:S a sh:NodeShape ; sh:targetClass ex:Thing ; sh:property [ sh:path ex:p ; sh:pattern "^(a$" ] .`;
+
+      const report = engineOver(shape, 'ex:s a ex:Thing .');
+
+      expect(report.unevaluated).toContain(`${SH}pattern`);
+    });
+  });
+
   describe('a shape it evaluates in full', () => {
     // The other direction: `sh:path`, `sh:message`, `sh:severity`, `sh:name`
     // and `sh:description` are not constraints, and an engine that listed them
